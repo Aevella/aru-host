@@ -1,0 +1,214 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+readonly CONFIG_DIR="${ARU_SELFHOST_CONFIG_DIR:-/etc/aru-selfhost}"
+readonly INSTALL_ENV="$CONFIG_DIR/install.env"
+readonly NODE_ENV="$CONFIG_DIR/node.env"
+readonly SERVICE="aru-selfhost.service"
+
+die() {
+  echo "aru-selfhost: $*" >&2
+  exit 1
+}
+
+need_root() {
+  [[ ${EUID:-$(id -u)} -eq 0 ]] || die "this command needs sudo"
+}
+
+load_install_config() {
+  [[ -r "$INSTALL_ENV" ]] || die "installation record missing: $INSTALL_ENV"
+  # install.env contains only shell-escaped, non-secret installer choices.
+  # shellcheck disable=SC1090
+  source "$INSTALL_ENV"
+}
+
+load_node_config() {
+  [[ -r "$NODE_ENV" ]] || die "node config missing: $NODE_ENV"
+  # node.env is root-owned and written by install.sh.
+  # shellcheck disable=SC1090
+  source "$NODE_ENV"
+}
+
+usage() {
+  cat <<'EOF'
+Usage: aru-selfhost <command>
+
+  status                 Show service state and installed release.
+  pairing                Restart the node and print a fresh 10-minute pairing link.
+  doctor                 Check service, container runtime, manifest, and capabilities.
+  logs [journal args]    Follow service logs; secrets appear only in the fresh boot block.
+  upgrade [--ref REF]    Re-run the installer with the persisted full profile.
+  rollback               Switch to the previous installed release and restart.
+  uninstall              Remove program files but preserve encrypted vault data.
+  uninstall --purge-data Remove program files and durable server data.
+EOF
+}
+
+installed_release() {
+  local target
+  target="$(readlink /opt/aru-selfhost/current 2>/dev/null || true)"
+  printf '%s\n' "${target##*/}"
+}
+
+status_command() {
+  echo "release: $(installed_release)"
+  systemctl --no-pager --full status "$SERVICE"
+}
+
+pairing_command() {
+  need_root
+  local since output url
+  since="$(date --iso-8601=seconds)"
+  systemctl restart "$SERVICE"
+  for _ in {1..20}; do
+    output="$(journalctl -u "$SERVICE" --since "$since" --no-pager -o cat 2>/dev/null || true)"
+    url="$(printf '%s\n' "$output" | grep -E '^aru://pair\?' | tail -1 || true)"
+    if [[ -n "$url" ]]; then
+      echo "$url"
+      echo "Single use; expires in 10 minutes. The next restart invalidates it."
+      return
+    fi
+    sleep 0.25
+  done
+  die "node started but no pairing link appeared; run /usr/local/bin/aru-selfhost logs"
+}
+
+doctor_command() {
+  need_root
+  load_node_config
+  local failed="false" manifest
+  echo "release: $(installed_release)"
+  if systemctl is-active --quiet "$SERVICE"; then
+    echo "service: active"
+  else
+    echo "service: inactive"
+    failed="true"
+  fi
+  if command -v "${ARU_NODE_BINARY:-node}" >/dev/null 2>&1; then
+    echo "node: $("${ARU_NODE_BINARY:-node}" --version)"
+  else
+    echo "node: missing"
+    failed="true"
+  fi
+  if command -v "${ARU_CONTAINER_RUNTIME:-podman}" >/dev/null 2>&1; then
+    echo "container: $("${ARU_CONTAINER_RUNTIME:-podman}" --version | head -1)"
+    local runtime_env=(
+      env
+      HOME=/var/lib/aru-selfhost
+      XDG_RUNTIME_DIR=/run/aru-selfhost
+      CONTAINERS_CONF=/etc/aru-selfhost/containers.conf
+      PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/libexec/podman:/usr/libexec/catatonit
+    )
+    if ! (
+      cd /var/lib/aru-selfhost
+      runuser -u aru-selfhost -- "${runtime_env[@]}" "${ARU_CONTAINER_RUNTIME:-podman}" info >/dev/null
+    ); then
+      echo "container preflight: failed for service user"
+      failed="true"
+    else
+      local image
+      for image in "${ARU_NODE_IMAGE:-}" "${ARU_PYTHON_IMAGE:-}" "${ARU_SHELL_IMAGE:-}"; do
+        [[ -n "$image" ]] || continue
+        if (
+          cd /var/lib/aru-selfhost
+          runuser -u aru-selfhost -- "${runtime_env[@]}" "${ARU_CONTAINER_RUNTIME:-podman}" image exists "$image"
+        ); then
+          echo "runtime image: ready ($image)"
+        else
+          echo "runtime image: missing ($image)"
+          failed="true"
+        fi
+      done
+    fi
+  else
+    echo "container: missing"
+    failed="true"
+  fi
+  if manifest="$(curl -fsS "http://127.0.0.1:${ARU_PORT}/.well-known/aru.json" 2>/dev/null)"; then
+    printf '%s' "$manifest" | "${ARU_NODE_BINARY:-node}" -e '
+      let body=""; process.stdin.on("data", c => body += c); process.stdin.on("end", () => {
+        const m=JSON.parse(body);
+        console.log(`manifest: ok (${m.serverId})`);
+        for (const [id, value] of Object.entries(m.capabilities ?? {})) {
+          console.log(`capability ${id}: ${value.enabled === true ? "enabled" : "disabled"}`);
+        }
+      });'
+  else
+    echo "manifest: unreachable on local service port"
+    failed="true"
+  fi
+  [[ "$failed" == "false" ]] || exit 1
+}
+
+upgrade_command() {
+  need_root
+  load_install_config
+  local ref="${ARU_INSTALL_SOURCE_REF:-main}"
+  local explicit_ref="false"
+  if [[ "${1:-}" == "--ref" ]]; then
+    ref="${2:?missing value for --ref}"
+    explicit_ref="true"
+    shift 2
+  fi
+  (($# == 0)) || die "unknown upgrade arguments: $*"
+
+  local installer="/opt/aru-selfhost/current/install.sh"
+  [[ -x "$installer" ]] || die "installed upgrader is missing"
+  local args=(
+    --profile "${ARU_INSTALL_PROFILE:-full}"
+    --display-name "${ARU_INSTALL_DISPLAY_NAME:-Aru Self-Hosted}"
+    --port "${ARU_INSTALL_PORT:-8787}"
+    --node-image "${ARU_INSTALL_NODE_IMAGE:-docker.io/library/node:22-alpine}"
+    --python-image "${ARU_INSTALL_PYTHON_IMAGE:-docker.io/library/python:3.13-alpine}"
+    --shell-image "${ARU_INSTALL_SHELL_IMAGE:-docker.io/library/alpine:3.22}"
+  )
+  if [[ -n "${ARU_INSTALL_DOMAIN:-}" ]]; then
+    args+=(--domain "$ARU_INSTALL_DOMAIN")
+  else
+    args+=(--base-url "$ARU_INSTALL_BASE_URL" --transport-kind "$ARU_INSTALL_TRANSPORT_KIND")
+  fi
+  [[ "${ARU_INSTALL_SKIP_CADDY:-false}" == "true" ]] && args+=(--skip-caddy)
+  [[ "${ARU_INSTALL_SKIP_FIREWALL:-false}" == "true" ]] && args+=(--skip-firewall)
+  if [[ -n "${ARU_INSTALL_BUNDLE_URL:-}" && "$explicit_ref" == "false" ]]; then
+    args+=(--bundle-url "$ARU_INSTALL_BUNDLE_URL")
+  else
+    args+=(--source-ref "$ref")
+  fi
+  "$installer" "${args[@]}"
+}
+
+rollback_command() {
+  need_root
+  local current previous
+  current="$(readlink /opt/aru-selfhost/current 2>/dev/null || true)"
+  previous="$(readlink /opt/aru-selfhost/previous 2>/dev/null || true)"
+  [[ -n "$current" && -n "$previous" ]] || die "no previous release is installed"
+  ln -sfn "$current" /opt/aru-selfhost/previous
+  ln -sfn "$previous" /opt/aru-selfhost/current
+  systemctl restart "$SERVICE"
+  echo "rolled back to ${previous##*/}"
+}
+
+uninstall_command() {
+  need_root
+  local args=(--uninstall)
+  [[ "${1:-}" == "--purge-data" ]] && args+=(--purge-data) && shift
+  (($# == 0)) || die "unknown uninstall arguments: $*"
+  [[ -x /opt/aru-selfhost/current/install.sh ]] || die "installed uninstaller is missing"
+  /opt/aru-selfhost/current/install.sh "${args[@]}"
+}
+
+command_name="${1:-}"
+[[ -n "$command_name" ]] || { usage; exit 1; }
+shift
+case "$command_name" in
+  status) status_command "$@" ;;
+  pairing) pairing_command "$@" ;;
+  doctor) doctor_command "$@" ;;
+  logs) exec journalctl -u "$SERVICE" -f "$@" ;;
+  upgrade) upgrade_command "$@" ;;
+  rollback) rollback_command "$@" ;;
+  uninstall) uninstall_command "$@" ;;
+  help|--help|-h) usage ;;
+  *) usage; die "unknown command: $command_name" ;;
+esac

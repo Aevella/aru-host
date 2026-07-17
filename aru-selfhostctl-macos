@@ -1,0 +1,200 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+INSTANCE="default"
+BASE_ROOT="${ARU_MACOS_BASE_ROOT:-$HOME/Library/Application Support/Aru Self-Hosted}"
+
+usage() {
+  cat <<'EOF'
+Usage: aru-selfhost [--instance NAME] <command>
+
+  status                 Show LaunchAgent state and installed release.
+  pairing                Restart this instance and print a fresh 10-minute pairing link.
+  doctor                 Check Node, local manifest, capabilities, and optional containers.
+  logs                   Follow this instance's private stdout/stderr logs.
+  upgrade [--ref REF]    Install a new release with the persisted instance choices.
+  rollback               Switch only this instance to its previous release.
+  uninstall              Remove this instance program/config and preserve data.
+  uninstall --purge-data Remove only this instance, including its durable data.
+EOF
+}
+
+die() {
+  echo "aru-selfhost: $*" >&2
+  exit 1
+}
+
+while (($#)); do
+  case "$1" in
+    --instance) INSTANCE="${2:?missing value for --instance}"; shift 2 ;;
+    --base-root) BASE_ROOT="${2:?missing value for --base-root}"; shift 2 ;;
+    *) break ;;
+  esac
+done
+
+[[ "$INSTANCE" =~ ^[a-z0-9][a-z0-9-]{0,31}$ ]] || die "invalid instance"
+INSTANCE_ROOT="$BASE_ROOT/instances/$INSTANCE"
+CONFIG_DIR="$INSTANCE_ROOT/config"
+INSTALL_ENV="$CONFIG_DIR/install.env"
+NODE_ENV="$CONFIG_DIR/node.env"
+CURRENT_LINK="$INSTANCE_ROOT/current"
+PREVIOUS_LINK="$INSTANCE_ROOT/previous"
+LOG_DIR="$INSTANCE_ROOT/logs"
+LABEL="cn.aelion.aru-selfhost.$INSTANCE"
+DOMAIN="gui/$(id -u)"
+
+load_install_config() {
+  [[ -r "$INSTALL_ENV" ]] || die "instance $INSTANCE is not installed"
+  # shellcheck disable=SC1090
+  source "$INSTALL_ENV"
+}
+
+load_node_config() {
+  [[ -r "$NODE_ENV" ]] || die "node config missing for instance $INSTANCE"
+  # shellcheck disable=SC1090
+  source "$NODE_ENV"
+}
+
+installed_release() {
+  local target
+  target="$(readlink "$CURRENT_LINK" 2>/dev/null || true)"
+  printf '%s\n' "${target##*/}"
+}
+
+restart_instance() {
+  launchctl kickstart -k "$DOMAIN/$LABEL"
+}
+
+status_command() {
+  echo "instance: $INSTANCE"
+  echo "release: $(installed_release)"
+  launchctl print "$DOMAIN/$LABEL"
+}
+
+pairing_command() {
+  load_node_config
+  : > "$LOG_DIR/stdout.log"
+  restart_instance
+  local output url
+  for _ in {1..40}; do
+    output="$(cat "$LOG_DIR/stdout.log" 2>/dev/null || true)"
+    url="$(printf '%s\n' "$output" | grep -E '^aru://pair\?' | tail -1 || true)"
+    if [[ -n "$url" ]]; then
+      echo "$url"
+      echo "Single use; expires in 10 minutes. The next restart invalidates it."
+      return
+    fi
+    sleep 0.25
+  done
+  die "node restarted but no pairing link appeared; run logs"
+}
+
+doctor_command() {
+  load_node_config
+  local failed=false manifest
+  echo "instance: $INSTANCE"
+  echo "release: $(installed_release)"
+  if launchctl print "$DOMAIN/$LABEL" >/dev/null 2>&1; then
+    echo "service: loaded"
+  else
+    echo "service: not loaded"
+    failed=true
+  fi
+  if [[ -x "$ARU_NODE_BINARY" ]]; then
+    echo "node: $($ARU_NODE_BINARY --version)"
+  else
+    echo "node: missing"
+    failed=true
+  fi
+  if [[ "$ARU_CONTAINER_RUNTIME" == "none" ]]; then
+    echo "container: unavailable (workspace/plugin capabilities intentionally disabled)"
+  elif command -v "$ARU_CONTAINER_RUNTIME" >/dev/null 2>&1 \
+       && "$ARU_CONTAINER_RUNTIME" info >/dev/null 2>&1; then
+    echo "container: $($ARU_CONTAINER_RUNTIME --version | head -1)"
+  else
+    echo "container: configured but unavailable ($ARU_CONTAINER_RUNTIME)"
+    failed=true
+  fi
+  if manifest="$(curl -fsS "http://127.0.0.1:$ARU_PORT/.well-known/aru.json" 2>/dev/null)"; then
+    printf '%s' "$manifest" | "$ARU_NODE_BINARY" -e '
+      let body="";process.stdin.on("data",c=>body+=c);process.stdin.on("end",()=>{
+        const m=JSON.parse(body);console.log(`manifest: ok (${m.serverId}, ${m.nodeKind})`);
+        for(const [id,value] of Object.entries(m.capabilities??{}))
+          console.log(`capability ${id}: ${value.enabled===true?"enabled":"disabled"}`);
+      });'
+  else
+    echo "manifest: unreachable on local service port"
+    failed=true
+  fi
+  [[ "$failed" == false ]] || exit 1
+}
+
+upgrade_command() {
+  load_install_config
+  local ref="${ARU_INSTALL_SOURCE_REF:-main}" explicit_ref=false
+  if [[ "${1:-}" == "--ref" ]]; then
+    ref="${2:?missing value for --ref}"
+    explicit_ref=true
+    shift 2
+  fi
+  (($# == 0)) || die "unknown upgrade arguments: $*"
+  local installer="$CURRENT_LINK/install-macos.sh"
+  local args=(
+    --instance "$INSTANCE"
+    --base-root "$BASE_ROOT"
+    --base-url "$ARU_INSTALL_BASE_URL"
+    --transport-kind "$ARU_INSTALL_TRANSPORT_KIND"
+    --display-name "$ARU_INSTALL_DISPLAY_NAME"
+    --port "$ARU_INSTALL_PORT"
+  )
+  if [[ -n "${ARU_INSTALL_SOURCE_DIR:-}" && -d "$ARU_INSTALL_SOURCE_DIR" \
+       && "$explicit_ref" == false ]]; then
+    [[ -x "$ARU_INSTALL_SOURCE_DIR/install-macos.sh" ]] \
+      || die "source installer is missing from $ARU_INSTALL_SOURCE_DIR"
+    installer="$ARU_INSTALL_SOURCE_DIR/install-macos.sh"
+    args+=(--source-dir "$ARU_INSTALL_SOURCE_DIR")
+  elif [[ -n "${ARU_INSTALL_BUNDLE_URL:-}" && "$explicit_ref" == false ]]; then
+    args+=(--bundle-url "$ARU_INSTALL_BUNDLE_URL")
+  else
+    args+=(--source-ref "$ref")
+  fi
+  [[ -x "$installer" ]] || die "installed upgrader is missing"
+  "$installer" "${args[@]}"
+}
+
+rollback_command() {
+  local current previous
+  current="$(readlink "$CURRENT_LINK" 2>/dev/null || true)"
+  previous="$(readlink "$PREVIOUS_LINK" 2>/dev/null || true)"
+  [[ -n "$current" && -n "$previous" ]] || die "no previous release for instance $INSTANCE"
+  launchctl bootout "$DOMAIN/$LABEL" >/dev/null 2>&1 || true
+  ln -sfn "$current" "$PREVIOUS_LINK"
+  ln -sfn "$previous" "$CURRENT_LINK"
+  launchctl bootstrap "$DOMAIN" "$HOME/Library/LaunchAgents/$LABEL.plist"
+  launchctl kickstart -k "$DOMAIN/$LABEL"
+  echo "rolled back instance $INSTANCE to ${previous##*/}"
+}
+
+uninstall_command() {
+  load_install_config
+  local args=(--instance "$INSTANCE" --base-root "$BASE_ROOT" --uninstall)
+  [[ "${1:-}" == "--purge-data" ]] && args+=(--purge-data) && shift
+  (($# == 0)) || die "unknown uninstall arguments: $*"
+  [[ -x "$CURRENT_LINK/install-macos.sh" ]] || die "installed uninstaller is missing"
+  "$CURRENT_LINK/install-macos.sh" "${args[@]}"
+}
+
+command_name="${1:-}"
+[[ -n "$command_name" ]] || { usage; exit 1; }
+shift
+case "$command_name" in
+  status) status_command "$@" ;;
+  pairing) pairing_command "$@" ;;
+  doctor) doctor_command "$@" ;;
+  logs) touch "$LOG_DIR/stdout.log" "$LOG_DIR/stderr.log"; exec tail -F "$LOG_DIR/stdout.log" "$LOG_DIR/stderr.log" ;;
+  upgrade) upgrade_command "$@" ;;
+  rollback) rollback_command "$@" ;;
+  uninstall) uninstall_command "$@" ;;
+  help|--help|-h) usage ;;
+  *) usage; die "unknown command: $command_name" ;;
+esac

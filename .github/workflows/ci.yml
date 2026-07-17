@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  host-core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Host and installer smoke tests
+        run: |
+          bash tests/http-smoke.sh
+          bash tests/installer-smoke.sh
+          node tests/collaborator-host-smoke.mjs
+          node tests/collaborator-cognition-smoke.mjs
+          node tests/collaborator-conversation-smoke.mjs
+          node tests/direct-api-driver-smoke.mjs
+          node tests/provider-profiles-smoke.mjs
+          node tests/conversation-turn-relay.test.mjs
+          bash tests/plugin-supervisor-smoke.sh
+      - name: Build Linux release payload
+        run: ./package-release.sh dist/aru-host-linux.tar.gz
+
+  macos:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - name: Host installer smoke test
+        run: bash tests/macos-installer-smoke.sh
+      - name: Console tests
+        run: swift test --package-path macos-console
+      - name: Build macOS Host Core payload
+        run: ./package-macos-release.sh dist/aru-host-macos.tar.gz
