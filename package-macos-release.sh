@@ -18,6 +18,6 @@ for file in "${files[@]}"; do
 done
 chmod 0644 "$temp/backup-settings.mjs" "$temp/conversation-turn-relay.mjs" "$temp/collaborator-host.mjs" "$temp/collaborator-cognition.mjs" "$temp/collaborator-surfaces.mjs" "$temp/collaborator-conversations.mjs" "$temp/codex-app-server-driver.mjs" "$temp/direct-api-driver.mjs" "$temp/provider-profiles.mjs" "$temp/provider-secret-store.mjs" "$temp/node-control.mjs" "$temp/node-workspaces.mjs" "$temp/plugin-supervisor.mjs" "$temp/plugin-workshop.mjs" "$temp/source-plugin-runtime.mjs" "$temp/source-plugin-runner.mjs"
 tar -czf "$OUTPUT" -C "$temp" "${files[@]}"
-shasum -a 256 "$OUTPUT" > "${OUTPUT}.sha256"
+(cd "$(dirname "$OUTPUT")" && shasum -a 256 "$(basename "$OUTPUT")") > "${OUTPUT}.sha256"
 echo "$OUTPUT"
 echo "${OUTPUT}.sha256"

@@ -28,9 +28,9 @@ tar -czf "$OUTPUT" -C "$temp" \
   run-node.sh aru-selfhost.service aru-selfhostctl install.sh
 
 if command -v sha256sum >/dev/null 2>&1; then
-  sha256sum "$OUTPUT" > "${OUTPUT}.sha256"
+  (cd "$(dirname "$OUTPUT")" && sha256sum "$(basename "$OUTPUT")") > "${OUTPUT}.sha256"
 else
-  shasum -a 256 "$OUTPUT" > "${OUTPUT}.sha256"
+  (cd "$(dirname "$OUTPUT")" && shasum -a 256 "$(basename "$OUTPUT")") > "${OUTPUT}.sha256"
 fi
 
 echo "$OUTPUT"
