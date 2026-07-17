@@ -72,6 +72,11 @@ log() {
   echo "[$PRODUCT] $*"
 }
 
+download() {
+  curl --fail --silent --show-error --location \
+    --retry 4 --retry-delay 2 --retry-all-errors "$@"
+}
+
 root_path() {
   printf '%s%s' "$INSTALL_ROOT" "$1"
 }
@@ -207,7 +212,7 @@ install_node_runtime() {
     apt-get update
     DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl gnupg
     install -d -m 0755 /etc/apt/keyrings
-    curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+    download https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
       | gpg --dearmor --yes -o /etc/apt/keyrings/nodesource.gpg
     echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" \
       > /etc/apt/sources.list.d/nodesource.list
@@ -240,9 +245,9 @@ install_caddy() {
   if ! command -v caddy >/dev/null 2>&1; then
     log "installing Caddy for automatic HTTPS"
     DEBIAN_FRONTEND=noninteractive apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl gnupg
-    curl -fsSL https://dl.cloudsmith.io/public/caddy/stable/gpg.key \
+    download https://dl.cloudsmith.io/public/caddy/stable/gpg.key \
       | gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-    curl -fsSL https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt \
+    download https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt \
       > /etc/apt/sources.list.d/caddy-stable.list
     chmod 0644 /usr/share/keyrings/caddy-stable-archive-keyring.gpg /etc/apt/sources.list.d/caddy-stable.list
     apt-get update
@@ -348,8 +353,8 @@ fetch_source_payload() {
   SOURCE_TMP="$(mktemp -d)"
   if [[ -n "$BUNDLE_URL" ]]; then
     log "downloading hash-verified release bundle"
-    curl -fsSL "$BUNDLE_URL" -o "$SOURCE_TMP/bundle.tar.gz"
-    curl -fsSL "${BUNDLE_URL}.sha256" -o "$SOURCE_TMP/bundle.tar.gz.sha256"
+    download "$BUNDLE_URL" -o "$SOURCE_TMP/bundle.tar.gz"
+    download "${BUNDLE_URL}.sha256" -o "$SOURCE_TMP/bundle.tar.gz.sha256"
     local expected actual
     expected="$(awk '{print $1}' "$SOURCE_TMP/bundle.tar.gz.sha256")"
     actual="$(sha256_file "$SOURCE_TMP/bundle.tar.gz")"
@@ -369,7 +374,7 @@ fetch_source_payload() {
   local raw="$REPO_RAW_DEFAULT/$SOURCE_REF"
   log "downloading node payload from Aevella/aru-host@$SOURCE_REF"
   for file in aru-selfhost-stub.mjs backup-settings.mjs conversation-turn-relay.mjs collaborator-host.mjs collaborator-cognition.mjs collaborator-surfaces.mjs collaborator-conversations.mjs codex-app-server-driver.mjs direct-api-driver.mjs provider-profiles.mjs provider-secret-store.mjs node-control.mjs node-workspaces.mjs plugin-supervisor.mjs plugin-workshop.mjs source-plugin-runtime.mjs source-plugin-runner.mjs run-node.sh aru-selfhost.service aru-selfhostctl install.sh; do
-    curl -fsSL "$raw/$file" -o "$SOURCE_TMP/$file"
+    download "$raw/$file" -o "$SOURCE_TMP/$file"
   done
   SOURCE_DIR="$SOURCE_TMP"
 }

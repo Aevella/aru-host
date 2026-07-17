@@ -59,6 +59,11 @@ log() {
   echo "[$PRODUCT] $*"
 }
 
+download() {
+  curl --fail --silent --show-error --location \
+    --retry 4 --retry-delay 2 --retry-all-errors "$@"
+}
+
 for arg in "$@"; do
   [[ "$arg" == "--help" ]] && { usage; exit 0; }
 done
@@ -248,11 +253,11 @@ install_managed_node() {
   log "installing a user-owned Node.js 22 runtime"
   temp="$(mktemp -d)"
   checksums="$temp/SHASUMS256.txt"
-  curl -fsSL https://nodejs.org/dist/latest-v22.x/SHASUMS256.txt -o "$checksums"
+  download https://nodejs.org/dist/latest-v22.x/SHASUMS256.txt -o "$checksums"
   filename="$(awk -v suffix="darwin-$node_arch.tar.gz" '$2 ~ suffix "$" {print $2; exit}' "$checksums")"
   [[ -n "$filename" ]] || { rm -rf "$temp"; die "Node.js release manifest lacks $node_arch macOS archive"; }
   expected="$(awk -v name="$filename" '$2 == name {print $1}' "$checksums")"
-  curl -fsSL "https://nodejs.org/dist/latest-v22.x/$filename" -o "$temp/$filename"
+  download "https://nodejs.org/dist/latest-v22.x/$filename" -o "$temp/$filename"
   actual="$(sha256_file "$temp/$filename")"
   [[ "$actual" == "$expected" ]] || { rm -rf "$temp"; die "Node.js archive SHA-256 mismatch"; }
   mkdir -p "$BASE_ROOT/runtime"
@@ -294,8 +299,8 @@ fetch_source_payload() {
   SOURCE_TMP="$(mktemp -d)"
   if [[ -n "$BUNDLE_URL" ]]; then
     log "downloading hash-verified macOS release bundle"
-    curl -fsSL "$BUNDLE_URL" -o "$SOURCE_TMP/bundle.tar.gz"
-    curl -fsSL "${BUNDLE_URL}.sha256" -o "$SOURCE_TMP/bundle.tar.gz.sha256"
+    download "$BUNDLE_URL" -o "$SOURCE_TMP/bundle.tar.gz"
+    download "${BUNDLE_URL}.sha256" -o "$SOURCE_TMP/bundle.tar.gz.sha256"
     local expected actual entries expected_entries
     expected="$(awk '{print $1}' "$SOURCE_TMP/bundle.tar.gz.sha256")"
     actual="$(sha256_file "$SOURCE_TMP/bundle.tar.gz")"
@@ -313,7 +318,7 @@ fetch_source_payload() {
   local raw="$REPO_RAW_DEFAULT/$SOURCE_REF" file
   log "downloading macOS node payload from Aevella/aru-host@$SOURCE_REF"
   for file in aru-selfhost-stub.mjs backup-settings.mjs conversation-turn-relay.mjs collaborator-host.mjs collaborator-cognition.mjs collaborator-surfaces.mjs collaborator-conversations.mjs codex-app-server-driver.mjs direct-api-driver.mjs provider-profiles.mjs provider-secret-store.mjs node-control.mjs node-workspaces.mjs plugin-supervisor.mjs plugin-workshop.mjs source-plugin-runtime.mjs source-plugin-runner.mjs run-node.sh install-macos.sh aru-selfhostctl-macos; do
-    curl -fsSL "$raw/$file" -o "$SOURCE_TMP/$file"
+    download "$raw/$file" -o "$SOURCE_TMP/$file"
   done
   SOURCE_DIR="$SOURCE_TMP"
 }
