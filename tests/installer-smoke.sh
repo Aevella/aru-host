@@ -117,24 +117,11 @@ test ! -e "$root/opt/aru-selfhost"
 bash "$SELFHOST_DIR/package-release.sh" "$artifacts/aru-selfhost-linux.tar.gz" >/dev/null
 test -s "$artifacts/aru-selfhost-linux.tar.gz"
 test -s "$artifacts/aru-selfhost-linux.tar.gz.sha256"
-tar -tzf "$artifacts/aru-selfhost-linux.tar.gz" | grep -Fqx 'install.sh'
-tar -tzf "$artifacts/aru-selfhost-linux.tar.gz" | grep -Fqx 'aru-selfhost-stub.mjs'
-tar -tzf "$artifacts/aru-selfhost-linux.tar.gz" | grep -Fqx 'collaborator-host.mjs'
-tar -tzf "$artifacts/aru-selfhost-linux.tar.gz" | grep -Fqx 'collaborator-surfaces.mjs'
-tar -tzf "$artifacts/aru-selfhost-linux.tar.gz" | grep -Fqx 'collaborator-conversations.mjs'
-tar -tzf "$artifacts/aru-selfhost-linux.tar.gz" | grep -Fqx 'codex-app-server-driver.mjs'
-tar -tzf "$artifacts/aru-selfhost-linux.tar.gz" | grep -Fqx 'collaborator-cognition.mjs'
-tar -tzf "$artifacts/aru-selfhost-linux.tar.gz" | grep -Fqx 'direct-api-driver.mjs'
-tar -tzf "$artifacts/aru-selfhost-linux.tar.gz" | grep -Fqx 'provider-profiles.mjs'
-tar -tzf "$artifacts/aru-selfhost-linux.tar.gz" | grep -Fqx 'provider-secret-store.mjs'
-tar -tzf "$artifacts/aru-selfhost-linux.tar.gz" | grep -Fqx 'backup-settings.mjs'
-tar -tzf "$artifacts/aru-selfhost-linux.tar.gz" | grep -Fqx 'conversation-turn-relay.mjs'
-tar -tzf "$artifacts/aru-selfhost-linux.tar.gz" | grep -Fqx 'node-control.mjs'
-tar -tzf "$artifacts/aru-selfhost-linux.tar.gz" | grep -Fqx 'node-workspaces.mjs'
-tar -tzf "$artifacts/aru-selfhost-linux.tar.gz" | grep -Fqx 'plugin-supervisor.mjs'
-tar -tzf "$artifacts/aru-selfhost-linux.tar.gz" | grep -Fqx 'plugin-workshop.mjs'
-tar -tzf "$artifacts/aru-selfhost-linux.tar.gz" | grep -Fqx 'source-plugin-runtime.mjs'
-tar -tzf "$artifacts/aru-selfhost-linux.tar.gz" | grep -Fqx 'source-plugin-runner.mjs'
+archive_entries="$artifacts/linux-archive-entries.txt"
+tar -tzf "$artifacts/aru-selfhost-linux.tar.gz" > "$archive_entries"
+for file in install.sh aru-selfhost-stub.mjs collaborator-host.mjs collaborator-surfaces.mjs collaborator-conversations.mjs codex-app-server-driver.mjs collaborator-cognition.mjs direct-api-driver.mjs provider-profiles.mjs provider-secret-store.mjs backup-settings.mjs conversation-turn-relay.mjs node-control.mjs node-workspaces.mjs plugin-supervisor.mjs plugin-workshop.mjs source-plugin-runtime.mjs source-plugin-runner.mjs; do
+  grep -Fqx "$file" "$archive_entries"
+done
 
 cp "$artifacts/aru-selfhost-linux.tar.gz" "$artifacts/tampered.tar.gz"
 cp "$artifacts/aru-selfhost-linux.tar.gz.sha256" "$artifacts/tampered.tar.gz.sha256"
