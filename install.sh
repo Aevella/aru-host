@@ -46,7 +46,7 @@ Options:
   --profile full            Persisted upgrade profile. full installs every currently
                             implemented capability bundle and adopts new ones on upgrade.
   --port PORT               Local node port (default 8787).
-  --source-dir DIR          Install payload from a local aru-host checkout.
+  --source-dir DIR          Install payload from a local Host source directory.
   --source-ref REF          Download payload from this Aevella/aru-host git ref (default main).
   --bundle-url URL          Install a release tarball and verify URL.sha256.
   --node-image IMAGE        Node workspace runtime image.

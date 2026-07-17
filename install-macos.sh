@@ -37,7 +37,7 @@ Options:
   --transport-kind KIND    lan or tailscale (default: lan).
   --display-name NAME      Name shown to Aru clients.
   --port PORT              Listen port. Fresh installs choose the first free port from 8787.
-  --source-dir DIR         Install payload from a local aru-host checkout.
+  --source-dir DIR         Install payload from a local Host source directory.
   --source-ref REF         Download payload from this Aevella/aru-host ref (default: main).
   --bundle-url URL         Install a hash-verified macOS release tarball.
   --base-root DIR          Override the user-owned installation root.
