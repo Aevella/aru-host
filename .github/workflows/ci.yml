@@ -12,8 +12,8 @@ jobs:
   host-core:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       - name: Host and installer smoke tests
@@ -33,7 +33,7 @@ jobs:
   macos:
     runs-on: macos-26
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Host installer smoke test
         run: bash tests/macos-installer-smoke.sh
       - name: Console tests
