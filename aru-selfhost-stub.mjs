@@ -64,6 +64,7 @@ import { createNodeWorkspaceHost } from "./node-workspaces.mjs";
 import { createNodeControl } from "./node-control.mjs";
 import { createBackupSettings } from "./backup-settings.mjs";
 import { createConversationTurnRelay } from "./conversation-turn-relay.mjs";
+import { createAPNsPushHost } from "./apns-push.mjs";
 
 class HttpError extends Error {
   constructor(status, code, message, { issues = [], recovery = null } = {}) {
@@ -134,7 +135,7 @@ const OFFICIAL_DEFAULT_MAXIMUM_RUNTIME_SECONDS = 24 * 60 * 60;
 const CONTAINER_STOP_GRACE_SECONDS = 5;
 const ARTIFACT_METADATA_SCHEMA = "aru.selfhost.artifact-metadata.v1";
 const WORKSPACE_RUNTIMES = ["node", "python", "shell"];
-const SERVER_VERSION = "stub-0.28";
+const SERVER_VERSION = "stub-0.29";
 const ENCRYPTED_PACKAGE_MAGIC = Buffer.from("ARUEPKG2", "ascii");
 const ENCRYPTED_PACKAGE_VERSION = 2;
 const ENCRYPTED_PACKAGE_CONTENT_TYPE = "application/vnd.aru.encrypted-backup";
@@ -164,6 +165,15 @@ const nodeControl = createNodeControl({
   readJSONBody,
   sendJSON,
   HttpError,
+  log,
+});
+const remotePush = createAPNsPushHost({
+  state,
+  saveState,
+  readJSONBody,
+  sendJSON,
+  HttpError,
+  serverId: state.serverId,
   log,
 });
 const backupSettings = createBackupSettings({
@@ -225,6 +235,8 @@ const collaboratorHost = createCollaboratorHost({
   managedWorkspaceRoot: config.managedWorkspaceRoot,
   toolCatalog: () => [...officialMCPTools(), ...pluginSupervisor.dynamicMCPTools()],
   executeTool: executeMCPTool,
+  createArtifact: persistDirectArtifact,
+  onTurnSettled: remotePush.deliverHostedCollaboratorTurn,
   log,
 });
 const nodeWorkspaceHost = createNodeWorkspaceHost({
@@ -254,6 +266,7 @@ const server = createServer(async (req, res) => {
 });
 
 server.listen(config.port, config.listenHost, () => {
+  collaboratorHost.start();
   const manifestURL = `${config.baseUrl}/.well-known/aru.json`;
   const pairingPayload = {
     schema: "aru.selfhost.pairing-envelope.v1",
@@ -291,6 +304,7 @@ server.listen(config.port, config.listenHost, () => {
   setImmediate(() => pluginSupervisor.reconcileInstalledPlugins()
     .catch((error) => log(`plugin reconciliation failed: ${error?.message ?? error}`)));
 });
+server.on("close", () => collaboratorHost.stop());
 
 // ---------------------------------------------------------------------------
 // Routing
@@ -317,6 +331,7 @@ async function route(req, res) {
   }
   if (await backupSettings.route(req, res, path, () => requireDevice(req))) return;
   if (await conversationTurnRelay.route(req, res, path, requireDevice)) return;
+  if (await remotePush.route(req, res, path, () => requireDevice(req))) return;
   if (path === "/aru/v1/jobs" && req.method === "POST") {
     return handleWorkspaceJobSubmit(req, res, requireDevice(req));
   }
@@ -469,9 +484,14 @@ function manifest() {
         turnExecution: collaboratorHost.driverInventory().execution.enabled,
         conversationEndpoint: "/aru/v1/hosted-collaborators/{collaboratorId}/conversations",
         cognitionEndpoint: "/aru/v1/hosted-collaborators/{collaboratorId}/cognition",
+        initiativeEndpoint: "/aru/v1/hosted-collaborators/{collaboratorId}/initiative",
+        projectEndpoint: "/aru/v1/hosted-collaborators/{collaboratorId}/projects",
         providerProfileEndpoint: "/aru/v1/provider-profiles",
         surfaceExecution: true,
         surfaceEndpoint: "/aru/v1/hosted-collaborators/{collaboratorId}/surfaces",
+      },
+      "remote-notifications": {
+        ...remotePush.manifestCapability(),
       },
       "node-workspaces": {
         ...nodeWorkspaceHost.manifestCapability(),
@@ -890,7 +910,12 @@ const MCP_TOOLS = [
 ];
 
 function officialMCPTools() {
-  return [...MCP_TOOLS, ...nodeWorkspaceHost.tools(), ...collaboratorHost.surfaceTools()];
+  return [
+    ...MCP_TOOLS,
+    ...nodeWorkspaceHost.tools(),
+    ...collaboratorHost.surfaceTools(),
+    ...collaboratorHost.projectTools(),
+  ];
 }
 
 function mcpIdentifierSchema(description) {
@@ -1017,6 +1042,12 @@ async function executeMCPTool(name, args, device) {
         throw new HttpError(400, "mcp.tool_unknown", `Unknown tool: ${name}`);
       }
       structuredContent = surfaceCall.value;
+    } else if (name.startsWith("aru_collaborator_project_")) {
+      const projectCall = collaboratorHost.callProjectTool(name, args, device);
+      if (!projectCall.matched) {
+        throw new HttpError(400, "mcp.tool_unknown", `Unknown tool: ${name}`);
+      }
+      structuredContent = projectCall.value;
     } else if (name === "aru_node_status") {
       structuredContent = {
         serverId: state.serverId,
@@ -2041,36 +2072,46 @@ function readWorkspaceOutputs(root, excludedPath) {
 
 function persistWorkspaceArtifacts(binaryFiles, run, device, jobId = null) {
   if (binaryFiles.length === 0) return [];
-  const createdAt = Date.now();
-  const metadata = binaryFiles.map(({ path, data }) => {
-    const sha256 = sha256Hex(data);
-    const artifactId = `artifact_${randomUUID()}`;
-    const blobPath = join(config.dataDir, "artifacts", sha256);
-    if (!existsSync(blobPath)) writeFileSync(blobPath, data, { mode: 0o600 });
-    const entry = {
-      schema: ARTIFACT_METADATA_SCHEMA,
-      artifactId,
-      filename: path,
-      mimeType: mimeTypeForArtifactPath(path),
-      byteCount: data.length,
-      sha256,
-      createdAt,
-      producer: {
+  const metadata = binaryFiles.map(({ path, data }) => persistDirectArtifact({
+    filename: path,
+    mimeType: mimeTypeForArtifactPath(path),
+    data,
+    producer: {
         kind: "workspace-run",
         runId: run.runId,
         projectId: run.projectId,
         runtime: run.runtime,
         jobId,
-      },
-      downloadPath: `/aru/v1/artifacts/${encodeURIComponent(artifactId)}`,
-      deletedAt: null,
-      createdByDeviceId: device.deviceId,
-    };
-    state.artifacts.push(entry);
-    return publicArtifactMetadata(entry);
-  });
+    },
+  }, device, false));
   saveState();
   return metadata;
+}
+
+function persistDirectArtifact({ filename, mimeType, data, producer }, device, persist = true) {
+  if (!Buffer.isBuffer(data)) {
+    throw new HttpError(500, "artifact.bytes_invalid", "artifact publication requires binary data");
+  }
+  const sha256 = sha256Hex(data);
+  const artifactId = `artifact_${randomUUID()}`;
+  const blobPath = join(config.dataDir, "artifacts", sha256);
+  if (!existsSync(blobPath)) writeFileSync(blobPath, data, { mode: 0o600 });
+  const entry = {
+    schema: ARTIFACT_METADATA_SCHEMA,
+    artifactId,
+    filename,
+    mimeType,
+    byteCount: data.length,
+    sha256,
+    createdAt: Date.now(),
+    producer,
+    downloadPath: `/aru/v1/artifacts/${encodeURIComponent(artifactId)}`,
+    deletedAt: null,
+    createdByDeviceId: device.deviceId,
+  };
+  state.artifacts.push(entry);
+  if (persist) saveState();
+  return publicArtifactMetadata(entry);
 }
 
 function artifactInventory() {

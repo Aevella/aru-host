@@ -155,6 +155,75 @@ import Testing
     #expect(HostCollaboratorCognitionRecordKind.references.rawValue == "references")
 }
 
+@Test func decodesComputerCollaboratorInitiativeControlPlane() throws {
+    let initiative = try JSONDecoder().decode(HostCollaboratorInitiative.self, from: Data(#"""
+    {
+      "schema":"aru.selfhost.collaborator-initiative.v1",
+      "collaboratorId":"hostcol_1234",
+      "revision":3,
+      "rules":[{
+        "ruleId":"hostinitiative_1234",
+        "title":"Check in",
+        "goal":"Ask how the project is going",
+        "instructions":"Be brief",
+        "conversationId":null,
+        "nextFireAt":200,
+        "recurrenceMinutes":60,
+        "notificationsEnabled":true,
+        "enabled":true,
+        "deliveryCount":2,
+        "lastAttemptAt":150,
+        "lastDeliveredAt":160,
+        "lastFailure":null,
+        "runningAt":null,
+        "createdAt":100,
+        "updatedAt":170,
+        "archivedAt":null
+      }],
+      "createdAt":90,
+      "updatedAt":170
+    }
+    """#.utf8))
+
+    #expect(initiative.collaboratorId == "hostcol_1234")
+    #expect(initiative.rules.first?.notificationsEnabled == true)
+    #expect(initiative.rules.first?.deliveryCount == 2)
+    #expect(initiative.rules.first?.isArchived == false)
+    #expect(initiative.rules.first?.isRunning == false)
+}
+
+@Test func decodesComputerCollaboratorPageProjectControlPlane() throws {
+    let inventory = try JSONDecoder().decode(HostCollaboratorProjectInventory.self, from: Data(#"""
+    {
+      "schema":"aru.selfhost.collaborator-project-inventory.v1",
+      "collaboratorId":"hostcol_1234",
+      "projects":[{
+        "schema":"aru.selfhost.collaborator-project.v1",
+        "projectId":"hostproject_1234",
+        "collaboratorId":"hostcol_1234",
+        "title":"Aelion page",
+        "revision":3,
+        "workspacePath":"projects/aelion-page",
+        "entryPath":"index.html",
+        "sourceURL":"https://github.com/aru/page",
+        "repositoryURL":"https://github.com/aru/page.git",
+        "surfaceId":"surface_1234",
+        "checkpointCount":1,
+        "latestCheckpoint":{"checkpointId":"checkpoint_1","ordinal":1,"note":"saved","artifactId":"artifact_1","createdAt":150},
+        "createdAt":100,
+        "updatedAt":200,
+        "archivedAt":null,
+        "repository":{"state":"ready","sourceURL":"https://github.com/aru/page","repositoryURL":"https://github.com/aru/page.git","branch":"main","commit":"abcdef","dirty":false,"upstream":"origin/main","ahead":0,"behind":0}
+      }]
+    }
+    """#.utf8))
+
+    #expect(inventory.projects.first?.workspacePath == "projects/aelion-page")
+    #expect(inventory.projects.first?.latestCheckpoint?.artifactId == "artifact_1")
+    #expect(inventory.projects.first?.repository?.branch == "main")
+    #expect(inventory.projects.first?.surfaceId == "surface_1234")
+}
+
 @Test func decodesCollaboratorToolAccessAndAdmission() throws {
     let roots = try JSONDecoder().decode(HostedCollaboratorInventory.self, from: Data(#"""
     {

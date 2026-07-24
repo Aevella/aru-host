@@ -701,5 +701,15 @@ export function createCollaboratorSurfaceHost({
   function collaboratorDirectory(collaboratorId) { return join(root, collaboratorId); }
   function surfacePath(collaboratorId, surfaceId) { return join(collaboratorDirectory(collaboratorId), `${surfaceId}.json`); }
 
-  return { route, tools, selfTools, callTool, callSelfTool, inventory, surface };
+  return {
+    route,
+    tools,
+    selfTools,
+    callTool,
+    callSelfTool,
+    inventory,
+    surface,
+    createProjectSurface,
+    publishProject,
+  };
 }

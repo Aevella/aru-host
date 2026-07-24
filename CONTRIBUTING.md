@@ -8,6 +8,9 @@ Before opening a pull request:
 node --check aru-selfhost-stub.mjs
 bash tests/http-smoke.sh
 bash tests/installer-smoke.sh
+node tests/apns-push-smoke.mjs
+node tests/collaborator-initiative-smoke.mjs
+node tests/collaborator-project-smoke.mjs
 bash tests/macos-installer-smoke.sh
 swift test --package-path macos-console
 npm ci --prefix linux-console

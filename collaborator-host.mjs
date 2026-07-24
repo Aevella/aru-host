@@ -5,6 +5,8 @@ import { createCollaboratorCognitionHost } from "./collaborator-cognition.mjs";
 import { createCollaboratorSurfaceHost } from "./collaborator-surfaces.mjs";
 import { createCodexAppServerDriver } from "./codex-app-server-driver.mjs";
 import { createCollaboratorConversationHost } from "./collaborator-conversations.mjs";
+import { createCollaboratorInitiativeHost } from "./collaborator-initiative.mjs";
+import { createCollaboratorProjectHost } from "./collaborator-projects.mjs";
 import { createDirectAPIDriver } from "./direct-api-driver.mjs";
 import { createProviderProfileHost } from "./provider-profiles.mjs";
 import { createProviderSecretStore } from "./provider-secret-store.mjs";
@@ -69,8 +71,12 @@ export function createCollaboratorHost({
   executeTool = async () => {
     throw new Error("Aru tool execution is unavailable");
   },
+  createArtifact = () => {
+    throw new Error("Aru artifact publication is unavailable");
+  },
   providerSecretStore = createProviderSecretStore(),
   conversationHostFactory = createCollaboratorConversationHost,
+  onTurnSettled = async () => {},
   log = () => {},
   now = Date.now,
 }) {
@@ -79,6 +85,15 @@ export function createCollaboratorHost({
   let codexExecutable = resolveDriverExecutable(LOCAL_DRIVER_DEFINITIONS[0]);
   const surfaces = createCollaboratorSurfaceHost({
     dataDir,
+    readJSONBody,
+    sendJSON,
+    HttpError,
+    now,
+  });
+  const projects = createCollaboratorProjectHost({
+    dataDir,
+    surfaces,
+    createArtifact,
     readJSONBody,
     sendJSON,
     HttpError,
@@ -114,6 +129,7 @@ export function createCollaboratorHost({
     ),
     now,
   });
+  let initiative;
   const conversations = conversationHostFactory({
     dataDir,
     driverForCollaborator,
@@ -125,22 +141,49 @@ export function createCollaboratorHost({
     executeTool: executeConversationTool,
     requestInstructions: cognition.requestInstructions,
     configurationRevision: (collaborator) => cognition.summary(collaborator.collaboratorId).revision,
+    onTurnSettled: async (event) => {
+      const collaborator = collaboratorForId(event.conversation.collaboratorId);
+      const enriched = { ...event, collaborator };
+      initiative?.settle(enriched);
+      await onTurnSettled(enriched);
+    },
     now,
+  });
+  initiative = createCollaboratorInitiativeHost({
+    dataDir,
+    readJSONBody,
+    sendJSON,
+    HttpError,
+    collaboratorForId,
+    collaboratorIds: () => state.hostedCollaborators
+      .filter((collaborator) => !collaborator.archivedAt)
+      .map((collaborator) => collaborator.collaboratorId),
+    trigger: (collaborator, rule) => conversations.runProactive(collaborator, rule),
+    now,
+    log,
   });
 
   function conversationToolCatalog() {
     return [
-      ...toolCatalog().filter((tool) => !tool.name.startsWith("aru_collaborator_surface_")),
+      ...toolCatalog().filter((tool) =>
+        !tool.name.startsWith("aru_collaborator_surface_")
+        && !tool.name.startsWith("aru_collaborator_project_")),
       ...surfaces.selfTools(),
+      ...projects.selfTools(),
       ...cognition.selfTools(),
+      ...initiative.selfTools(),
     ];
   }
 
   async function executeConversationTool(name, args, device, collaborator) {
     const surfaceCall = surfaces.callSelfTool(name, args, device, collaborator);
     if (surfaceCall.matched) return surfaceCall.value;
+    const projectCall = projects.callSelfTool(name, args, device, collaborator);
+    if (projectCall.matched) return projectCall.value;
     const cognitionCall = cognition.callSelfTool(name, args, device, collaborator);
     if (cognitionCall.matched) return cognitionCall.value;
+    const initiativeCall = initiative.callSelfTool(name, args, device, collaborator);
+    if (initiativeCall.matched) return initiativeCall.value;
     return executeTool(name, args, device);
   }
 
@@ -238,10 +281,16 @@ export function createCollaboratorHost({
     if (await conversations.route(req, res, path, requireDevice)) {
       return true;
     }
+    if (await initiative.route(req, res, path, requireDevice)) {
+      return true;
+    }
     if (await cognition.route(req, res, path, requireDevice, collaboratorForId)) {
       return true;
     }
     if (await surfaces.route(req, res, path, requireDevice, collaboratorForId)) {
+      return true;
+    }
+    if (await projects.route(req, res, path, requireDevice, collaboratorForId)) {
       return true;
     }
     const match = path.match(/^\/aru\/v1\/hosted-collaborators\/([^/]+)$/);
@@ -296,6 +345,7 @@ export function createCollaboratorHost({
     };
     state.hostedCollaborators.push(collaborator);
     cognition.initialize(collaborator.collaboratorId, "isolated");
+    initiative.initialize(collaborator.collaboratorId);
     saveState();
     return publicCollaborator(collaborator);
   }
@@ -462,10 +512,16 @@ export function createCollaboratorHost({
     driverInventory,
     collaboratorInventory,
     surfaceTools: surfaces.tools,
+    projectTools: projects.tools,
     callSurfaceTool(name, args, device) {
       return surfaces.callTool(name, args, device, collaboratorForId);
     },
+    callProjectTool(name, args, device) {
+      return projects.callTool(name, args, device, collaboratorForId);
+    },
     conversationStatus: conversations.status,
+    start: initiative.start,
+    stop: initiative.stop,
   };
 }
 

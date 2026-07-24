@@ -119,6 +119,55 @@ assert.deepEqual(publishTool.inputSchema.properties.networkAccess.enum, ["none",
 const runtimeTool = conversationTools.find((tool) => tool.name === "aru_collaborator_surface_runtime");
 assert.ok(runtimeTool);
 assert.equal("collaboratorId" in runtimeTool.inputSchema.properties, false);
+const initiativeCreateTool = conversationTools.find(
+  (tool) => tool.name === "aru_collaborator_initiative_create",
+);
+assert.ok(initiativeCreateTool);
+assert.equal("collaboratorId" in initiativeCreateTool.inputSchema.properties, false);
+assert.deepEqual(
+  initiativeCreateTool.inputSchema.required,
+  ["expectedRevision", "title", "goal", "fireAfterMinutes", "recurrenceMinutes"],
+);
+assert.equal(initiativeCreateTool.outputSchema.properties.rules.type, "array");
+
+let ownInitiative = await conversationOptions.executeTool(
+  "aru_collaborator_initiative_read",
+  {},
+  { deviceId: `hosted-collaborator:${owner.collaboratorId}` },
+  owner,
+);
+ownInitiative = await conversationOptions.executeTool(
+  "aru_collaborator_initiative_create",
+  {
+    expectedRevision: ownInitiative.revision,
+    title: "Keep in touch",
+    goal: "Check in with AA later",
+    fireAfterMinutes: 15,
+    recurrenceMinutes: 0,
+  },
+  { deviceId: `hosted-collaborator:${owner.collaboratorId}` },
+  owner,
+);
+assert.equal(ownInitiative.collaboratorId, owner.collaboratorId);
+assert.equal(ownInitiative.rules.length, 1);
+assert.equal(ownInitiative.rules[0].nextFireAt, 900_020);
+assert.equal(ownInitiative.rules[0].notificationsEnabled, true);
+await assert.rejects(
+  conversationOptions.executeTool(
+    "aru_collaborator_initiative_create",
+    {
+      collaboratorId: otherOwner.collaboratorId,
+      expectedRevision: ownInitiative.revision,
+      title: "Forged initiative",
+      goal: "Write another collaborator's rules",
+      fireAfterMinutes: 15,
+      recurrenceMinutes: 0,
+    },
+    { deviceId: `hosted-collaborator:${owner.collaboratorId}` },
+    owner,
+  ),
+  (error) => error.code === "initiative.owner_scope_fixed",
+);
 
 const published = await conversationOptions.executeTool(
   "aru_collaborator_surface_publish",

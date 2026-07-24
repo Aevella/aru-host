@@ -150,6 +150,11 @@ deterministic dev flows.
 | `POST /aru/v1/agent-drivers/refresh` | Bearer | rerun bounded local driver version probes |
 | `GET/POST /aru/v1/hosted-collaborators` | Bearer | list or create computer-authoritative collaborator roots |
 | `GET/PUT /aru/v1/hosted-collaborators/:id` | Bearer | read or update one hosted root and selected driver |
+| `GET/POST /aru/v1/hosted-collaborators/:id/initiative` | Bearer | list or create durable one-shot/recurring proactive rules |
+| `PUT .../initiative/rules/:ruleId`, `POST .../initiative/rules/:ruleId/archive`, `/restore`, `/run` | Bearer | revision-safely edit, archive, restore, or explicitly run one rule |
+| `GET/POST /aru/v1/hosted-collaborators/:id/projects` | Bearer | list or create Host-workspace page projects, optionally by cloning GitHub |
+| `GET/PUT /aru/v1/hosted-collaborators/:id/projects/:projectId` | Bearer | inspect or revision-safely rename a project and its phone entry path |
+| `POST .../projects/:projectId/checkpoint`, `/publish`, `/archive`, `/restore` | Bearer | save immutable artifact checkpoints, explicitly publish the phone surface, or change visibility |
 | `GET/POST /aru/v1/hosted-collaborators/:id/conversations` | Bearer | list or create Host-authoritative computer conversations |
 | `GET .../conversations/:conversationId` | Bearer | read durable messages, turn state, and approval state |
 | `GET .../conversations/:conversationId/events?after=<cursor>` | Bearer | read ordered replica events after a Host cursor |
@@ -160,6 +165,7 @@ deterministic dev flows.
 | `PUT /aru/v1/hosted-collaborators/:id/surfaces/:surfaceId/state` | Bearer | revision-safely persist phone interaction state on the Host |
 | `GET/POST /aru/v1/hosted-collaborators/:id/surfaces/:surfaceId/events` | Bearer | read or append typed phone interaction events |
 | `POST .../surfaces/:surfaceId/rollback`, `/archive`, `/restore` | Bearer | restore an earlier source as a new version or change visibility |
+| `GET/PUT/DELETE /aru/v1/push-devices/current` | Bearer | inspect, register, or remove the requesting paired phone's APNs route |
 
 The fixed MCP catalog exposes node identity read/rename, backup inventory,
 revision-safe backup retention read/update, device inspection, durable job
@@ -239,28 +245,77 @@ replacement thread receives the durable Host transcript and the new cognition.
 Host Console and paired phones edit this same ledger, and owner-bound cognition
 tools let the collaborator update only its own records without an id parameter.
 
+`collaborator-initiative.mjs` owns proactive timing separately from conversation
+execution. It persists the due attempt before asking
+`collaborator-conversations.mjs` to create or reuse the target conversation and
+run a normal Host turn tagged with the rule id. A one-shot rule disables after
+that attempt is claimed; a recurring rule advances to its next due time. Host
+restart records an interrupted attempt as failed instead of silently replaying
+it. `apns-push.mjs` is downstream of durable conversation settlement: it sends
+only completed initiative turns whose rule requested phone notification, never
+an in-progress seed or a manually sent message. Each paired device owns its own
+registration, and revocation removes its delivery eligibility.
+
+The same initiative owner publishes four current-root tools to hosted
+conversations: `aru_collaborator_initiative_read`, `create`, `update`, and
+`archive`. Their schemas contain no `collaboratorId`; `collaborator-host.mjs`
+injects the executing root and rejects forged ownership again at dispatch.
+Create and reschedule accept relative whole minutes, with
+`recurrenceMinutes: 0` meaning one time, then return the complete revisioned
+initiative snapshot. There is deliberately no self `run-now` tool: a model that
+is already speaking should continue in that turn rather than recursively start
+another conversation turn. Roots in explicit selected-tool mode receive these
+tools only after the user adds them to that durable admission list.
+
+`collaborator-projects.mjs` owns durable page-project identity and the binding
+between one managed collaborator workspace, its optional Git checkout, its
+artifact checkpoints, and one published phone surface. A GitHub URL is cloned
+by the Host into a new workspace directory; phone and Console read branch,
+commit, dirty, upstream, ahead, and behind state from that single checkout.
+`aru_collaborator_project_inventory`, `create`, `checkpoint`, and `publish` are
+current-root tools with no `collaboratorId`. Checkpoint excludes `.git`, rejects
+symlinks, and publishes an immutable tar.gz through the artifact vault without
+changing the active phone page. Publish is the separate explicit action that
+freezes the same workspace into the linked immutable surface release. Neither
+operation pushes Git commits or creates a second phone-side clone.
+
 Hosted collaborator surfaces remain a separate implemented execution boundary.
-`collaborator-surfaces.mjs` owns the durable
-source, immutable versions, revisioned JSON state, typed phone interaction
-events, archive state, and atomic per-surface files. A paired model can create
-or update one directly through `aru_collaborator_surface_publish`; there is no
-draft/install gate. Host Console owns source editing, isolated preview, version
-history, rollback, archive, and restore. The phone receives source and state as
-a projection, executes them in a non-persistent WKWebView with external network,
-frames, forms, objects, and top-level navigation blocked, then returns state and
-typed events to the Host. It cannot edit source or roll versions back, so a
-phone-local collaborator and a computer collaborator never share authority.
+`collaborator-surfaces.mjs` owns the durable release ledger, immutable versions,
+revisioned JSON state, typed phone interaction events, archive state, and atomic
+per-surface files. Tiny pages can still publish one complete document through
+`aru_collaborator_surface_publish`. Substantial pages live as ordinary
+multi-file projects in the collaborator's managed workspace and publish their
+built directory through `aru_collaborator_surface_publish_project`;
+`collaborator-surface-bundles.mjs` copies that build into immutable Host storage,
+hashes every path, and serves the exact bundle to paired clients. There is no
+draft/install gate. Host Console edits inline pages and inspects multi-file
+project manifests, isolated previews, version history, rollback, archive, and
+restore without flattening a project back into one HTML field. The phone
+validates the manifest and bytes, executes the bundle in a non-persistent
+WKWebView, allows only release-local resources while external network is
+blocked, then returns state and typed events to the Host. It cannot edit source
+or roll versions back, so a phone-local collaborator and a computer collaborator
+never share authority.
 
 There are two ordinary authoring routes. In Host Console, open Computer
 Collaborators, choose the hosted collaborator, create a page, edit its complete
 HTML document, check Preview, and publish; the page then appears under that
-computer collaborator on every paired phone. From an AI client that already has
-this Host MCP, ask it to create or revise the phone page and publish through
+computer collaborator on every paired phone. From a computer collaborator, ask
+it to create or revise the phone page. It writes the normal project in its
+managed workspace and publishes the build through
+`aru_collaborator_surface_publish_project`; small self-contained pages may use
 `aru_collaborator_surface_publish`. The studio's refresh action pulls those
-model-authored changes back into the directory and active editor without
-closing the window. Every later publish creates another immutable version;
+model-authored releases back into the directory and preview without closing the
+window. Every later publish creates another immutable version;
 Versions can restore an earlier source and Phone State shows the Host-owned
 interaction state returned by devices.
+
+The conversation event ledger is also projected to paired phones. While a
+computer collaborator is working, the phone polls only new cursor events and
+renders a compact expandable activity strip for command execution, workspace
+file changes, dynamic or Host tool calls, confirmation waits, completion, and
+failure. These are real driver and Host events, not synthetic progress; paths
+are reduced to collaborator-workspace-relative names before leaving the Host.
 
 The driver inventory reports `execution.enabled=true` only when the fixed Codex
 probe is ready. Each Codex hosted root then reports `turnExecution=true`; an

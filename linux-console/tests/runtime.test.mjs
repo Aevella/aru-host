@@ -22,6 +22,9 @@ test("Host request allowlist admits owned routes and blocks traversal", () => {
   assert.deepEqual(validateHostRequest("PUT", "/aru/v1/hosted-collaborators/root_1/conversations/conversation_1/approvals/approval_1"), {
     method: "PUT", path: "/aru/v1/hosted-collaborators/root_1/conversations/conversation_1/approvals/approval_1",
   });
+  assert.deepEqual(validateHostRequest("POST", "/aru/v1/hosted-collaborators/root_1/projects/project_1/publish"), {
+    method: "POST", path: "/aru/v1/hosted-collaborators/root_1/projects/project_1/publish",
+  });
   assert.throws(() => validateHostRequest("GET", "https://example.com"));
   assert.throws(() => validateHostRequest("GET", "/aru/v1/../state"));
   assert.throws(() => validateHostRequest("POST", "/aru/v1/diagnostics"));

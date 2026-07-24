@@ -42,14 +42,18 @@ struct CollaboratorSurfaceStudioView: View {
 
     private enum StudioPage: String, CaseIterable, Identifiable {
         case conversations
+        case initiative
         case cognition
+        case projects
         case surfaces
 
         var id: String { rawValue }
         var title: String {
             switch self {
             case .conversations: L10n.conversations
+            case .initiative: L10n.initiative
             case .cognition: L10n.cognition
+            case .projects: L10n.projects
             case .surfaces: L10n.surfaces
             }
         }
@@ -63,8 +67,12 @@ struct CollaboratorSurfaceStudioView: View {
                 Divider().overlay(Color.white.opacity(0.48))
                 if studioPage == .conversations {
                     CollaboratorConversationStudioView(runtime: runtime, collaborator: collaborator)
+                } else if studioPage == .initiative {
+                    CollaboratorInitiativeStudioView(runtime: runtime, collaborator: collaborator)
                 } else if studioPage == .cognition {
                     CollaboratorCognitionStudioView(runtime: runtime, collaborator: collaborator)
+                } else if studioPage == .projects {
+                    CollaboratorProjectStudioView(runtime: runtime, collaborator: collaborator)
                 } else {
                     HStack(spacing: 0) {
                         surfaceDirectory
@@ -139,7 +147,7 @@ struct CollaboratorSurfaceStudioView: View {
                 }
             }
             .padding(4)
-            .frame(width: 360)
+            .frame(width: 560)
             .background {
                 Capsule()
                     .fill(Color.white.opacity(0.18))
@@ -160,7 +168,9 @@ struct CollaboratorSurfaceStudioView: View {
     private var studioSubtitle: String {
         switch studioPage {
         case .conversations: L10n.conversationStudioSubtitle
+        case .initiative: L10n.initiativeStudioSubtitle
         case .cognition: L10n.cognitionStudioSubtitle
+        case .projects: L10n.projectStudioSubtitle
         case .surfaces: L10n.surfaceStudioSubtitle
         }
     }

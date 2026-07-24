@@ -352,6 +352,57 @@ enum L10n {
     static let surfaces = value("surfaces")
     static let surfaceStudioSubtitle = value("surface.studio.subtitle")
     static let conversationStudioSubtitle = value("conversation.studio.subtitle")
+    static let initiative = value("initiative")
+    static let initiativeStudioSubtitle = value("initiative.studio.subtitle")
+    static let initiativeNew = value("initiative.new")
+    static let initiativeTitle = value("initiative.title")
+    static let initiativeGoal = value("initiative.goal")
+    static let initiativeInstructions = value("initiative.instructions")
+    static let initiativeWhen = value("initiative.when")
+    static let initiativeRepeat = value("initiative.repeat")
+    static let initiativeOnce = value("initiative.once")
+    static let initiativeHourly = value("initiative.hourly")
+    static let initiativeDaily = value("initiative.daily")
+    static let initiativeWeekly = value("initiative.weekly")
+    static let initiativeNotify = value("initiative.notify")
+    static let initiativeNotifyShort = value("initiative.notify.short")
+    static let initiativeCreate = value("initiative.create")
+    static let initiativePlans = value("initiative.plans")
+    static let initiativeOwnedByHost = value("initiative.host.owned")
+    static let initiativeEmpty = value("initiative.empty")
+    static let initiativeEmptyDetail = value("initiative.empty.detail")
+    static let initiativePause = value("initiative.pause")
+    static let initiativeResume = value("initiative.resume")
+    static let initiativeRunNow = value("initiative.run.now")
+    static let initiativeRunning = value("initiative.running")
+    static let initiativePaused = value("initiative.paused")
+    static let initiativeReady = value("initiative.ready")
+    static let initiativeMutationInProgress = value("initiative.mutation.in.progress")
+    static let projects = value("projects")
+    static let projectStudioSubtitle = value("project.studio.subtitle")
+    static let projectNew = value("project.new")
+    static let projectNewDetail = value("project.new.detail")
+    static let projectTitle = value("project.title")
+    static let projectGitHub = value("project.github")
+    static let projectEntry = value("project.entry")
+    static let projectCreate = value("project.create")
+    static let projectOwnedByHost = value("project.host.owned")
+    static let projectEmpty = value("project.empty")
+    static let projectEmptyDetail = value("project.empty.detail")
+    static let projectDirty = value("project.dirty")
+    static let projectPublished = value("project.published")
+    static let projectUnpublished = value("project.unpublished")
+    static let projectNote = value("project.note")
+    static let projectNetwork = value("project.network")
+    static let projectSave = value("project.save")
+    static let projectPublish = value("project.publish")
+    static let projectCreated = value("project.created")
+    static let projectSaved = value("project.saved")
+    static let projectPublishedNow = value("project.published.now")
+    static let projectMutationInProgress = value("project.mutation.in.progress")
+    static func projectCheckpoints(_ count: Int) -> String {
+        String(format: value("project.checkpoints.format"), Int64(count))
+    }
     static let cognition = value("cognition")
     static let cognitionStudioSubtitle = value("cognition.studio.subtitle")
     static let cognitionEnvironment = value("cognition.environment")
@@ -432,6 +483,14 @@ enum L10n {
 
     static func objectCount(_ count: Int) -> String {
         String(format: value("object.count.format"), count)
+    }
+
+    static func initiativeMinutes(_ minutes: Int) -> String {
+        String(format: value("initiative.minutes.format"), minutes)
+    }
+
+    static func initiativeDeliveries(_ count: Int) -> String {
+        String(format: value("initiative.deliveries.format"), count)
     }
 
     static func attachmentCount(_ count: Int) -> String {

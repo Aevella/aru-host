@@ -21,9 +21,11 @@ final class HostConsoleRuntime: ObservableObject {
     @Published private(set) var driverInventory: AgentDriverInventory?
     @Published private(set) var collaborators: [HostedCollaborator] = []
     @Published private(set) var collaboratorSurfaces: [String: [HostCollaboratorSurface]] = [:]
+    @Published var collaboratorProjects: [String: [HostCollaboratorProject]] = [:]
     @Published private(set) var collaboratorConversations: [String: [HostCollaboratorConversation]] = [:]
     @Published private(set) var collaboratorConversationDetails: [String: HostCollaboratorConversation] = [:]
     @Published var collaboratorCognitions: [String: HostCollaboratorCognition] = [:]
+    @Published var collaboratorInitiatives: [String: HostCollaboratorInitiative] = [:]
     @Published private(set) var sectionErrors: [HostConsoleSection: String] = [:]
     @Published private(set) var loadingSections: Set<HostConsoleSection> = []
     @Published private(set) var mutatingPluginIds: Set<String> = []
@@ -32,8 +34,10 @@ final class HostConsoleRuntime: ObservableObject {
     @Published private(set) var isCreatingCollaborator = false
     @Published private(set) var mutatingCollaboratorIds: Set<String> = []
     @Published private(set) var mutatingSurfaceIds: Set<String> = []
+    @Published var mutatingProjectIds: Set<String> = []
     @Published private(set) var mutatingConversationIds: Set<String> = []
     @Published var mutatingCognitionIds: Set<String> = []
+    @Published var mutatingInitiativeIds: Set<String> = []
     @Published private(set) var isUpdatingJobPolicy = false
     @Published private(set) var isUpdatingWorkspaces = false
     @Published private(set) var isUpdatingNodeSettings = false

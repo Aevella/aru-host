@@ -20,9 +20,12 @@ jobs:
         run: |
           bash tests/http-smoke.sh
           bash tests/installer-smoke.sh
+          node tests/apns-push-smoke.mjs
           node tests/collaborator-host-smoke.mjs
           node tests/collaborator-cognition-smoke.mjs
           node tests/collaborator-conversation-smoke.mjs
+          node tests/collaborator-initiative-smoke.mjs
+          node tests/collaborator-project-smoke.mjs
           node tests/direct-api-driver-smoke.mjs
           node tests/provider-profiles-smoke.mjs
           node tests/conversation-turn-relay.test.mjs

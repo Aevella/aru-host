@@ -697,6 +697,59 @@ struct HostCollaboratorCognition: Decodable, Equatable, Sendable {
     let updatedAt: Int64
 }
 
+struct HostCollaboratorInitiativeRule: Decodable, Equatable, Identifiable, Sendable {
+    let ruleId: String
+    let title: String
+    let goal: String
+    let instructions: String
+    let conversationId: String?
+    let nextFireAt: Int64?
+    let recurrenceMinutes: Int?
+    let notificationsEnabled: Bool
+    let enabled: Bool
+    let deliveryCount: Int
+    let lastAttemptAt: Int64?
+    let lastDeliveredAt: Int64?
+    let lastFailure: String?
+    let runningAt: Int64?
+    let createdAt: Int64
+    let updatedAt: Int64
+    let archivedAt: Int64?
+
+    var id: String { ruleId }
+    var isArchived: Bool { archivedAt != nil }
+    var isRunning: Bool { runningAt != nil }
+}
+
+struct HostCollaboratorInitiative: Decodable, Equatable, Sendable {
+    let schema: String
+    let collaboratorId: String
+    let revision: Int
+    let rules: [HostCollaboratorInitiativeRule]
+    let createdAt: Int64
+    let updatedAt: Int64
+}
+
+struct CreateHostCollaboratorInitiativeRuleBody: Encodable, Sendable {
+    let expectedRevision: Int
+    let title: String
+    let goal: String
+    let instructions: String
+    let nextFireAt: Int64
+    let recurrenceMinutes: Int?
+    let notificationsEnabled: Bool
+    let enabled: Bool
+}
+
+struct UpdateHostCollaboratorInitiativeRuleBody: Encodable, Sendable {
+    let expectedRevision: Int
+    let enabled: Bool
+}
+
+struct MutateHostCollaboratorInitiativeRuleBody: Encodable, Sendable {
+    let expectedRevision: Int
+}
+
 struct UpdateHostCollaboratorCognitionBody: Encodable, Sendable {
     let expectedRevision: Int
     let instructionEnvironment: HostCollaboratorInstructionEnvironment
@@ -879,6 +932,82 @@ struct HostCollaboratorSurfaceInventory: Decodable, Sendable {
     let schema: String
     let collaboratorId: String
     let surfaces: [HostCollaboratorSurface]
+}
+
+struct HostCollaboratorProjectRepository: Decodable, Equatable, Sendable {
+    let state: String
+    let sourceURL: String?
+    let repositoryURL: String?
+    let branch: String?
+    let commit: String?
+    let dirty: Bool?
+    let upstream: String?
+    let ahead: Int?
+    let behind: Int?
+}
+
+struct HostCollaboratorProjectCheckpoint: Decodable, Equatable, Sendable {
+    let checkpointId: String
+    let ordinal: Int
+    let note: String
+    let artifactId: String
+    let createdAt: Int64
+}
+
+struct HostCollaboratorProject: Decodable, Equatable, Identifiable, Sendable {
+    let schema: String
+    let projectId: String
+    let collaboratorId: String
+    let title: String
+    let revision: Int
+    let workspacePath: String
+    let entryPath: String
+    let sourceURL: String?
+    let repositoryURL: String?
+    let surfaceId: String?
+    let checkpointCount: Int
+    let latestCheckpoint: HostCollaboratorProjectCheckpoint?
+    let createdAt: Int64
+    let updatedAt: Int64
+    let archivedAt: Int64?
+    let repository: HostCollaboratorProjectRepository?
+
+    var id: String { projectId }
+    var isArchived: Bool { archivedAt != nil }
+}
+
+struct HostCollaboratorProjectInventory: Decodable, Sendable {
+    let schema: String
+    let collaboratorId: String
+    let projects: [HostCollaboratorProject]
+}
+
+struct HostCollaboratorProjectCheckpointReceipt: Decodable, Sendable {
+    let project: HostCollaboratorProject
+    let artifact: HostArtifact
+}
+
+struct HostCollaboratorProjectPublishReceipt: Decodable, Sendable {
+    let project: HostCollaboratorProject
+    let surface: HostCollaboratorSurface
+}
+
+struct CreateHostCollaboratorProjectBody: Encodable, Sendable {
+    let title: String
+    let repositoryURL: String?
+    let entryPath: String
+}
+
+struct CheckpointHostCollaboratorProjectBody: Encodable, Sendable {
+    let expectedRevision: Int
+    let note: String
+}
+
+struct PublishHostCollaboratorProjectBody: Encodable, Sendable {
+    let expectedRevision: Int
+    let expectedSurfaceRevision: Int?
+    let note: String
+    let networkAccess: String
 }
 
 struct CreateHostCollaboratorSurfaceBody: Encodable, Sendable {
