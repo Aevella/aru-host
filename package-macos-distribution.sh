@@ -38,6 +38,12 @@ done
   || { echo "--version and --build are required" >&2; exit 1; }
 [[ -n "$NOTARY_PROFILE" ]] \
   || { echo "a notarytool Keychain profile is required" >&2; exit 1; }
+if [[ -z "$SIGNING_IDENTITY" ]]; then
+  SIGNING_IDENTITY="$(security find-identity -v -p codesigning \
+    | awk '/"Developer ID Application:/{print $2; exit}')"
+fi
+[[ -n "$SIGNING_IDENTITY" ]] \
+  || { echo "no Developer ID Application identity is available" >&2; exit 1; }
 [[ "$OUTPUT_DIR" == /* ]] || OUTPUT_DIR="$PWD/$OUTPUT_DIR"
 mkdir -p "$OUTPUT_DIR"
 
