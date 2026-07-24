@@ -11,11 +11,8 @@ struct NodeWorkspacesView: View {
             VStack(alignment: .leading, spacing: 22) {
                 HostSectionHeader(
                     title: L10n.computerFolders,
-                    subtitle: L10n.computerFoldersSubtitle,
-                    isLoading: runtime.loadingSections.contains(.workspaces)
-                ) {
-                    Task { await runtime.refresh(.workspaces) }
-                }
+                    subtitle: L10n.computerFoldersSubtitle
+                )
 
                 if let error = runtime.sectionErrors[.workspaces] ?? mutationError {
                     SectionErrorBanner(message: error)

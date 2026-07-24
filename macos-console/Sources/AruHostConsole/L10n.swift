@@ -18,6 +18,9 @@ enum L10n {
     static let appSubtitle = value("app.subtitle")
     static let refresh = value("refresh")
     static let refreshAll = value("refresh.all")
+    static let checkForUpdates = value("update.check")
+    static let updateReleaseUnavailable = value("error.update.release.unavailable")
+    static let updateAssetMissing = value("error.update.asset.missing")
     static let overview = value("overview")
     static let backupVault = value("backup.vault")
     static let mcpGateway = value("mcp.gateway")
@@ -244,6 +247,12 @@ enum L10n {
     static let noArtifactsDetail = value("no.artifacts.detail")
     static let collaboratorsSubtitle = value("collaborators.subtitle")
     static let findingHost = value("finding.host")
+    static let preparingHostCore = value("host.core.preparing")
+    static let preparingHostCoreDetail = value("host.core.preparing.detail")
+    static let hostCorePayloadMissing = value("error.host.core.payload.missing")
+    static let hostCoreReleaseInvalid = value("error.host.core.release.invalid")
+    static let hostCoreInstallerMissing = value("error.host.core.installer.missing")
+    static let hostCoreInstallFailed = value("error.host.core.install.failed")
     static let thisMac = value("this.mac")
     static let pairingExplanation = value("pairing.explanation")
     static let pairing = value("pairing")
@@ -383,6 +392,16 @@ enum L10n {
     static let surfaceRestored = value("surface.restored")
     static let surfaceMutationInProgress = value("surface.mutation.in.progress")
     static let surfaceRollbackNote = value("surface.rollback.note")
+    static let surfaceProject = value("surface.project")
+    static let surfaceProjectDetail = value("surface.project.detail")
+    static let surfaceProjectEntry = value("surface.project.entry")
+    static let surfaceProjectFiles = value("surface.project.files")
+    static let surfaceProjectBytes = value("surface.project.bytes")
+    static let surfacePersistentStorage = value("surface.runtime.storage")
+    static let surfacePersistentStorageDetail = value("surface.runtime.storage.detail")
+    static let surfaceNetworkAccess = value("surface.runtime.network")
+    static let surfaceNetworkAccessDetail = value("surface.runtime.network.detail")
+    static let surfaceRuntimeSaved = value("surface.runtime.saved")
     static let cancel = value("cancel")
     static let save = value("save")
     static let create = value("create")
@@ -498,6 +517,7 @@ enum L10n {
     static func pluginDraftDeleted(_ name: String) -> String { String(format: value("plugin.draft.deleted.format"), name) }
     static func pluginApplied(_ name: String) -> String { String(format: value("plugin.applied.format"), name) }
     static func pluginRolledBack(_ name: String, _ version: String) -> String { String(format: value("plugin.rolled.back.format"), name, version) }
+    static func updateAvailable(_ version: String) -> String { String(format: value("update.available.format"), version) }
     static func pluginUninstalled(_ name: String) -> String { String(format: value("plugin.uninstalled.format"), name) }
     static func pluginToolCount(_ count: Int) -> String { String(format: value("plugin.tool.count.format"), count) }
 

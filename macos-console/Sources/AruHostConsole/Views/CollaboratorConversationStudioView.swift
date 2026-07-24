@@ -18,7 +18,12 @@ struct CollaboratorConversationStudioView: View {
             conversationPane
         }
         .task {
-            await refreshDirectory(selectNewestWhenNeeded: true)
+            var shouldSelectNewest = true
+            while !Task.isCancelled {
+                await refreshDirectory(selectNewestWhenNeeded: shouldSelectNewest)
+                shouldSelectNewest = false
+                try? await Task.sleep(for: .seconds(3))
+            }
         }
         .task(id: selectedConversationId) {
             guard let selectedConversationId else { return }
@@ -79,17 +84,6 @@ struct CollaboratorConversationStudioView: View {
                 }
             }
             Spacer()
-            Button {
-                Task { await refreshDirectory(selectNewestWhenNeeded: false) }
-            } label: {
-                HStack(spacing: 7) {
-                    if isRefreshing { ProgressView().controlSize(.small) }
-                    else { Image(systemName: "arrow.clockwise") }
-                    Text(L10n.refresh)
-                }
-            }
-            .buttonStyle(FloatingGlassButtonStyle())
-            .disabled(isRefreshing)
         }
         .padding(16)
         .background(Color.white.opacity(0.10))
@@ -213,8 +207,11 @@ struct CollaboratorConversationStudioView: View {
     }
 
     private func messageBubble(_ message: HostCollaboratorConversationMessage) -> some View {
-        HStack {
+        HStack(alignment: .bottom, spacing: 8) {
             if message.role == "user" { Spacer(minLength: 120) }
+            if message.role != "user" {
+                HostedCollaboratorAvatar(collaborator: collaborator, size: 28)
+            }
             VStack(alignment: .leading, spacing: 7) {
                 Text(message.role == "user" ? L10n.you : collaborator.displayName)
                     .font(.system(size: 9.5, weight: .bold, design: .rounded))

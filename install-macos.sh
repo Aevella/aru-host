@@ -13,6 +13,7 @@ PORT=""
 SOURCE_DIR=""
 SOURCE_REF="main"
 BUNDLE_URL=""
+RELEASE_VERSION=""
 SKIP_DEPENDENCIES="false"
 SKIP_START="false"
 UNINSTALL="false"
@@ -40,6 +41,7 @@ Options:
   --source-dir DIR         Install payload from a local Host source directory.
   --source-ref REF         Download payload from this Aevella/aru-host ref (default: main).
   --bundle-url URL         Install a hash-verified macOS release tarball.
+  --release-version VER    Record the enclosing signed Host release version.
   --base-root DIR          Override the user-owned installation root.
   --skip-dependencies      Require an existing Node.js 22+ runtime.
   --skip-start             Install files without loading the LaunchAgent.
@@ -78,6 +80,7 @@ while (($#)); do
     --source-dir) SOURCE_DIR="${2:?missing value for --source-dir}"; shift 2 ;;
     --source-ref) SOURCE_REF="${2:?missing value for --source-ref}"; shift 2 ;;
     --bundle-url) BUNDLE_URL="${2:?missing value for --bundle-url}"; shift 2 ;;
+    --release-version) RELEASE_VERSION="${2:?missing value for --release-version}"; shift 2 ;;
     --base-root) BASE_ROOT="${2:?missing value for --base-root}"; shift 2 ;;
     --skip-dependencies) SKIP_DEPENDENCIES="true"; shift ;;
     --skip-start) SKIP_START="true"; shift ;;
@@ -94,6 +97,8 @@ done
 [[ "$TRANSPORT_KIND" == "lan" || "$TRANSPORT_KIND" == "tailscale" ]] \
   || die "transport kind must be lan or tailscale"
 [[ "$SOURCE_REF" =~ ^[A-Za-z0-9._/-]+$ ]] || die "source ref contains unsupported characters"
+[[ -z "$RELEASE_VERSION" || "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.]+)?$ ]] \
+  || die "release version must be a semantic version"
 [[ -z "$SOURCE_DIR" || -z "$BUNDLE_URL" ]] || die "choose --source-dir or --bundle-url, not both"
 
 if [[ -n "$INSTALL_ROOT" ]]; then
@@ -301,15 +306,17 @@ fetch_source_payload() {
     log "downloading hash-verified macOS release bundle"
     download "$BUNDLE_URL" -o "$SOURCE_TMP/bundle.tar.gz"
     download "${BUNDLE_URL}.sha256" -o "$SOURCE_TMP/bundle.tar.gz.sha256"
-    local expected actual entries expected_entries
+    local expected actual entries expected_entries expected_entries_with_release
     expected="$(awk '{print $1}' "$SOURCE_TMP/bundle.tar.gz.sha256")"
     actual="$(sha256_file "$SOURCE_TMP/bundle.tar.gz")"
     [[ "$expected" == "$actual" ]] || die "release bundle SHA-256 mismatch"
     entries="$(tar -tzf "$SOURCE_TMP/bundle.tar.gz" | LC_ALL=C sort)"
-    expected_entries="$(printf '%s\n' aru-selfhost-stub.mjs backup-settings.mjs conversation-turn-relay.mjs collaborator-host.mjs collaborator-cognition.mjs collaborator-surfaces.mjs collaborator-conversations.mjs codex-app-server-driver.mjs direct-api-driver.mjs provider-profiles.mjs provider-secret-store.mjs node-control.mjs node-workspaces.mjs plugin-supervisor.mjs plugin-workshop.mjs \
+    expected_entries="$(printf '%s\n' aru-selfhost-stub.mjs backup-settings.mjs conversation-turn-relay.mjs collaborator-host.mjs collaborator-cognition.mjs collaborator-surfaces.mjs collaborator-surface-bundles.mjs collaborator-conversations.mjs codex-app-server-driver.mjs direct-api-driver.mjs provider-profiles.mjs provider-secret-store.mjs node-control.mjs node-workspaces.mjs plugin-supervisor.mjs plugin-workshop.mjs \
       source-plugin-runtime.mjs source-plugin-runner.mjs \
       run-node.sh install-macos.sh aru-selfhostctl-macos | LC_ALL=C sort)"
-    [[ "$entries" == "$expected_entries" ]] || die "release bundle contains an unexpected file set"
+    expected_entries_with_release="$(printf '%s\n' "$expected_entries" release.json | LC_ALL=C sort)"
+    [[ "$entries" == "$expected_entries" || "$entries" == "$expected_entries_with_release" ]] \
+      || die "release bundle contains an unexpected file set"
     mkdir -p "$SOURCE_TMP/payload"
     tar -xzf "$SOURCE_TMP/bundle.tar.gz" -C "$SOURCE_TMP/payload"
     SOURCE_DIR="$SOURCE_TMP/payload"
@@ -317,7 +324,7 @@ fetch_source_payload() {
   fi
   local raw="$REPO_RAW_DEFAULT/$SOURCE_REF" file
   log "downloading macOS node payload from Aevella/aru-host@$SOURCE_REF"
-  for file in aru-selfhost-stub.mjs backup-settings.mjs conversation-turn-relay.mjs collaborator-host.mjs collaborator-cognition.mjs collaborator-surfaces.mjs collaborator-conversations.mjs codex-app-server-driver.mjs direct-api-driver.mjs provider-profiles.mjs provider-secret-store.mjs node-control.mjs node-workspaces.mjs plugin-supervisor.mjs plugin-workshop.mjs source-plugin-runtime.mjs source-plugin-runner.mjs run-node.sh install-macos.sh aru-selfhostctl-macos; do
+  for file in aru-selfhost-stub.mjs backup-settings.mjs conversation-turn-relay.mjs collaborator-host.mjs collaborator-cognition.mjs collaborator-surfaces.mjs collaborator-surface-bundles.mjs collaborator-conversations.mjs codex-app-server-driver.mjs direct-api-driver.mjs provider-profiles.mjs provider-secret-store.mjs node-control.mjs node-workspaces.mjs plugin-supervisor.mjs plugin-workshop.mjs source-plugin-runtime.mjs source-plugin-runner.mjs run-node.sh install-macos.sh aru-selfhostctl-macos; do
     download "$raw/$file" -o "$SOURCE_TMP/$file"
   done
   SOURCE_DIR="$SOURCE_TMP"
@@ -325,12 +332,25 @@ fetch_source_payload() {
 
 SOURCE_INPUT_DIR="$SOURCE_DIR"
 fetch_source_payload
-for file in aru-selfhost-stub.mjs backup-settings.mjs conversation-turn-relay.mjs collaborator-host.mjs collaborator-cognition.mjs collaborator-surfaces.mjs collaborator-conversations.mjs codex-app-server-driver.mjs direct-api-driver.mjs provider-profiles.mjs provider-secret-store.mjs node-control.mjs node-workspaces.mjs plugin-supervisor.mjs plugin-workshop.mjs source-plugin-runtime.mjs source-plugin-runner.mjs run-node.sh install-macos.sh aru-selfhostctl-macos; do
+if [[ -z "$RELEASE_VERSION" && -f "$SOURCE_DIR/release.json" ]]; then
+  RELEASE_VERSION="$($NODE_BINARY -e '
+    const fs = require("node:fs");
+    const release = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+    if (release.schema !== "aru.host.release.v1" || typeof release.version !== "string") process.exit(2);
+    process.stdout.write(release.version);
+  ' "$SOURCE_DIR/release.json")" || die "payload release metadata is invalid"
+  [[ "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.]+)?$ ]] \
+    || die "payload release version must be a semantic version"
+fi
+for file in aru-selfhost-stub.mjs backup-settings.mjs conversation-turn-relay.mjs collaborator-host.mjs collaborator-cognition.mjs collaborator-surfaces.mjs collaborator-surface-bundles.mjs collaborator-conversations.mjs codex-app-server-driver.mjs direct-api-driver.mjs provider-profiles.mjs provider-secret-store.mjs node-control.mjs node-workspaces.mjs plugin-supervisor.mjs plugin-workshop.mjs source-plugin-runtime.mjs source-plugin-runner.mjs run-node.sh install-macos.sh aru-selfhostctl-macos; do
   [[ -f "$SOURCE_DIR/$file" ]] || die "payload is missing $file"
 done
 
 release_stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 release_ref="$(printf '%s' "$SOURCE_REF" | tr '/ ' '--' | tr -cd 'A-Za-z0-9._-')"
+if [[ -n "$RELEASE_VERSION" ]]; then
+  release_ref="host-$RELEASE_VERSION"
+fi
 release_id="${release_ref:-bundle}-$release_stamp"
 suffix=1
 while [[ -e "$RELEASES_DIR/$release_id" ]]; do
@@ -347,6 +367,7 @@ install -m 0644 "$SOURCE_DIR/conversation-turn-relay.mjs" "$RELEASES_DIR/$releas
 install -m 0644 "$SOURCE_DIR/collaborator-host.mjs" "$RELEASES_DIR/$release_id/collaborator-host.mjs"
 install -m 0644 "$SOURCE_DIR/collaborator-cognition.mjs" "$RELEASES_DIR/$release_id/collaborator-cognition.mjs"
 install -m 0644 "$SOURCE_DIR/collaborator-surfaces.mjs" "$RELEASES_DIR/$release_id/collaborator-surfaces.mjs"
+install -m 0644 "$SOURCE_DIR/collaborator-surface-bundles.mjs" "$RELEASES_DIR/$release_id/collaborator-surface-bundles.mjs"
 install -m 0644 "$SOURCE_DIR/collaborator-conversations.mjs" "$RELEASES_DIR/$release_id/collaborator-conversations.mjs"
 install -m 0644 "$SOURCE_DIR/codex-app-server-driver.mjs" "$RELEASES_DIR/$release_id/codex-app-server-driver.mjs"
 install -m 0644 "$SOURCE_DIR/direct-api-driver.mjs" "$RELEASES_DIR/$release_id/direct-api-driver.mjs"
@@ -430,6 +451,7 @@ ARU_INSTALL_DISPLAY_NAME="$DISPLAY_NAME"
 ARU_INSTALL_PORT="$PORT"
 ARU_INSTALL_SOURCE_REF="$SOURCE_REF"
 ARU_INSTALL_BUNDLE_URL="$BUNDLE_URL"
+ARU_INSTALL_RELEASE_VERSION="$RELEASE_VERSION"
 ARU_INSTALL_SOURCE_DIR=""
 if [[ -n "$SOURCE_INPUT_DIR" ]]; then
   ARU_INSTALL_SOURCE_DIR="$SOURCE_DIR"
@@ -437,7 +459,7 @@ fi
 write_env "$INSTALL_ENV" ARU_INSTALL_INSTANCE ARU_INSTALL_BASE_ROOT \
   ARU_INSTALL_BASE_URL ARU_INSTALL_TRANSPORT_KIND ARU_INSTALL_DISPLAY_NAME \
   ARU_INSTALL_PORT ARU_INSTALL_SOURCE_REF ARU_INSTALL_BUNDLE_URL \
-  ARU_INSTALL_SOURCE_DIR
+  ARU_INSTALL_RELEASE_VERSION ARU_INSTALL_SOURCE_DIR
 
 xml_escape() {
   printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' \

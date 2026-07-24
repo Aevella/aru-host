@@ -10,11 +10,8 @@ struct BackupVaultView: View {
             VStack(alignment: .leading, spacing: 22) {
                 HostSectionHeader(
                     title: L10n.backupVault,
-                    subtitle: L10n.backupSubtitle,
-                    isLoading: runtime.loadingSections.contains(.backups)
-                ) {
-                    Task { await runtime.refresh(.backups) }
-                }
+                    subtitle: L10n.backupSubtitle
+                )
                 if let error = runtime.sectionErrors[.backups] ?? mutationError {
                     SectionErrorBanner(message: error)
                 }

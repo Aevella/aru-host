@@ -8,14 +8,17 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import { createCollaboratorSurfaceBundleStore } from "./collaborator-surface-bundles.mjs";
 
 const SURFACE_INVENTORY_SCHEMA = "aru.selfhost.collaborator-surface-inventory.v1";
 const SURFACE_SCHEMA = "aru.selfhost.collaborator-surface.v1";
 const SURFACE_VERSION_SCHEMA = "aru.selfhost.collaborator-surface-version.v1";
 const SURFACE_EVENT_INVENTORY_SCHEMA = "aru.selfhost.collaborator-surface-event-inventory.v1";
+const SURFACE_STORAGE_MODE = "isolated-persistent";
 
 export function createCollaboratorSurfaceHost({
   dataDir,
+  workspaceRoot = join(dataDir, "collaborator-workspaces"),
   readJSONBody,
   sendJSON,
   HttpError,
@@ -23,6 +26,11 @@ export function createCollaboratorSurfaceHost({
 }) {
   const root = join(dataDir, "collaborator-surfaces");
   mkdirSync(root, { recursive: true });
+  const bundles = createCollaboratorSurfaceBundleStore({
+    dataDir,
+    workspaceRoot,
+    HttpError,
+  });
 
   async function route(req, res, path, requireDevice, collaboratorForId) {
     const inventoryMatch = path.match(
@@ -41,6 +49,16 @@ export function createCollaboratorSurfaceHost({
         return true;
       }
       return false;
+    }
+
+    const bundleMatch = path.match(
+      /^\/aru\/v1\/hosted-collaborators\/([^/]+)\/surfaces\/([^/]+)\/versions\/([^/]+)\/bundle$/,
+    );
+    if (bundleMatch && req.method === "GET") {
+      const collaborator = collaboratorForId(bundleMatch[1]);
+      requireDevice();
+      sendJSON(res, 200, bundle(collaborator.collaboratorId, bundleMatch[2], bundleMatch[3]));
+      return true;
     }
 
     const versionMatch = path.match(
@@ -72,7 +90,7 @@ export function createCollaboratorSurfaceHost({
     }
 
     const actionMatch = path.match(
-      /^\/aru\/v1\/hosted-collaborators\/([^/]+)\/surfaces\/([^/]+)\/(state|rollback|archive|restore)$/,
+      /^\/aru\/v1\/hosted-collaborators\/([^/]+)\/surfaces\/([^/]+)\/(state|runtime|rollback|archive|restore)$/,
     );
     if (actionMatch) {
       if (req.method !== "PUT" && req.method !== "POST") return false;
@@ -81,6 +99,8 @@ export function createCollaboratorSurfaceHost({
       const body = await readJSONBody(req, 32 * 1024 * 1024);
       const result = actionMatch[3] === "state"
         ? updateState(collaborator.collaboratorId, actionMatch[2], body, device)
+        : actionMatch[3] === "runtime"
+          ? updateRuntime(collaborator.collaboratorId, actionMatch[2], body, device)
         : actionMatch[3] === "rollback"
           ? rollback(collaborator.collaboratorId, actionMatch[2], body, device)
           : setArchived(collaborator.collaboratorId, actionMatch[2], actionMatch[3] === "archive", body, device);
@@ -144,6 +164,37 @@ export function createCollaboratorSurfaceHost({
       stateJSON: "{}",
       stateRevision: 1,
       stateUpdatedAt: timestamp,
+      networkAccess: validatedNetworkAccess(body.networkAccess ?? "none"),
+      versions: [initialVersion],
+      events: [],
+      nextEventSequence: 1,
+      createdByDeviceId: device.deviceId,
+      updatedByDeviceId: device.deviceId,
+    };
+    saveSurface(record);
+    return publicSurface(record);
+  }
+
+  function createProjectSurface(collaboratorId, body, device) {
+    const timestamp = now();
+    const surfaceId = `surface_${randomUUID()}`;
+    const versionId = `surfacever_${randomUUID()}`;
+    const release = bundles.publishableBundle(collaboratorId, surfaceId, versionId, body);
+    const initialVersion = makeBundleVersion(1, versionId, release, body.note, timestamp, device);
+    const record = {
+      schema: SURFACE_SCHEMA,
+      surfaceId,
+      collaboratorId,
+      title: validatedTitle(body.title),
+      revision: 1,
+      activeVersionId: initialVersion.versionId,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      archivedAt: null,
+      stateJSON: "{}",
+      stateRevision: 1,
+      stateUpdatedAt: timestamp,
+      networkAccess: validatedNetworkAccess(body.networkAccess ?? "none"),
       versions: [initialVersion],
       events: [],
       nextEventSequence: 1,
@@ -160,11 +211,14 @@ export function createCollaboratorSurfaceHost({
     if (record.archivedAt !== null) {
       throw new HttpError(409, "surface.archived", "archived surface must be restored before publishing");
     }
-    if (body.sourceHTML === undefined && body.title === undefined) {
-      throw new HttpError(400, "surface.no_changes", "sourceHTML or title required");
+    if (body.sourceHTML === undefined && body.title === undefined && body.networkAccess === undefined) {
+      throw new HttpError(400, "surface.no_changes", "sourceHTML, title, or networkAccess required");
     }
     const timestamp = now();
     if (body.title !== undefined) record.title = validatedTitle(body.title);
+    if (body.networkAccess !== undefined) {
+      record.networkAccess = validatedNetworkAccess(body.networkAccess);
+    }
     if (body.sourceHTML !== undefined) {
       const sourceHTML = validatedSourceHTML(body.sourceHTML);
       const active = activeVersion(record);
@@ -181,6 +235,36 @@ export function createCollaboratorSurfaceHost({
     return publicSurface(record);
   }
 
+  function publishProject(collaboratorId, surfaceId, body, device) {
+    const record = loadSurface(collaboratorId, surfaceId);
+    requireRevision(record, body.expectedRevision);
+    if (record.archivedAt !== null) {
+      throw new HttpError(409, "surface.archived", "archived surface must be restored before publishing");
+    }
+    const timestamp = now();
+    const versionId = `surfacever_${randomUUID()}`;
+    const release = bundles.publishableBundle(collaboratorId, surfaceId, versionId, body);
+    if (body.title !== undefined) record.title = validatedTitle(body.title);
+    if (body.networkAccess !== undefined) {
+      record.networkAccess = validatedNetworkAccess(body.networkAccess);
+    }
+    const next = makeBundleVersion(record.versions.length + 1, versionId, release, body.note, timestamp, device);
+    record.versions.push(next);
+    record.activeVersionId = next.versionId;
+    record.revision += 1;
+    record.updatedAt = timestamp;
+    record.updatedByDeviceId = device.deviceId;
+    saveSurface(record);
+    return publicSurface(record);
+  }
+
+  function bundle(collaboratorId, surfaceId, versionId) {
+    const record = loadSurface(collaboratorId, surfaceId);
+    const found = record.versions.find((candidate) => candidate.versionId === validatedVersionId(versionId));
+    if (!found) throw new HttpError(404, "surface.version_unknown", "unknown surface version");
+    return bundles.bundle(record.collaboratorId, record.surfaceId, found);
+  }
+
   function rollback(collaboratorId, surfaceId, body, device) {
     const record = loadSurface(collaboratorId, surfaceId);
     requireRevision(record, body.expectedRevision);
@@ -191,13 +275,15 @@ export function createCollaboratorSurfaceHost({
     const target = record.versions.find((candidate) => candidate.versionId === targetId);
     if (!target) throw new HttpError(404, "surface.version_unknown", "unknown surface version");
     const timestamp = now();
-    const next = makeVersion(
-      record.versions.length + 1,
-      target.sourceHTML,
-      body.note ?? `Rollback to version ${target.ordinal}`,
-      timestamp,
-      device,
-    );
+    const next = target.delivery === "bundle"
+      ? cloneBundleVersion(record.versions.length + 1, target, body.note ?? `Rollback to version ${target.ordinal}`, timestamp, device)
+      : makeVersion(
+        record.versions.length + 1,
+        target.sourceHTML,
+        body.note ?? `Rollback to version ${target.ordinal}`,
+        timestamp,
+        device,
+      );
     next.restoredFromVersionId = target.versionId;
     record.versions.push(next);
     record.activeVersionId = next.versionId;
@@ -219,6 +305,17 @@ export function createCollaboratorSurfaceHost({
     record.stateJSON = normalizedStateJSON(body.stateJSON);
     record.stateRevision += 1;
     record.stateUpdatedAt = now();
+    record.updatedByDeviceId = device.deviceId;
+    saveSurface(record);
+    return publicSurface(record);
+  }
+
+  function updateRuntime(collaboratorId, surfaceId, body, device) {
+    const record = loadSurface(collaboratorId, surfaceId);
+    requireRevision(record, body.expectedRevision);
+    record.networkAccess = validatedNetworkAccess(body.networkAccess);
+    record.revision += 1;
+    record.updatedAt = now();
     record.updatedByDeviceId = device.deviceId;
     saveSurface(record);
     return publicSurface(record);
@@ -304,8 +401,25 @@ export function createCollaboratorSurfaceHost({
         expectedRevision: { type: "integer", minimum: 1, description: "Required when updating an existing surface." },
         title: id("User-visible surface title."),
         sourceHTML: id("Complete HTML document with inline CSS and JavaScript."),
+        networkAccess: networkAccessSchema(),
         note: { type: "string", description: "Optional version note." },
       }, [...ownerRequired, "title", "sourceHTML"]),
+      operation("aru_collaborator_surface_publish_project", "Publish collaborator page project", `Publish a multi-file web build from ${scope} managed computer workspace. The Host stores an immutable resource bundle and phones run that exact release.`, {
+        ...ownerProperties,
+        surfaceId: id("Existing surface id; omit to create."),
+        expectedRevision: { type: "integer", minimum: 1, description: "Required when updating an existing surface." },
+        title: id("User-visible surface title."),
+        projectPath: { type: "string", minLength: 1, description: "Directory relative to your managed workspace that contains the built web files." },
+        entryPath: { type: "string", minLength: 1, description: "HTML entry path relative to projectPath; defaults to index.html." },
+        networkAccess: networkAccessSchema(),
+        note: { type: "string", description: "Optional version note." },
+      }, [...ownerRequired, "title", "projectPath"]),
+      operation("aru_collaborator_surface_runtime", "Set collaborator surface runtime", `Set ${scope} visible runtime permissions without publishing a code version. Persistent browser storage remains isolated per surface and per device.`, {
+        ...ownerProperties,
+        surfaceId: id("Surface id."),
+        expectedRevision: { type: "integer", minimum: 1, description: "Current surface revision." },
+        networkAccess: networkAccessSchema(),
+      }, [...ownerRequired, "surfaceId", "expectedRevision", "networkAccess"]),
       operation("aru_collaborator_surface_events", "Read collaborator surface events", `Read durable typed interaction events sent from ${scope} phone surface.`, { ...ownerProperties, surfaceId: id("Surface id.") }, [...ownerRequired, "surfaceId"], true),
       operation("aru_collaborator_surface_rollback", "Roll back collaborator surface", `Publish a new version of ${scope} surface by restoring an earlier immutable version.`, {
         ...ownerProperties, surfaceId: id("Surface id."), versionId: id("Earlier version id."), expectedRevision: { type: "integer", minimum: 1 }, note: { type: "string" },
@@ -341,8 +455,21 @@ export function createCollaboratorSurfaceHost({
         : createSurface(collaboratorId, args, device);
       return { matched: true, value };
     }
+    if (name === "aru_collaborator_surface_publish_project") {
+      const surfaceId = String(args.surfaceId ?? "").trim();
+      const value = surfaceId
+        ? publishProject(collaboratorId, surfaceId, args, device)
+        : createProjectSurface(collaboratorId, args, device);
+      return { matched: true, value };
+    }
     if (name === "aru_collaborator_surface_events") {
       return { matched: true, value: eventInventory(collaboratorId, requiredString(args, "surfaceId")) };
+    }
+    if (name === "aru_collaborator_surface_runtime") {
+      return {
+        matched: true,
+        value: updateRuntime(collaboratorId, requiredString(args, "surfaceId"), args, device),
+      };
     }
     if (name === "aru_collaborator_surface_rollback") {
       return { matched: true, value: rollback(collaboratorId, requiredString(args, "surfaceId"), args, device) };
@@ -385,6 +512,15 @@ export function createCollaboratorSurfaceHost({
     record.stateJSON ??= "{}";
     record.stateRevision ??= 1;
     record.stateUpdatedAt ??= record.updatedAt;
+    record.networkAccess = validatedNetworkAccess(record.networkAccess ?? "none");
+    for (const version of record.versions ?? []) {
+      version.delivery ??= "inline";
+      version.releaseId ??= null;
+      version.projectPath ??= null;
+      version.entryPath ??= null;
+      version.files ??= [];
+      version.byteCount ??= Buffer.byteLength(version.sourceHTML ?? "");
+    }
     return record;
   }
 
@@ -405,6 +541,13 @@ export function createCollaboratorSurfaceHost({
       stateRevision: record.stateRevision,
       stateUpdatedAt: record.stateUpdatedAt,
       eventCount: record.events.length,
+      networkAccess: record.networkAccess,
+      storageMode: SURFACE_STORAGE_MODE,
+      delivery: active.delivery,
+      projectPath: active.projectPath,
+      entryPath: active.entryPath,
+      files: active.files,
+      byteCount: active.byteCount,
     };
   }
 
@@ -419,7 +562,7 @@ export function createCollaboratorSurfaceHost({
   }
 
   function publicVersion(entry, includesSource) {
-    const { createdByDeviceId: _, sourceHTML, ...safe } = entry;
+    const { createdByDeviceId: _, sourceHTML, releaseId: __, ...safe } = entry;
     return {
       schema: SURFACE_VERSION_SCHEMA,
       ...safe,
@@ -431,12 +574,49 @@ export function createCollaboratorSurfaceHost({
     return {
       versionId: `surfacever_${randomUUID()}`,
       ordinal,
+      delivery: "inline",
+      releaseId: null,
+      projectPath: null,
+      entryPath: null,
+      files: [],
+      byteCount: Buffer.byteLength(sourceHTML),
       sourceHTML,
       contentSHA256: createHash("sha256").update(sourceHTML).digest("hex"),
       note: String(note ?? "").trim(),
       createdAt: timestamp,
       createdByDeviceId: device.deviceId,
       restoredFromVersionId: null,
+    };
+  }
+
+  function makeBundleVersion(ordinal, versionId, release, note, timestamp, device) {
+    return {
+      versionId,
+      ordinal,
+      delivery: "bundle",
+      releaseId: release.releaseId,
+      projectPath: release.projectPath,
+      entryPath: release.entryPath,
+      files: release.files,
+      byteCount: release.byteCount,
+      sourceHTML: null,
+      contentSHA256: release.contentSHA256,
+      note: String(note ?? "").trim(),
+      createdAt: timestamp,
+      createdByDeviceId: device.deviceId,
+      restoredFromVersionId: null,
+    };
+  }
+
+  function cloneBundleVersion(ordinal, target, note, timestamp, device) {
+    return {
+      ...target,
+      versionId: `surfacever_${randomUUID()}`,
+      ordinal,
+      note: String(note ?? "").trim(),
+      createdAt: timestamp,
+      createdByDeviceId: device.deviceId,
+      restoredFromVersionId: target.versionId,
     };
   }
 
@@ -494,6 +674,22 @@ export function createCollaboratorSurfaceHost({
   function validatedSourceHTML(value) {
     if (typeof value !== "string" || !value.trim()) throw new HttpError(400, "surface.source_required", "sourceHTML required");
     return value;
+  }
+
+  function validatedNetworkAccess(value) {
+    const access = String(value ?? "").trim();
+    if (access !== "none" && access !== "outbound") {
+      throw new HttpError(400, "surface.network_access_invalid", "networkAccess must be none or outbound");
+    }
+    return access;
+  }
+
+  function networkAccessSchema() {
+    return {
+      type: "string",
+      enum: ["none", "outbound"],
+      description: "Use outbound only when this surface must call user-configured APIs, cloud backup, remote media, or other internet resources. The current value is visible and editable on phone and Host Console.",
+    };
   }
 
   function requiredString(args, name) {

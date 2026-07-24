@@ -16,11 +16,8 @@ struct PluginSupervisorView: View {
             VStack(alignment: .leading, spacing: 22) {
                 HostSectionHeader(
                     title: L10n.plugins,
-                    subtitle: L10n.pluginsSubtitle,
-                    isLoading: runtime.loadingSections.contains(.plugins)
-                ) {
-                    Task { await runtime.refresh(.plugins) }
-                }
+                    subtitle: L10n.pluginsSubtitle
+                )
 
                 actionBar
 

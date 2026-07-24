@@ -2,8 +2,29 @@ import Foundation
 import Testing
 @testable import AruHostConsole
 
+@Test func readsBundledHostReleaseVersionFromInstallerState() {
+    #expect(BundledHostCoreInstaller.installedReleaseVersion(in: "ARU_INSTALL_RELEASE_VERSION=0.28.0\n") == "0.28.0")
+    #expect(BundledHostCoreInstaller.installedReleaseVersion(in: "ARU_INSTALL_RELEASE_VERSION='0.28.1'\n") == "0.28.1")
+    #expect(BundledHostCoreInstaller.installedReleaseVersion(in: "ARU_INSTALL_SOURCE_REF=main\n") == nil)
+}
+
+@Test func comparesStableAndPrereleaseHostVersions() {
+    #expect(HostSemanticVersion.isNewer("0.28.1", than: "0.28.0"))
+    #expect(HostSemanticVersion.isNewer("0.28.0", than: "0.28.0-dev"))
+    #expect(!HostSemanticVersion.isNewer("0.28.0", than: "0.28.0"))
+    #expect(!HostSemanticVersion.isNewer("0.27.9", than: "0.28.0"))
+    #expect(!HostSemanticVersion.isNewer("latest", than: "0.28.0"))
+}
+
+@Test func visibleHostSectionsOwnAutomaticRefreshCadence() {
+    #expect(HostConsoleSection.runtime.automaticRefreshSeconds == 3)
+    #expect(HostConsoleSection.collaborators.automaticRefreshSeconds == 8)
+    #expect(HostConsoleSection.mcp.automaticRefreshSeconds == 15)
+    #expect(HostConsoleSection.allCases.allSatisfy { $0.automaticRefreshSeconds > 0 })
+}
+
 @Test func extractsOnlyCompletePairingLinksFromControlOutput() {
-    let link = "aru://pair?canonicalUrl=http://ExampleMac.local:8787&serverId=home-mac&pairingToken=secret"
+    let link = "aru://pair?canonicalUrl=http://example-mac.local:8787&serverId=home-mac&pairingToken=secret"
     #expect(LocalPairingIssuer.pairingLink(from: "restarting\n\(link)\nready") == link)
     #expect(LocalPairingIssuer.pairingLink(from: "aru://pair?serverId=home-mac") == nil)
     #expect(LocalPairingIssuer.pairingLink(from: "https://example.com") == nil)
@@ -33,6 +54,61 @@ import Testing
     #expect(roots.collaborators.isEmpty)
 }
 
+@Test @MainActor func computerCollaboratorAvatarMatchesAruStablePresetRule() {
+    #expect(HostCollaboratorAvatarPreset.count == 36)
+    #expect(HostCollaboratorAvatarPreset.assetName(for: "hostcol_1")
+            == "AvatarPresetCollaborator04")
+    #expect(HostCollaboratorAvatarPreset.assetName(for: "hostcol_1")
+            == HostCollaboratorAvatarPreset.assetName(for: "hostcol_1"))
+    #expect(HostCollaboratorAvatarPreset.resourceURL(for: "hostcol_1") != nil)
+    #expect(HostCollaboratorAvatarPreset.image(for: "hostcol_1") != nil)
+}
+
+@Test func decodesCollaboratorSurfaceProjectBundle() throws {
+    let surface = try JSONDecoder().decode(HostCollaboratorSurface.self, from: Data(#"""
+    {
+      "schema":"aru.selfhost.collaborator-surface.v1",
+      "surfaceId":"surface_1",
+      "collaboratorId":"hostcol_1",
+      "title":"Aelion's room",
+      "revision":2,
+      "activeVersionId":"version_2",
+      "activeVersionOrdinal":2,
+      "contentSHA256":"releasehash",
+      "createdAt":100,
+      "updatedAt":200,
+      "archivedAt":null,
+      "stateRevision":0,
+      "stateUpdatedAt":200,
+      "eventCount":0,
+      "sourceHTML":null,
+      "stateJSON":"{}",
+      "delivery":"bundle",
+      "projectPath":"pages/room",
+      "entryPath":"index.html",
+      "byteCount":24,
+      "files":[{"path":"index.html","sha256":"htmlhash","byteCount":12,"mimeType":"text/html"}],
+      "versions":[]
+    }
+    """#.utf8))
+    #expect(surface.delivery == "bundle")
+    #expect(surface.files?.first?.path == "index.html")
+
+    let bundle = try JSONDecoder().decode(HostCollaboratorSurfaceBundle.self, from: Data(#"""
+    {
+      "schema":"aru.selfhost.collaborator-surface-bundle.v1",
+      "collaboratorId":"hostcol_1",
+      "surfaceId":"surface_1",
+      "versionId":"version_2",
+      "contentSHA256":"releasehash",
+      "entryPath":"index.html",
+      "byteCount":12,
+      "files":[{"path":"index.html","sha256":"htmlhash","byteCount":12,"mimeType":"text/html","contentBase64":"PGgxPkFydTwvaDE+"}]
+    }
+    """#.utf8))
+    #expect(String(data: try #require(bundle.files.first?.data), encoding: .utf8) == "<h1>Aru</h1>")
+}
+
 @Test func rejectsUnknownWireSchema() throws {
     let roots = try JSONDecoder().decode(HostedCollaboratorInventory.self, from: Data(#"""
     {"schema":"aru.selfhost.hosted-collaborator-inventory.v2","collaborators":[]}
@@ -53,7 +129,7 @@ import Testing
       "memories":[{
         "memoryId":"hostmem_1",
         "title":"Preferred name",
-        "content":"Use Star when invited.",
+        "content":"Use AA when invited.",
         "createdAt":100,
         "updatedAt":110,
         "archivedAt":null
@@ -85,7 +161,7 @@ import Testing
       "schema":"aru.selfhost.hosted-collaborator-inventory.v1",
       "collaborators":[{
         "collaboratorId":"hostcol_1234",
-        "displayName":"Mori",
+        "displayName":"Aelion",
         "driverId":"codex",
         "revision":3,
         "activationStatus":"driver-ready",
@@ -143,7 +219,7 @@ import Testing
       "schema":"aru.selfhost.hosted-collaborator-inventory.v1",
       "collaborators":[{
         "collaboratorId":"hostcol_1234",
-        "displayName":"Vale",
+        "displayName":"Example Collaborator",
         "driverId":"api",
         "providerProfileId":"provider_1234",
         "revision":1,
@@ -166,7 +242,7 @@ import Testing
         "schema":"aru.selfhost.collaborator-surface.v1",
         "surfaceId":"surface_1234",
         "collaboratorId":"hostcol_1234",
-        "title":"Mori's desk",
+        "title":"Aelion's desk",
         "revision":4,
         "activeVersionId":"surfacever_2",
         "activeVersionOrdinal":2,
@@ -176,20 +252,23 @@ import Testing
         "archivedAt":null,
         "stateRevision":3,
         "stateUpdatedAt":220,
-        "eventCount":7
+        "eventCount":7,
+        "networkAccess":"outbound",
+        "storageMode":"isolated-persistent"
       }]
     }
     """#.utf8))
     #expect(inventory.collaboratorId == "hostcol_1234")
     #expect(inventory.surfaces.first?.activeVersionOrdinal == 2)
     #expect(inventory.surfaces.first?.eventCount == 7)
+    #expect(inventory.surfaces.first?.allowsOutboundNetwork == true)
 
     let detail = try JSONDecoder().decode(HostCollaboratorSurface.self, from: Data(#"""
     {
       "schema":"aru.selfhost.collaborator-surface.v1",
       "surfaceId":"surface_1234",
       "collaboratorId":"hostcol_1234",
-      "title":"Mori's desk",
+      "title":"Aelion's desk",
       "revision":4,
       "activeVersionId":"surfacever_2",
       "activeVersionOrdinal":2,
@@ -200,6 +279,8 @@ import Testing
       "stateRevision":3,
       "stateUpdatedAt":220,
       "eventCount":7,
+      "networkAccess":"outbound",
+      "storageMode":"isolated-persistent",
       "sourceHTML":"<main>Hello</main>",
       "stateJSON":"{\"open\":true}",
       "versions":[{
@@ -216,6 +297,7 @@ import Testing
     #expect(detail.sourceHTML == "<main>Hello</main>")
     #expect(detail.stateJSON == #"{"open":true}"#)
     #expect(detail.versions?.first?.note == "Current")
+    #expect(detail.allowsOutboundNetwork)
 }
 
 @Test func decodesComputerCollaboratorConversationControlPlane() throws {

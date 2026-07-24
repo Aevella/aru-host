@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  appendFileSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -137,14 +138,26 @@ export function createConversationTurnRelay({
         redirect: "error",
         signal: controller.signal,
       });
-      const result = Buffer.from(await response.arrayBuffer());
       const filename = `${turn.turnId}.response`;
       const finalPath = join(resultDirectory, filename);
       temporaryPath = `${finalPath}.${process.pid}.tmp`;
-      writeFileSync(temporaryPath, result, { mode: 0o600 });
-      renameSync(temporaryPath, finalPath);
+      const temporaryFilename = `${filename}.${process.pid}.tmp`;
+      writeFileSync(temporaryPath, Buffer.alloc(0), { mode: 0o600 });
       turn.providerStatus = response.status;
       turn.providerContentType = response.headers.get("content-type") ?? "application/octet-stream";
+      turn.resultFilename = temporaryFilename;
+      turn.updatedAt = Date.now();
+      saveState();
+      if (response.body) {
+        for await (const chunk of response.body) {
+          if (!chunk?.byteLength) continue;
+          appendFileSync(temporaryPath, Buffer.from(chunk));
+          turn.updatedAt = Date.now();
+        }
+      } else {
+        appendFileSync(temporaryPath, Buffer.from(await response.arrayBuffer()));
+      }
+      renameSync(temporaryPath, finalPath);
       turn.resultFilename = filename;
       turn.state = response.ok ? "succeeded" : "failed";
       if (!response.ok) {
@@ -245,7 +258,11 @@ export function createConversationTurnRelay({
     };
     if (includeResult && turn.resultFilename) {
       const path = join(resultDirectory, turn.resultFilename);
-      if (existsSync(path)) value.resultBase64 = readFileSync(path).toString("base64");
+      if (existsSync(path)) {
+        const result = readFileSync(path);
+        value.resultByteCount = result.byteLength;
+        if (result.byteLength > 0) value.resultBase64 = result.toString("base64");
+      }
     }
     return value;
   }

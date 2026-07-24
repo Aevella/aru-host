@@ -220,6 +220,7 @@ surface_id="$(printf '%s' "$surface_created" | node -e '
     if(p.schema!=="aru.selfhost.collaborator-surface.v1"||p.revision!==1||p.stateRevision!==1)process.exit(1);
     if(p.activeVersionOrdinal!==1||p.versions?.length!==1||p.versions[0]?.ordinal!==1)process.exit(2);
     if(!p.sourceHTML?.includes("PolarisRoom.emit")||p.stateJSON!=="{}")process.exit(3);
+    if(p.networkAccess!=="none"||p.storageMode!=="isolated-persistent")process.exit(4);
     process.stdout.write(p.surfaceId);
   });')"
 surface_initial_version_id="$(printf '%s' "$surface_created" | node -e '
@@ -258,6 +259,15 @@ curl -fsS -X POST "http://127.0.0.1:$port/aru/v1/hosted-collaborators/$hosted_co
       let b="";process.stdin.on("data",c=>b+=c);process.stdin.on("end",()=>{
         const p=JSON.parse(b);if(p.schema!=="aru.selfhost.collaborator-surface-event.v1"||p.sequence!==1)process.exit(1);
       });'
+
+curl -fsS -X PUT "http://127.0.0.1:$port/aru/v1/hosted-collaborators/$hosted_collaborator_id/surfaces/$surface_id/runtime" \
+  -H 'content-type: application/json' \
+  -H "authorization: Bearer $credential" \
+  --data '{"expectedRevision":1,"networkAccess":"outbound"}' \
+  | node -e '
+      let b="";process.stdin.on("data",c=>b+=c);process.stdin.on("end",()=>{
+        const p=JSON.parse(b);if(p.revision!==2||p.networkAccess!=="outbound"||p.storageMode!=="isolated-persistent")process.exit(1);
+      });'
 curl -fsS "http://127.0.0.1:$port/aru/v1/hosted-collaborators/$hosted_collaborator_id/surfaces/$surface_id/events" \
   -H "authorization: Bearer $credential" \
   | node -e '
@@ -268,7 +278,7 @@ curl -fsS "http://127.0.0.1:$port/aru/v1/hosted-collaborators/$hosted_collaborat
       });'
 
 surface_updated_html='<!doctype html><html><body><h1>Version two</h1></body></html>'
-surface_update_payload="$(node -e 'process.stdout.write(JSON.stringify({expectedRevision:1,title:"Phone canvas",sourceHTML:process.argv[1],note:"Second"}))' "$surface_updated_html")"
+surface_update_payload="$(node -e 'process.stdout.write(JSON.stringify({expectedRevision:2,title:"Phone canvas",sourceHTML:process.argv[1],note:"Second"}))' "$surface_updated_html")"
 curl -fsS -X PUT "http://127.0.0.1:$port/aru/v1/hosted-collaborators/$hosted_collaborator_id/surfaces/$surface_id" \
   -H 'content-type: application/json' \
   -H "authorization: Bearer $credential" \
@@ -276,7 +286,7 @@ curl -fsS -X PUT "http://127.0.0.1:$port/aru/v1/hosted-collaborators/$hosted_col
   | node -e '
       let b="";process.stdin.on("data",c=>b+=c);process.stdin.on("end",()=>{
         const p=JSON.parse(b);
-        if(p.revision!==2||p.activeVersionOrdinal!==2||p.versions?.map(v=>v.ordinal).join(",")!=="2,1")process.exit(1);
+        if(p.revision!==3||p.activeVersionOrdinal!==2||p.versions?.map(v=>v.ordinal).join(",")!=="2,1")process.exit(1);
         if(p.eventCount!==1||p.stateRevision!==2)process.exit(2);
       });'
 
@@ -284,11 +294,11 @@ stale_surface_status="$(curl -sS -o "$data_dir/stale-surface.json" -w '%{http_co
   -X PUT "http://127.0.0.1:$port/aru/v1/hosted-collaborators/$hosted_collaborator_id/surfaces/$surface_id" \
   -H 'content-type: application/json' \
   -H "authorization: Bearer $credential" \
-  --data '{"expectedRevision":1,"title":"Stale"}')"
+  --data '{"expectedRevision":2,"title":"Stale"}')"
 test "$stale_surface_status" = "409"
 grep -Fq 'surface.revision_conflict' "$data_dir/stale-surface.json"
 
-rollback_payload="$(node -e 'process.stdout.write(JSON.stringify({expectedRevision:2,versionId:process.argv[1],note:"Restore initial"}))' "$surface_initial_version_id")"
+rollback_payload="$(node -e 'process.stdout.write(JSON.stringify({expectedRevision:3,versionId:process.argv[1],note:"Restore initial"}))' "$surface_initial_version_id")"
 curl -fsS -X POST "http://127.0.0.1:$port/aru/v1/hosted-collaborators/$hosted_collaborator_id/surfaces/$surface_id/rollback" \
   -H 'content-type: application/json' \
   -H "authorization: Bearer $credential" \
@@ -296,7 +306,7 @@ curl -fsS -X POST "http://127.0.0.1:$port/aru/v1/hosted-collaborators/$hosted_co
   | node -e '
       let b="";process.stdin.on("data",c=>b+=c);process.stdin.on("end",()=>{
         const p=JSON.parse(b);const active=p.versions?.[0];
-        if(p.revision!==3||p.activeVersionOrdinal!==3||active?.restoredFromVersionId==null)process.exit(1);
+        if(p.revision!==4||p.activeVersionOrdinal!==3||active?.restoredFromVersionId==null)process.exit(1);
         if(!p.sourceHTML?.includes("PolarisRoom.emit"))process.exit(2);
       });'
 
@@ -310,18 +320,18 @@ curl -fsS "http://127.0.0.1:$port/aru/v1/hosted-collaborators/$hosted_collaborat
 curl -fsS -X POST "http://127.0.0.1:$port/aru/v1/hosted-collaborators/$hosted_collaborator_id/surfaces/$surface_id/archive" \
   -H 'content-type: application/json' \
   -H "authorization: Bearer $credential" \
-  --data '{"expectedRevision":3}' \
+  --data '{"expectedRevision":4}' \
   | node -e '
       let b="";process.stdin.on("data",c=>b+=c);process.stdin.on("end",()=>{
-        const p=JSON.parse(b);if(p.revision!==4||p.archivedAt==null)process.exit(1);
+        const p=JSON.parse(b);if(p.revision!==5||p.archivedAt==null)process.exit(1);
       });'
 curl -fsS -X POST "http://127.0.0.1:$port/aru/v1/hosted-collaborators/$hosted_collaborator_id/surfaces/$surface_id/restore" \
   -H 'content-type: application/json' \
   -H "authorization: Bearer $credential" \
-  --data '{"expectedRevision":4}' \
+  --data '{"expectedRevision":5}' \
   | node -e '
       let b="";process.stdin.on("data",c=>b+=c);process.stdin.on("end",()=>{
-        const p=JSON.parse(b);if(p.revision!==5||p.archivedAt!==null)process.exit(1);
+        const p=JSON.parse(b);if(p.revision!==6||p.archivedAt!==null)process.exit(1);
       });'
 
 managed_workspace_inventory="$(curl -fsS "http://127.0.0.1:$port/aru/v1/node-workspaces" \
@@ -666,7 +676,8 @@ printf '%s' "$mcp_tools" | node -e '
       "aru_plugin_status","aru_plugin_install","aru_plugin_enable",
       "aru_plugin_disable","aru_plugin_upgrade","aru_plugin_rollback","aru_plugin_uninstall",
       "aru_collaborator_surface_inventory","aru_collaborator_surface_read",
-      "aru_collaborator_surface_publish","aru_collaborator_surface_events",
+      "aru_collaborator_surface_publish","aru_collaborator_surface_publish_project",
+      "aru_collaborator_surface_runtime","aru_collaborator_surface_events",
       "aru_collaborator_surface_rollback"
     ];
     if(expected.some(name=>!names.includes(name))||names.length!==expected.length)process.exit(1);

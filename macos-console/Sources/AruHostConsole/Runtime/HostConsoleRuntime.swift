@@ -44,18 +44,23 @@ final class HostConsoleRuntime: ObservableObject {
 
     private let session: URLSession
     private let vault: HostCredentialVault
-    private let baseURL: URL
+    private let configuredBaseURL: URL?
+    private let hostCoreInstaller: any HostCoreInstalling
     private var credential: String?
 
     init(
         session: URLSession = .shared,
         vault: HostCredentialVault = HostCredentialVault(),
-        baseURL: URL = LocalHostLocator.baseURL()
+        baseURL: URL? = nil,
+        hostCoreInstaller: any HostCoreInstalling = BundledHostCoreInstaller()
     ) {
         self.session = session
         self.vault = vault
-        self.baseURL = baseURL
+        self.configuredBaseURL = baseURL
+        self.hostCoreInstaller = hostCoreInstaller
     }
+
+    private var baseURL: URL { configuredBaseURL ?? LocalHostLocator.baseURL() }
 
     var readyDriverCount: Int {
         driverInventory?.drivers.filter { $0.status == .ready }.count ?? 0
@@ -70,6 +75,13 @@ final class HostConsoleRuntime: ObservableObject {
     }
 
     func start() async {
+        phase = .preparingHost
+        do {
+            try await hostCoreInstaller.prepare()
+        } catch {
+            phase = .failure(error.localizedDescription)
+            return
+        }
         phase = .loading
         do {
             let manifest: HostManifest = try await request("/.well-known/aru.json")
@@ -140,11 +152,12 @@ final class HostConsoleRuntime: ObservableObject {
         }
     }
 
-    func refresh(_ section: HostConsoleSection) async {
+    func refresh(_ section: HostConsoleSection, forceDriverProbe: Bool = false) async {
+        guard !loadingSections.contains(section) else { return }
         loadingSections.insert(section)
         defer { loadingSections.remove(section) }
         do {
-            try await load(section, forceDriverProbe: section == .collaborators)
+            try await load(section, forceDriverProbe: forceDriverProbe && section == .collaborators)
             sectionErrors[section] = nil
             lastUpdated = Date()
         } catch HostConsoleHTTPError.unauthorized {
@@ -295,12 +308,21 @@ final class HostConsoleRuntime: ObservableObject {
             authenticated: true)
     }
 
+    func surfaceBundle(collaboratorId: String,
+                       surfaceId: String,
+                       versionId: String) async throws -> HostCollaboratorSurfaceBundle {
+        try await request(
+            "/aru/v1/hosted-collaborators/\(collaboratorId)/surfaces/\(surfaceId)/versions/\(versionId)/bundle",
+            authenticated: true)
+    }
+
     @discardableResult
     func publishSurface(collaborator: HostedCollaborator,
                         surface: HostCollaboratorSurface?,
                         title: String,
                         sourceHTML: String,
-                        note: String) async throws -> HostCollaboratorSurface {
+                        note: String,
+                        allowsOutboundNetwork: Bool) async throws -> HostCollaboratorSurface {
         let mutationId = surface?.surfaceId ?? "new::\(collaborator.id)"
         guard !mutatingSurfaceIds.contains(mutationId) else {
             throw HostConsoleHTTPError.server(L10n.surfaceMutationInProgress)
@@ -317,17 +339,41 @@ final class HostConsoleRuntime: ObservableObject {
                 expectedRevision: surface.revision,
                 title: title.trimmingCharacters(in: .whitespacesAndNewlines),
                 sourceHTML: sourceHTML,
-                note: note.trimmingCharacters(in: .whitespacesAndNewlines)))
+                note: note.trimmingCharacters(in: .whitespacesAndNewlines),
+                networkAccess: allowsOutboundNetwork ? "outbound" : "none"))
         } else {
             path = "/aru/v1/hosted-collaborators/\(collaborator.id)/surfaces"
             method = "POST"
             body = try JSONEncoder().encode(CreateHostCollaboratorSurfaceBody(
                 title: title.trimmingCharacters(in: .whitespacesAndNewlines),
                 sourceHTML: sourceHTML,
-                note: note.trimmingCharacters(in: .whitespacesAndNewlines)))
+                note: note.trimmingCharacters(in: .whitespacesAndNewlines),
+                networkAccess: allowsOutboundNetwork ? "outbound" : "none"))
         }
         let updated: HostCollaboratorSurface = try await request(
             path, method: method, body: body, authenticated: true)
+        try await refreshSurfaces(collaboratorId: collaborator.id)
+        lastUpdated = Date()
+        return updated
+    }
+
+    @discardableResult
+    func setSurfaceNetworkAccess(_ allowsOutboundNetwork: Bool,
+                                 collaborator: HostedCollaborator,
+                                 surface: HostCollaboratorSurface) async throws -> HostCollaboratorSurface {
+        guard !mutatingSurfaceIds.contains(surface.surfaceId) else {
+            throw HostConsoleHTTPError.server(L10n.surfaceMutationInProgress)
+        }
+        mutatingSurfaceIds.insert(surface.surfaceId)
+        defer { mutatingSurfaceIds.remove(surface.surfaceId) }
+        let body = try JSONEncoder().encode(UpdateHostCollaboratorSurfaceRuntimeBody(
+            expectedRevision: surface.revision,
+            networkAccess: allowsOutboundNetwork ? "outbound" : "none"))
+        let updated: HostCollaboratorSurface = try await request(
+            "/aru/v1/hosted-collaborators/\(collaborator.id)/surfaces/\(surface.surfaceId)/runtime",
+            method: "PUT",
+            body: body,
+            authenticated: true)
         try await refreshSurfaces(collaboratorId: collaborator.id)
         lastUpdated = Date()
         return updated

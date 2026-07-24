@@ -29,7 +29,7 @@ bash "$SELFHOST_DIR/install.sh" \
   --source-dir "$SELFHOST_DIR" \
   --base-url "http://100.64.0.10:8787" \
   --transport-kind tailscale \
-  --display-name "Example Test Node" \
+  --display-name "AA Test Node" \
   --node-image "mirror.example/node@sha256:node" \
   --python-image "mirror.example/python@sha256:python" \
   --shell-image "mirror.example/alpine@sha256:shell"
@@ -39,6 +39,7 @@ test -x "$root/opt/aru-selfhost/current/server.mjs"
 test -f "$root/opt/aru-selfhost/current/plugin-supervisor.mjs"
 test -f "$root/opt/aru-selfhost/current/plugin-workshop.mjs"
 test -f "$root/opt/aru-selfhost/current/collaborator-host.mjs"
+test -f "$root/opt/aru-selfhost/current/collaborator-surface-bundles.mjs"
 test -f "$root/opt/aru-selfhost/current/collaborator-surfaces.mjs"
 test -f "$root/opt/aru-selfhost/current/collaborator-conversations.mjs"
 test -f "$root/opt/aru-selfhost/current/codex-app-server-driver.mjs"
@@ -69,7 +70,7 @@ grep -Fq 'ARU_TRANSPORT_KIND=tailscale' "$root/etc/aru-selfhost/node.env"
 grep -Fq 'ARU_INSTALL_PROFILE=full' "$root/etc/aru-selfhost/install.env"
 grep -Fq 'ARU_NODE_IMAGE=mirror.example/node@sha256:node' "$root/etc/aru-selfhost/node.env"
 grep -Fq 'ARU_INSTALL_PYTHON_IMAGE=mirror.example/python@sha256:python' "$root/etc/aru-selfhost/install.env"
-grep -Fq 'Example\ Test\ Node' "$root/etc/aru-selfhost/node.env"
+grep -Fq 'AA\ Test\ Node' "$root/etc/aru-selfhost/node.env"
 
 installed_port="$(node -e 'const s=require("node:net").createServer();s.listen(0,"127.0.0.1",()=>{console.log(s.address().port);s.close()})')"
 ARU_FAKE_RUNTIME_STATE_DIR="$artifacts/installed-runtime" \
@@ -100,7 +101,7 @@ bash "$SELFHOST_DIR/install.sh" \
   --source-dir "$SELFHOST_DIR" \
   --base-url "http://100.64.0.10:8787" \
   --transport-kind tailscale \
-  --display-name "Example Test Node" \
+  --display-name "AA Test Node" \
   --node-image "mirror.example/node@sha256:node" \
   --python-image "mirror.example/python@sha256:python" \
   --shell-image "mirror.example/alpine@sha256:shell" >/dev/null
@@ -119,7 +120,7 @@ test -s "$artifacts/aru-selfhost-linux.tar.gz"
 test -s "$artifacts/aru-selfhost-linux.tar.gz.sha256"
 archive_entries="$artifacts/linux-archive-entries.txt"
 tar -tzf "$artifacts/aru-selfhost-linux.tar.gz" > "$archive_entries"
-for file in install.sh aru-selfhost-stub.mjs collaborator-host.mjs collaborator-surfaces.mjs collaborator-conversations.mjs codex-app-server-driver.mjs collaborator-cognition.mjs direct-api-driver.mjs provider-profiles.mjs provider-secret-store.mjs backup-settings.mjs conversation-turn-relay.mjs node-control.mjs node-workspaces.mjs plugin-supervisor.mjs plugin-workshop.mjs source-plugin-runtime.mjs source-plugin-runner.mjs; do
+for file in install.sh aru-selfhost-stub.mjs collaborator-host.mjs collaborator-surface-bundles.mjs collaborator-surfaces.mjs collaborator-conversations.mjs codex-app-server-driver.mjs collaborator-cognition.mjs direct-api-driver.mjs provider-profiles.mjs provider-secret-store.mjs backup-settings.mjs conversation-turn-relay.mjs node-control.mjs node-workspaces.mjs plugin-supervisor.mjs plugin-workshop.mjs source-plugin-runtime.mjs source-plugin-runner.mjs; do
   grep -Fqx "$file" "$archive_entries"
 done
 
@@ -156,7 +157,7 @@ bash "$SELFHOST_DIR/install.sh" \
   --root "$root" \
   --bundle-url "file://$artifacts/aru-selfhost-linux.tar.gz" \
   --domain "aru.example.com" \
-  --display-name "Example Public Node"
+  --display-name "AA Public Node"
 test -x "$root/opt/aru-selfhost/current/server.mjs"
 test -f "$root/opt/aru-selfhost/current/plugin-supervisor.mjs"
 grep -Fq 'ARU_BASE_URL=https://aru.example.com' "$root/etc/aru-selfhost/node.env"

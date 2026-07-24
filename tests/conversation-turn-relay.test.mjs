@@ -15,8 +15,17 @@ test("durable turn submission is idempotent and never persists provider secrets"
   globalThis.fetch = async (_url, request) => {
     fetchCount += 1;
     assert.equal(request.headers.authorization, "Bearer secret-for-one-request");
-    await new Promise((resolve) => setTimeout(resolve, 25));
-    return new Response('data: {"choices":[{"delta":{"content":"好"}}]}\n\ndata: [DONE]\n\n', {
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"好"}}]}\n\n'));
+        setTimeout(() => {
+          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+          controller.close();
+        }, 35);
+      },
+    });
+    return new Response(stream, {
       status: 200,
       headers: { "content-type": "text/event-stream" },
     });
@@ -56,12 +65,16 @@ test("durable turn submission is idempotent and never persists provider secrets"
     await relay.route(request, {}, "/aru/v1/conversation-turns", () => device);
     assert.equal(responses[0].status, 202);
     assert.equal(responses[1].body.turnId, responses[0].body.turnId);
+    const statusPath = `/aru/v1/conversation-turns/${responses[0].body.turnId}`;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await relay.route({ method: "GET" }, {}, statusPath, () => device);
+    assert.equal(responses.at(-1).body.state, "running");
+    assert.match(Buffer.from(responses.at(-1).body.resultBase64, "base64").toString(), /好/);
     await new Promise((resolve) => setTimeout(resolve, 60));
     assert.equal(fetchCount, 1);
     assert.equal(state.conversationTurns[0].state, "succeeded");
     assert.equal(readFileSync(statePath, "utf8").includes("secret-for-one-request"), false);
 
-    const statusPath = `/aru/v1/conversation-turns/${responses[0].body.turnId}`;
     await relay.route({ method: "GET" }, {}, statusPath, () => device);
     assert.match(Buffer.from(responses.at(-1).body.resultBase64, "base64").toString(), /好/);
     await relay.route(

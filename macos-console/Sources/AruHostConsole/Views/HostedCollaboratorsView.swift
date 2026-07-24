@@ -12,11 +12,8 @@ struct HostedCollaboratorsView: View {
             VStack(alignment: .leading, spacing: 22) {
                 HostSectionHeader(
                     title: L10n.computerCollaborators,
-                    subtitle: L10n.collaboratorsSubtitle,
-                    isLoading: runtime.loadingSections.contains(.collaborators)
-                ) {
-                    Task { await refreshAll() }
-                }
+                    subtitle: L10n.collaboratorsSubtitle
+                )
                 if let error = runtime.sectionErrors[.collaborators] {
                     SectionErrorBanner(message: error)
                 }
@@ -43,14 +40,11 @@ struct HostedCollaboratorsView: View {
             )
         }
         .task {
-            await providerRuntime.refresh()
+            while !Task.isCancelled {
+                await providerRuntime.refresh()
+                try? await Task.sleep(for: .seconds(HostConsoleSection.collaborators.automaticRefreshSeconds))
+            }
         }
-    }
-
-    private func refreshAll() async {
-        async let collaborators: Void = runtime.refresh(.collaborators)
-        async let providers: Void = providerRuntime.refresh()
-        _ = await (collaborators, providers)
     }
 
     private var driverPanel: some View {
@@ -204,7 +198,11 @@ private struct CollaboratorRow: View {
 
     var body: some View {
         HStack(spacing: 14) {
-            StatusGlyph(state: collaborator.turnExecution ? .ready : .waiting)
+            HostedCollaboratorAvatar(
+                collaborator: collaborator,
+                size: 42,
+                statusColor: statusTint
+            )
             VStack(alignment: .leading, spacing: 3) {
                 Text(collaborator.displayName)
                     .font(.system(size: 14, weight: .semibold, design: .rounded))

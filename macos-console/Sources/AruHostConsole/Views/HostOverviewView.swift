@@ -16,11 +16,8 @@ struct HostOverviewView: View {
             VStack(alignment: .leading, spacing: 22) {
                 HostSectionHeader(
                     title: runtime.manifest?.displayName ?? L10n.thisMac,
-                    subtitle: L10n.overviewSubtitle,
-                    isLoading: runtime.loadingSections.contains(.overview)
-                ) {
-                    Task { await runtime.refresh(.overview) }
-                }
+                    subtitle: L10n.overviewSubtitle
+                )
 
                 if let error = runtime.sectionErrors[.overview] {
                     SectionErrorBanner(message: error)

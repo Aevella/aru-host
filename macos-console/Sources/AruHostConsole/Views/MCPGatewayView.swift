@@ -40,11 +40,8 @@ struct MCPGatewayView: View {
             VStack(alignment: .leading, spacing: 22) {
                 HostSectionHeader(
                     title: L10n.mcpGateway,
-                    subtitle: L10n.mcpSubtitle,
-                    isLoading: runtime.loadingSections.contains(.mcp)
-                ) {
-                    Task { await runtime.refresh(.mcp) }
-                }
+                    subtitle: L10n.mcpSubtitle
+                )
                 if let error = runtime.sectionErrors[.mcp] {
                     SectionErrorBanner(message: error)
                 }
@@ -152,6 +149,7 @@ struct MCPGatewayView: View {
                                         ? L10n.accessAllShort
                                         : L10n.toolCount(catalog.filter { collaborator.toolAccess.admits($0.name) }.count),
                                     symbol: "person.crop.circle",
+                                    collaborator: collaborator,
                                     target: .collaborator(collaborator.id)
                                 )
                             }
@@ -172,14 +170,19 @@ struct MCPGatewayView: View {
         title: String,
         detail: String,
         symbol: String,
+        collaborator: HostedCollaborator? = nil,
         target: MCPDirectoryScope
     ) -> some View {
         Button {
             withAnimation(.snappy(duration: 0.24)) { scope = target }
         } label: {
             HStack(spacing: 8) {
-                Image(systemName: symbol)
-                    .font(.system(size: 11, weight: .semibold))
+                if let collaborator {
+                    HostedCollaboratorAvatar(collaborator: collaborator, size: 22)
+                } else {
+                    Image(systemName: symbol)
+                        .font(.system(size: 11, weight: .semibold))
+                }
                 VStack(alignment: .leading, spacing: 1) {
                     Text(title)
                         .font(.system(size: 11, weight: .semibold, design: .rounded))
@@ -195,20 +198,7 @@ struct MCPGatewayView: View {
     private func collaboratorAccessSummary(_ collaborator: HostedCollaborator) -> some View {
         ReadablePanel {
             HStack(spacing: 14) {
-                ZStack {
-                    Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: [HostPalette.lavender.opacity(0.24), HostPalette.rose.opacity(0.11)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                    Text(String(collaborator.displayName.prefix(1)).uppercased())
-                        .font(.system(size: 15, weight: .semibold, design: .rounded))
-                        .foregroundStyle(HostPalette.lavenderDeep)
-                }
-                .frame(width: 38, height: 38)
+                HostedCollaboratorAvatar(collaborator: collaborator, size: 38)
 
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 7) {

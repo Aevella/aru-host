@@ -1,0 +1,97 @@
+name: Release Aru Host for macOS
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: write
+
+jobs:
+  macos-distribution:
+    runs-on: macos-26
+    env:
+      NOTARY_PROFILE: aru-host-release
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Resolve release version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          echo "ARU_HOST_VERSION=$version" >> "$GITHUB_ENV"
+          echo "ARU_HOST_BUILD_NUMBER=$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
+
+      - name: Verify Host Core and Console
+        run: |
+          bash tests/macos-installer-smoke.sh
+          swift test --package-path macos-console
+
+      - name: Import Developer ID identity
+        env:
+          DEVELOPER_ID_P12_BASE64: ${{ secrets.DEVELOPER_ID_P12_BASE64 }}
+          DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+        run: |
+          keychain="$RUNNER_TEMP/aru-host-release.keychain-db"
+          keychain_password="$(openssl rand -hex 32)"
+          certificate="$RUNNER_TEMP/developer-id.p12"
+          printf '%s' "$DEVELOPER_ID_P12_BASE64" | base64 --decode > "$certificate"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$certificate" \
+            -k "$keychain" \
+            -P "$DEVELOPER_ID_P12_PASSWORD" \
+            -T /usr/bin/codesign \
+            -T /usr/bin/security
+          security set-key-partition-list \
+            -S apple-tool:,apple: \
+            -s \
+            -k "$keychain_password" \
+            "$keychain"
+          security list-keychains -d user -s "$keychain"
+          echo "ARU_HOST_RELEASE_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+
+      - name: Configure Apple notarization
+        env:
+          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          APP_STORE_CONNECT_API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
+          APP_STORE_CONNECT_API_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_API_PRIVATE_KEY }}
+        run: |
+          api_key="$RUNNER_TEMP/AuthKey_$APP_STORE_CONNECT_API_KEY_ID.p8"
+          printf '%s' "$APP_STORE_CONNECT_API_PRIVATE_KEY" > "$api_key"
+          chmod 600 "$api_key"
+          xcrun notarytool store-credentials "$NOTARY_PROFILE" \
+            --key "$api_key" \
+            --key-id "$APP_STORE_CONNECT_API_KEY_ID" \
+            --issuer "$APP_STORE_CONNECT_API_ISSUER_ID" \
+            --keychain "$ARU_HOST_RELEASE_KEYCHAIN" \
+            --validate
+
+      - name: Build, notarize, and verify distribution
+        run: |
+          ./package-macos-distribution.sh \
+            --version "$ARU_HOST_VERSION" \
+            --build "$ARU_HOST_BUILD_NUMBER" \
+            --output-dir dist \
+            --notary-profile "$NOTARY_PROFILE"
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            "dist/aru-host-macos-$ARU_HOST_VERSION.dmg" \
+            "dist/aru-host-macos-$ARU_HOST_VERSION.dmg.sha256" \
+            "dist/aru-host-macos-$ARU_HOST_VERSION.json" \
+            --verify-tag \
+            --title "Aru Host $ARU_HOST_VERSION" \
+            --generate-notes
+
+      - name: Remove temporary signing keychain
+        if: always()
+        run: |
+          if [[ -n "${ARU_HOST_RELEASE_KEYCHAIN:-}" ]]; then
+            security delete-keychain "$ARU_HOST_RELEASE_KEYCHAIN" || true
+          fi

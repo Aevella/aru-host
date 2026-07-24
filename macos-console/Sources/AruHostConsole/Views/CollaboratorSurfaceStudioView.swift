@@ -8,9 +8,11 @@ struct CollaboratorSurfaceStudioView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var selectedSurfaceId: String?
     @State private var detail: HostCollaboratorSurface?
+    @State private var surfaceBundle: HostCollaboratorSurfaceBundle?
     @State private var title = ""
     @State private var sourceHTML = Self.defaultHTML
     @State private var versionNote = ""
+    @State private var allowsOutboundNetwork = false
     @State private var editorPage = EditorPage.source
     @State private var isLoadingDetail = false
     @State private var isRefreshingInventory = false
@@ -83,11 +85,22 @@ struct CollaboratorSurfaceStudioView: View {
                 beginNewSurface()
             }
         }
+        .task(id: studioPage) {
+            guard studioPage == .surfaces else { return }
+            while !Task.isCancelled {
+                await refreshFromHost()
+                try? await Task.sleep(for: .seconds(8))
+            }
+        }
     }
 
     private var header: some View {
         HStack(spacing: 14) {
-            StatusGlyph(state: .ready)
+            HostedCollaboratorAvatar(
+                collaborator: collaborator,
+                size: 44,
+                statusColor: collaborator.turnExecution ? HostPalette.mint : HostPalette.amber
+            )
             VStack(alignment: .leading, spacing: 3) {
                 Text(collaborator.displayName)
                     .font(.system(size: 23, weight: .light, design: .rounded))
@@ -160,19 +173,6 @@ struct CollaboratorSurfaceStudioView: View {
                     .foregroundStyle(HostPalette.ink)
                 Spacer()
                 HStack(spacing: 7) {
-                    Button {
-                        Task { await refreshFromHost() }
-                    } label: {
-                        if isRefreshingInventory {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Image(systemName: "arrow.clockwise")
-                        }
-                    }
-                    .buttonStyle(StudioIconButtonStyle())
-                    .disabled(isRefreshingInventory)
-                    .help(L10n.refresh)
-
                     Button(action: beginNewSurface) {
                         Image(systemName: "plus")
                     }
@@ -247,6 +247,7 @@ struct CollaboratorSurfaceStudioView: View {
                     text: $title,
                     symbol: "textformat",
                     weight: .semibold)
+                    .disabled(isProjectSurface)
                 HStack(spacing: 3) {
                     ForEach(EditorPage.allCases) { page in
                         Button {
@@ -297,6 +298,8 @@ struct CollaboratorSurfaceStudioView: View {
                 SectionErrorBanner(message: errorMessage)
             }
 
+            runtimeControls
+
             Group {
                 if isLoadingDetail {
                     VStack { Spacer(); ProgressView(); Spacer() }
@@ -308,11 +311,19 @@ struct CollaboratorSurfaceStudioView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             HStack(spacing: 12) {
-                StudioTextField(
-                    placeholder: L10n.surfaceVersionNote,
-                    text: $versionNote,
-                    symbol: "text.quote",
-                    weight: .regular)
+                if isProjectSurface {
+                    Label(L10n.surfaceProjectDetail, systemImage: "shippingbox.fill")
+                        .font(.system(size: 10.5, design: .rounded))
+                        .foregroundStyle(HostPalette.secondaryInk.opacity(0.64))
+                        .lineLimit(2)
+                } else {
+                    StudioTextField(
+                        placeholder: L10n.surfaceVersionNote,
+                        text: $versionNote,
+                        symbol: "text.quote",
+                        weight: .regular)
+                }
+                Spacer(minLength: 0)
                 if let detail {
                     Button(detail.isArchived ? L10n.restore : L10n.archive) {
                         Task { await setArchived(!detail.isArchived) }
@@ -320,19 +331,21 @@ struct CollaboratorSurfaceStudioView: View {
                     .buttonStyle(FloatingGlassButtonStyle(
                         tint: detail.isArchived ? HostPalette.mint.opacity(0.18) : HostPalette.rose.opacity(0.14)))
                 }
-                Button {
-                    Task { await save() }
-                } label: {
-                    HStack(spacing: 7) {
-                        if isMutating { ProgressView().controlSize(.small) }
-                        Text(detail == nil ? L10n.publishSurface : L10n.publishVersion)
+                if !isProjectSurface {
+                    Button {
+                        Task { await save() }
+                    } label: {
+                        HStack(spacing: 7) {
+                            if isMutating { ProgressView().controlSize(.small) }
+                            Text(detail == nil ? L10n.publishSurface : L10n.publishVersion)
+                        }
                     }
+                    .buttonStyle(FloatingGlassButtonStyle(tint: HostPalette.lavender.opacity(0.28)))
+                    .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                              || sourceHTML.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                              || isMutating
+                              || detail?.isArchived == true)
                 }
-                .buttonStyle(FloatingGlassButtonStyle(tint: HostPalette.lavender.opacity(0.28)))
-                .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                          || sourceHTML.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                          || isMutating
-                          || detail?.isArchived == true)
             }
         }
         .padding(18)
@@ -343,15 +356,22 @@ struct CollaboratorSurfaceStudioView: View {
     private var editorBody: some View {
         switch editorPage {
         case .source:
-            TextEditor(text: $sourceHTML)
-                .font(.system(size: 12, design: .monospaced))
-                .scrollContentBackground(.hidden)
-                .padding(12)
-                .background(Color.white.opacity(0.42),
-                            in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color.white.opacity(0.55)))
+            if isProjectSurface {
+                projectManifestView
+            } else {
+                TextEditor(text: $sourceHTML)
+                    .font(.system(size: 12, design: .monospaced))
+                    .scrollContentBackground(.hidden)
+                    .padding(12)
+                    .background(Color.white.opacity(0.42),
+                                in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color.white.opacity(0.55)))
+            }
         case .preview:
-            HostSurfacePreview(html: sourceHTML)
+            HostSurfacePreview(html: sourceHTML,
+                               bundle: surfaceBundle,
+                               surfaceId: detail?.surfaceId,
+                               allowsOutboundNetwork: allowsOutboundNetwork)
                 .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color.white.opacity(0.55)))
         case .versions:
@@ -367,6 +387,96 @@ struct CollaboratorSurfaceStudioView: View {
             .background(Color.white.opacity(0.42),
                         in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
+    }
+
+    private var runtimeControls: some View {
+        HStack(spacing: 12) {
+            Label(L10n.surfacePersistentStorage, systemImage: "externaldrive.badge.checkmark")
+                .font(.system(size: 10.5, weight: .semibold, design: .rounded))
+                .foregroundStyle(HostPalette.mint)
+            Text(L10n.surfacePersistentStorageDetail)
+                .font(.system(size: 10, design: .rounded))
+                .foregroundStyle(HostPalette.secondaryInk.opacity(0.62))
+                .lineLimit(1)
+            Spacer()
+            Toggle(L10n.surfaceNetworkAccess, isOn: Binding(
+                get: { allowsOutboundNetwork },
+                set: { value in
+                    allowsOutboundNetwork = value
+                    if detail != nil {
+                        Task { await setNetworkAccess(value) }
+                    }
+                }))
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .font(.system(size: 10.5, weight: .semibold, design: .rounded))
+                .disabled(isMutating)
+                .help(L10n.surfaceNetworkAccessDetail)
+        }
+        .padding(.horizontal, 12)
+        .frame(minHeight: 38)
+        .background(Color.white.opacity(0.24),
+                    in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 13).stroke(Color.white.opacity(0.48), lineWidth: 0.7))
+    }
+
+    private var projectManifestView: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                Label(L10n.surfaceProject, systemImage: "folder.badge.gearshape")
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .foregroundStyle(HostPalette.ink)
+                Text(L10n.surfaceProjectDetail)
+                    .font(.system(size: 11.5, design: .rounded))
+                    .foregroundStyle(HostPalette.secondaryInk.opacity(0.68))
+                HStack(spacing: 10) {
+                    projectFact(L10n.surfaceProjectEntry, value: detail?.entryPath ?? "—")
+                    projectFact(L10n.surfaceProjectFiles, value: "\(detail?.files?.count ?? 0)")
+                    projectFact(L10n.surfaceProjectBytes,
+                                value: ByteCountFormatter.string(fromByteCount: Int64(detail?.byteCount ?? 0),
+                                                                 countStyle: .file))
+                }
+                LazyVStack(spacing: 7) {
+                    ForEach(detail?.files ?? []) { file in
+                        HStack(spacing: 10) {
+                            Image(systemName: "doc")
+                                .foregroundStyle(HostPalette.lavender)
+                            Text(file.path)
+                                .font(.system(size: 11.5, design: .monospaced))
+                                .foregroundStyle(HostPalette.ink)
+                            Spacer()
+                            Text(ByteCountFormatter.string(fromByteCount: Int64(file.byteCount), countStyle: .file))
+                                .font(.system(size: 10.5, design: .rounded))
+                                .foregroundStyle(HostPalette.secondaryInk.opacity(0.58))
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 9)
+                        .background(Color.white.opacity(0.24),
+                                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(16)
+        }
+        .background(Color.white.opacity(0.42),
+                    in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color.white.opacity(0.55)))
+    }
+
+    private func projectFact(_ label: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label)
+                .font(.system(size: 9.5, weight: .medium, design: .rounded))
+                .foregroundStyle(HostPalette.secondaryInk.opacity(0.55))
+            Text(value)
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .foregroundStyle(HostPalette.ink)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(Color.white.opacity(0.28), in: RoundedRectangle(cornerRadius: 12))
     }
 
     private var versionsView: some View {
@@ -426,6 +536,8 @@ struct CollaboratorSurfaceStudioView: View {
         runtime.mutatingSurfaceIds.contains(detail?.surfaceId ?? "new::\(collaborator.id)")
     }
 
+    private var isProjectSurface: Bool { detail?.delivery == "bundle" }
+
     private var prettyState: String {
         guard let value = detail?.stateJSON,
               let data = value.data(using: .utf8),
@@ -441,9 +553,11 @@ struct CollaboratorSurfaceStudioView: View {
     private func beginNewSurface() {
         selectedSurfaceId = nil
         detail = nil
+        surfaceBundle = nil
         title = ""
         sourceHTML = Self.defaultHTML
         versionNote = ""
+        allowsOutboundNetwork = false
         errorMessage = nil
         successMessage = nil
         editorPage = .source
@@ -460,7 +574,15 @@ struct CollaboratorSurfaceStudioView: View {
             detail = value
             title = value.title
             sourceHTML = value.sourceHTML ?? ""
+            allowsOutboundNetwork = value.allowsOutboundNetwork
             versionNote = ""
+            surfaceBundle = nil
+            if value.delivery == "bundle" {
+                surfaceBundle = try await runtime.surfaceBundle(
+                    collaboratorId: collaborator.id,
+                    surfaceId: value.surfaceId,
+                    versionId: value.activeVersionId)
+            }
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -473,13 +595,22 @@ struct CollaboratorSurfaceStudioView: View {
         defer { isRefreshingInventory = false }
         do {
             try await runtime.refreshSurfaces(collaboratorId: collaborator.id)
-            if let selectedSurfaceId,
+            if !hasEditorChanges,
+               let selectedSurfaceId,
                let selected = surfaces.first(where: { $0.surfaceId == selectedSurfaceId }) {
                 await select(selected)
             }
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    private var hasEditorChanges: Bool {
+        guard let detail else { return false }
+        return title != detail.title
+            || sourceHTML != (detail.sourceHTML ?? "")
+            || allowsOutboundNetwork != detail.allowsOutboundNetwork
+            || !versionNote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private func save() async {
@@ -491,12 +622,28 @@ struct CollaboratorSurfaceStudioView: View {
                 surface: detail,
                 title: title,
                 sourceHTML: sourceHTML,
-                note: versionNote)
+                note: versionNote,
+                allowsOutboundNetwork: allowsOutboundNetwork)
             detail = value
             selectedSurfaceId = value.surfaceId
             versionNote = ""
             successMessage = L10n.surfacePublished
         } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func setNetworkAccess(_ enabled: Bool) async {
+        guard let detail else { return }
+        errorMessage = nil
+        do {
+            let value = try await runtime.setSurfaceNetworkAccess(
+                enabled, collaborator: collaborator, surface: detail)
+            self.detail = value
+            allowsOutboundNetwork = value.allowsOutboundNetwork
+            successMessage = L10n.surfaceRuntimeSaved
+        } catch {
+            allowsOutboundNetwork = detail.allowsOutboundNetwork
             errorMessage = error.localizedDescription
         }
     }
@@ -509,6 +656,13 @@ struct CollaboratorSurfaceStudioView: View {
                 collaborator: collaborator, surface: detail, versionId: versionId)
             self.detail = value
             sourceHTML = value.sourceHTML ?? sourceHTML
+            surfaceBundle = nil
+            if value.delivery == "bundle" {
+                surfaceBundle = try await runtime.surfaceBundle(
+                    collaboratorId: collaborator.id,
+                    surfaceId: value.surfaceId,
+                    versionId: value.activeVersionId)
+            }
             successMessage = L10n.surfaceRolledBack
         } catch {
             errorMessage = error.localizedDescription
@@ -553,83 +707,19 @@ struct CollaboratorSurfaceStudioView: View {
     """
 }
 
-private struct StudioTextField: View {
-    let placeholder: String
-    @Binding var text: String
-    let symbol: String
-    let weight: Font.Weight
-
-    @FocusState private var isFocused: Bool
-
-    var body: some View {
-        HStack(spacing: 9) {
-            Image(systemName: symbol)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(isFocused
-                                 ? HostPalette.lavenderDeep.opacity(0.82)
-                                 : HostPalette.secondaryInk.opacity(0.42))
-            TextField(placeholder, text: $text)
-                .textFieldStyle(.plain)
-                .font(.system(size: 13.5, weight: weight, design: .rounded))
-                .foregroundStyle(HostPalette.ink)
-                .focused($isFocused)
-                .focusEffectDisabled()
-        }
-        .padding(.horizontal, 13)
-        .frame(minHeight: 40)
-        .background {
-            RoundedRectangle(cornerRadius: 13, style: .continuous)
-                .fill(Color.white.opacity(isFocused ? 0.44 : 0.30))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 13, style: .continuous)
-                        .stroke(
-                            isFocused
-                            ? HostPalette.lavender.opacity(0.34)
-                            : Color.white.opacity(0.54),
-                            lineWidth: isFocused ? 1.0 : 0.7)
-                }
-                .shadow(
-                    color: isFocused
-                    ? HostPalette.lavenderDeep.opacity(0.10)
-                    : Color.clear,
-                    radius: 10,
-                    y: 4)
-        }
-        .animation(.easeOut(duration: 0.16), value: isFocused)
-    }
-}
-
-struct StudioIconButtonStyle: ButtonStyle {
-    var tint = Color.white.opacity(0.12)
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(HostPalette.ink.opacity(0.82))
-            .frame(width: 34, height: 34)
-            .background {
-                Circle()
-                    .fill(Color.white.opacity(configuration.isPressed ? 0.42 : 0.24))
-                    .overlay {
-                        Circle().fill(tint)
-                    }
-                    .overlay {
-                        Circle().stroke(Color.white.opacity(0.62), lineWidth: 0.7)
-                    }
-                    .shadow(color: HostPalette.lavenderDeep.opacity(0.08), radius: 7, y: 3)
-            }
-            .scaleEffect(configuration.isPressed ? 0.94 : 1)
-            .animation(.snappy(duration: 0.16), value: configuration.isPressed)
-    }
-}
-
 private struct HostSurfacePreview: NSViewRepresentable {
     let html: String
+    let bundle: HostCollaboratorSurfaceBundle?
+    let surfaceId: String?
+    let allowsOutboundNetwork: Bool
 
     func makeNSView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = .nonPersistent()
+        configuration.websiteDataStore = websiteDataStoreIdentifier.map {
+            WKWebsiteDataStore(forIdentifier: $0)
+        } ?? .nonPersistent()
         configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
+        configuration.setURLSchemeHandler(context.coordinator, forURLScheme: Coordinator.scheme)
         configuration.userContentController.addUserScript(WKUserScript(
             source: "window.PolarisRoom={emit:function(){return true;},getState:function(){return {};},saveState:function(){return true;}};",
             injectionTime: .atDocumentStart,
@@ -641,24 +731,94 @@ private struct HostSurfacePreview: NSViewRepresentable {
     }
 
     func updateNSView(_ webView: WKWebView, context: Context) {
-        guard context.coordinator.loaded != html else { return }
-        context.coordinator.loaded = html
-        let policy = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
+        let identity = "\(bundle?.contentSHA256 ?? html)::\(allowsOutboundNetwork)"
+        guard context.coordinator.loaded != identity else { return }
+        context.coordinator.loaded = identity
+        context.coordinator.allowsOutboundNetwork = allowsOutboundNetwork
+        context.coordinator.install(bundle: bundle)
+        let policy = Self.contentPolicy(bundleAssetsAvailable: bundle != nil,
+                                        allowsOutboundNetwork: allowsOutboundNetwork)
         let meta = "<meta http-equiv=\"Content-Security-Policy\" content=\"\(policy)\">"
-        webView.loadHTMLString(Self.inserting(meta: meta, into: html), baseURL: nil)
+        if let bundle,
+           let entry = bundle.files.first(where: { $0.path == bundle.entryPath })?.data,
+           let entryHTML = String(data: entry, encoding: .utf8),
+           let baseURL = URL(string: "\(Coordinator.scheme)://bundle/\(bundle.entryPath)") {
+            webView.loadHTMLString(Self.inserting(meta: meta, into: entryHTML), baseURL: baseURL)
+        } else {
+            webView.loadHTMLString(
+                Self.inserting(meta: meta, into: html),
+                baseURL: URL(string: "https://surface.aru.invalid/"))
+        }
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
-    final class Coordinator: NSObject, WKNavigationDelegate {
+    final class Coordinator: NSObject, WKNavigationDelegate, WKURLSchemeHandler {
+        private struct Resource {
+            let mimeType: String
+            let data: Data
+        }
+
+        static let scheme = "aru-host-surface"
         var loaded = ""
+        var allowsOutboundNetwork = false
+        private var resources: [String: Resource] = [:]
+
+        func install(bundle: HostCollaboratorSurfaceBundle?) {
+            resources = Dictionary(uniqueKeysWithValues: (bundle?.files ?? []).compactMap { file in
+                guard var data = file.data else { return nil }
+                if file.mimeType == "text/html", let html = String(data: data, encoding: .utf8) {
+                    let meta = "<meta http-equiv=\"Content-Security-Policy\" content=\"\(HostSurfacePreview.contentPolicy(bundleAssetsAvailable: true, allowsOutboundNetwork: allowsOutboundNetwork))\">"
+                    data = Data(HostSurfacePreview.inserting(meta: meta, into: html).utf8)
+                }
+                return (file.path, Resource(mimeType: file.mimeType, data: data))
+            })
+        }
+
+        func webView(_ webView: WKWebView, start urlSchemeTask: WKURLSchemeTask) {
+            guard let url = urlSchemeTask.request.url else {
+                urlSchemeTask.didFailWithError(URLError(.badURL))
+                return
+            }
+            let path = url.path.removingPercentEncoding?.trimmingCharacters(in: CharacterSet(charactersIn: "/")) ?? ""
+            guard let file = resources[path] else {
+                urlSchemeTask.didFailWithError(URLError(.fileDoesNotExist))
+                return
+            }
+            let response = URLResponse(url: url,
+                                       mimeType: file.mimeType,
+                                       expectedContentLength: file.data.count,
+                                       textEncodingName: file.mimeType.hasPrefix("text/") ? "utf-8" : nil)
+            urlSchemeTask.didReceive(response)
+            urlSchemeTask.didReceive(file.data)
+            urlSchemeTask.didFinish()
+        }
+
+        func webView(_ webView: WKWebView, stop urlSchemeTask: WKURLSchemeTask) {}
 
         func webView(_ webView: WKWebView,
                      decidePolicyFor navigationAction: WKNavigationAction,
                      decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void) {
             let scheme = navigationAction.request.url?.scheme?.lowercased()
-            decisionHandler(scheme == "about" ? .allow : .cancel)
+            let local = scheme == "about" || scheme == Self.scheme || scheme == "data" || scheme == "blob"
+            let remote = scheme == "https" || scheme == "http"
+            decisionHandler(local || (allowsOutboundNetwork && remote) ? .allow : .cancel)
         }
+    }
+
+    private static func contentPolicy(bundleAssetsAvailable: Bool,
+                                      allowsOutboundNetwork: Bool) -> String {
+        let local = bundleAssetsAvailable ? " aru-host-surface:" : ""
+        let localOnly = local.isEmpty ? " 'none'" : local
+        if allowsOutboundNetwork {
+            return "default-src https: http: data: blob:\(local); script-src 'unsafe-inline' 'unsafe-eval' https: http: data: blob:\(local); style-src 'unsafe-inline' https: http: data: blob:\(local); img-src https: http: data: blob:\(local); font-src https: http: data: blob:\(local); media-src https: http: data: blob:\(local); connect-src https: http: wss: ws:\(local); worker-src blob: data:\(local); manifest-src https: http:\(local); frame-src https: http:; object-src 'none'; base-uri 'none'"
+        }
+        return "default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'\(local); style-src 'unsafe-inline'\(local); img-src data: blob:\(local); font-src data:\(local); media-src blob:\(local); connect-src\(localOnly); worker-src blob: data:\(local); manifest-src\(localOnly); frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
+    }
+
+    private var websiteDataStoreIdentifier: UUID? {
+        guard let surfaceId else { return nil }
+        return UUID(uuidString: surfaceId.replacingOccurrences(of: "surface_", with: ""))
     }
 
     private static func inserting(meta: String, into html: String) -> String {

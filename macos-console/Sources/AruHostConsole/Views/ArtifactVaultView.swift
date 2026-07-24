@@ -8,11 +8,8 @@ struct ArtifactVaultView: View {
             VStack(alignment: .leading, spacing: 22) {
                 HostSectionHeader(
                     title: L10n.artifacts,
-                    subtitle: L10n.artifactsSubtitle,
-                    isLoading: runtime.loadingSections.contains(.artifacts)
-                ) {
-                    Task { await runtime.refresh(.artifacts) }
-                }
+                    subtitle: L10n.artifactsSubtitle
+                )
                 if let error = runtime.sectionErrors[.artifacts] {
                     SectionErrorBanner(message: error)
                 }

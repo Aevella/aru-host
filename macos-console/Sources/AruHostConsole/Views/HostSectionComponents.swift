@@ -3,8 +3,6 @@ import SwiftUI
 struct HostSectionHeader: View {
     let title: String
     let subtitle: String
-    let isLoading: Bool
-    let refresh: () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 16) {
@@ -18,18 +16,6 @@ struct HostSectionHeader: View {
                     .foregroundStyle(HostPalette.secondaryInk.opacity(0.68))
             }
             Spacer()
-            Button(action: refresh) {
-                Image(systemName: "arrow.trianglehead.2.clockwise.rotate.90")
-                    .rotationEffect(.degrees(isLoading ? 360 : 0))
-                    .animation(
-                        isLoading ? .linear(duration: 0.85).repeatForever(autoreverses: false) : .default,
-                        value: isLoading
-                    )
-                    .frame(width: 18, height: 18)
-            }
-            .buttonStyle(FloatingGlassButtonStyle())
-            .disabled(isLoading)
-            .help(L10n.refresh)
         }
     }
 }

@@ -9,11 +9,8 @@ struct WorkspaceRuntimeView: View {
             VStack(alignment: .leading, spacing: 22) {
                 HostSectionHeader(
                     title: L10n.runtime,
-                    subtitle: L10n.runtimeSubtitle,
-                    isLoading: runtime.loadingSections.contains(.runtime)
-                ) {
-                    Task { await runtime.refresh(.runtime) }
-                }
+                    subtitle: L10n.runtimeSubtitle
+                )
                 if let error = runtime.sectionErrors[.runtime] {
                     SectionErrorBanner(message: error)
                 }

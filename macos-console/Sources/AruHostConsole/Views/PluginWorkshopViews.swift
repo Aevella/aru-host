@@ -411,9 +411,11 @@ struct PluginDetailPanel: View {
                             ForEach(collaborators) { collaborator in
                                 let access = pluginAccess(for: collaborator)
                                 HStack(spacing: 5) {
-                                    Circle()
-                                        .fill(access.color)
-                                        .frame(width: 6, height: 6)
+                                    HostedCollaboratorAvatar(
+                                        collaborator: collaborator,
+                                        size: 20,
+                                        statusColor: access.color
+                                    )
                                     Text(collaborator.displayName)
                                     Text(access.label)
                                         .opacity(0.56)

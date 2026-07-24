@@ -8,7 +8,7 @@ import {
   renameSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { basename, isAbsolute, join, relative, resolve } from "node:path";
 
 const CONVERSATION_SCHEMA = "aru.selfhost.collaborator-conversation.v1";
 const INVENTORY_SCHEMA = "aru.selfhost.collaborator-conversation-inventory.v1";
@@ -246,7 +246,7 @@ export function createCollaboratorConversationHost({
         text: message(conversation, turn.userMessageId).content,
         userMessageId: turn.userMessageId,
         handler: {
-          onNotification: (method, params) => handleNotification(conversation, method, params),
+          onNotification: (method, params) => handleNotification(conversation, method, params, workspace),
           onApproval: (request) => requestDriverApproval(conversation, request),
           onToolCall: (params) => handleToolCall(conversation, collaborator, tools, params),
           onDisconnect: (error) => interruptConversation(conversation, error.message),
@@ -264,7 +264,7 @@ export function createCollaboratorConversationHost({
     }
   }
 
-  function handleNotification(conversation, method, params) {
+  function handleNotification(conversation, method, params, workspace) {
     const turn = conversation.activeTurn;
     if (!turn || (turn.driverTurnId && params.turnId && turn.driverTurnId !== params.turnId)) return;
     if (method === "item/agentMessage/delta") {
@@ -285,7 +285,7 @@ export function createCollaboratorConversationHost({
       const item = params.item ?? {};
       appendEvent(conversation, `driver.${method === "item/started" ? "itemStarted" : "itemCompleted"}`, {
         turnId: turn.turnId,
-        item: publicDriverItem(item),
+        item: publicDriverItem(item, workspace),
       });
       saveConversation(conversation);
       return;
@@ -319,6 +319,7 @@ export function createCollaboratorConversationHost({
   async function handleToolCall(conversation, collaborator, tools, params) {
     const tool = tools.find((candidate) => candidate.name === params.tool);
     if (!tool) throw new Error(`工具 ${params.tool} 不属于这个协作者`);
+    const toolCallId = `hosttoolcall_${randomUUID()}`;
     const grants = sessionToolGrants.get(
       conversationKey(conversation.collaboratorId, conversation.conversationId),
     ) ?? new Set();
@@ -328,6 +329,7 @@ export function createCollaboratorConversationHost({
     setTurnState(conversation, "toolRunning");
     appendEvent(conversation, "tool.started", {
       turnId: conversation.activeTurn.turnId,
+      toolCallId,
       toolName: tool.name,
       title: tool.title ?? tool.name,
     });
@@ -338,6 +340,7 @@ export function createCollaboratorConversationHost({
       }, collaborator);
       appendEvent(conversation, "tool.completed", {
         turnId: conversation.activeTurn.turnId,
+        toolCallId,
         toolName: tool.name,
         title: tool.title ?? tool.name,
       });
@@ -347,6 +350,7 @@ export function createCollaboratorConversationHost({
     } catch (error) {
       appendEvent(conversation, "tool.failed", {
         turnId: conversation.activeTurn.turnId,
+        toolCallId,
         toolName: tool.name,
         title: tool.title ?? tool.name,
         message: safeFailure(error),
@@ -398,7 +402,11 @@ export function createCollaboratorConversationHost({
     approval.resolvedByDeviceId = device.deviceId;
     pendingApprovals.delete(approvalId);
     setTurnState(conversation, "streaming");
-    appendEvent(conversation, "approval.resolved", { approvalId, decision });
+    appendEvent(conversation, "approval.resolved", {
+      turnId: approval.turnId,
+      approvalId,
+      decision,
+    });
     touch(conversation, device.deviceId);
     saveConversation(conversation);
     pending.continuation(decision);
@@ -418,6 +426,11 @@ export function createCollaboratorConversationHost({
       approval.decision = "cancel";
       approval.resolvedAt = now();
       approval.resolvedByDeviceId = device.deviceId;
+      appendEvent(conversation, "approval.resolved", {
+        turnId: approval.turnId,
+        approvalId: approval.approvalId,
+        decision: "cancel",
+      });
       pending?.continuation("cancel");
     }
     if (conversation.driverThreadId && turn.driverTurnId) {
@@ -466,6 +479,11 @@ export function createCollaboratorConversationHost({
           approval.state = "expired";
           approval.resolvedAt = now();
           approval.decision = "interrupted";
+          appendEvent(conversation, "approval.resolved", {
+            turnId: approval.turnId,
+            approvalId: approval.approvalId,
+            decision: "interrupted",
+          });
         }
         interruptConversation(conversation, "Aru Host 重启后保留了历史，但没有重复执行未完成的动作");
       }
@@ -686,6 +704,7 @@ function collaboratorInstructions(collaborator) {
     "This computer is the durable authority for your conversations. The phone is only a synchronized client.",
     "Work inside the provided managed workspace. Use Aru tools for product data and user-visible actions.",
     "Your collaborator surface tools are already bound to your own pages. Never ask for, guess, or send a collaborator id when using them.",
+    "For substantial phone interfaces, keep a normal multi-file web project in this workspace, build it, then publish the build directory with aru_collaborator_surface_publish_project. Use the inline surface tool only for genuinely small single-file pages.",
     "Never ask the user to configure sockets, copy credentials, or edit MCP JSON for this connection.",
   ].join("\n");
 }
@@ -733,11 +752,35 @@ function driverApprovalResponse(method, params, decision) {
   return { decision: value };
 }
 
-function publicDriverItem(item) {
-  const value = { id: item.id ?? null, type: item.type ?? "unknown" };
-  if (item.type === "commandExecution") value.command = item.command ?? null;
+function publicDriverItem(item, workspace) {
+  const value = {
+    id: item.id ?? null,
+    type: item.type ?? "unknown",
+    status: item.status ?? null,
+  };
+  if (item.type === "commandExecution") {
+    value.command = String(item.command ?? "").slice(0, 600) || null;
+  }
   if (item.type === "dynamicToolCall") value.tool = item.tool ?? null;
+  if (item.type === "fileChange") {
+    const changes = Array.isArray(item.changes) ? item.changes : [];
+    value.paths = changes
+      .map((change) => change?.path ?? change?.filePath ?? null)
+      .filter(Boolean)
+      .map((path) => publicWorkspacePath(path, workspace));
+  }
   return value;
+}
+
+function publicWorkspacePath(value, workspace) {
+  const path = String(value ?? "");
+  if (!path) return "";
+  if (!isAbsolute(path)) return path.replaceAll("\\", "/");
+  const difference = relative(resolve(workspace), resolve(path));
+  if (difference && difference !== ".." && !difference.startsWith("../")) {
+    return difference.replaceAll("\\", "/");
+  }
+  return basename(path);
 }
 
 function eventCursor(rawURL) {

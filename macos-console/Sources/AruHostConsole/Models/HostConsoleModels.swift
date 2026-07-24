@@ -62,6 +62,17 @@ enum HostConsoleSection: String, CaseIterable, Identifiable, Hashable, Sendable 
         case .collaborators: "person.2"
         }
     }
+
+    /// The Console refreshes only the visible section. Fast-moving job state
+    /// receives a shorter cadence; MCP discovery and broader inventories stay
+    /// quieter because opening them is already an immediate refresh.
+    var automaticRefreshSeconds: Double {
+        switch self {
+        case .runtime: 3
+        case .collaborators: 8
+        case .overview, .backups, .mcp, .plugins, .workspaces, .artifacts: 15
+        }
+    }
 }
 
 struct HostDiagnostics: Decodable, Equatable, Sendable {
@@ -794,6 +805,11 @@ struct HostCollaboratorSurfaceVersion: Decodable, Equatable, Identifiable, Senda
     let note: String
     let createdAt: Int64
     let restoredFromVersionId: String?
+    let delivery: String?
+    let projectPath: String?
+    let entryPath: String?
+    let files: [HostCollaboratorSurfaceFile]?
+    let byteCount: Int?
 
     var id: String { versionId }
 }
@@ -815,9 +831,48 @@ struct HostCollaboratorSurface: Decodable, Equatable, Identifiable, Sendable {
     let sourceHTML: String?
     let stateJSON: String?
     let versions: [HostCollaboratorSurfaceVersion]?
+    let delivery: String?
+    let projectPath: String?
+    let entryPath: String?
+    let files: [HostCollaboratorSurfaceFile]?
+    let byteCount: Int?
+    let networkAccess: String?
+    let storageMode: String?
 
     var id: String { surfaceId }
     var isArchived: Bool { archivedAt != nil }
+    var allowsOutboundNetwork: Bool { networkAccess == "outbound" }
+}
+
+struct HostCollaboratorSurfaceFile: Decodable, Equatable, Identifiable, Sendable {
+    let path: String
+    let sha256: String
+    let byteCount: Int
+    let mimeType: String
+
+    var id: String { path }
+}
+
+struct HostCollaboratorSurfaceBundleFile: Decodable, Equatable, Identifiable, Sendable {
+    let path: String
+    let sha256: String
+    let byteCount: Int
+    let mimeType: String
+    let contentBase64: String
+
+    var id: String { path }
+    var data: Data? { Data(base64Encoded: contentBase64) }
+}
+
+struct HostCollaboratorSurfaceBundle: Decodable, Equatable, Sendable {
+    let schema: String
+    let collaboratorId: String
+    let surfaceId: String
+    let versionId: String
+    let contentSHA256: String
+    let entryPath: String
+    let byteCount: Int
+    let files: [HostCollaboratorSurfaceBundleFile]
 }
 
 struct HostCollaboratorSurfaceInventory: Decodable, Sendable {
@@ -830,6 +885,7 @@ struct CreateHostCollaboratorSurfaceBody: Encodable, Sendable {
     let title: String
     let sourceHTML: String
     let note: String
+    let networkAccess: String
 }
 
 struct UpdateHostCollaboratorSurfaceBody: Encodable, Sendable {
@@ -837,6 +893,12 @@ struct UpdateHostCollaboratorSurfaceBody: Encodable, Sendable {
     let title: String
     let sourceHTML: String
     let note: String
+    let networkAccess: String
+}
+
+struct UpdateHostCollaboratorSurfaceRuntimeBody: Encodable, Sendable {
+    let expectedRevision: Int
+    let networkAccess: String
 }
 
 struct RollbackHostCollaboratorSurfaceBody: Encodable, Sendable {
@@ -883,6 +945,7 @@ struct UpdateHostedCollaboratorToolAccessBody: Encodable, Sendable {
 }
 
 enum HostConsolePhase: Equatable {
+    case preparingHost
     case loading
     case ready
     case credentialFailure(String)

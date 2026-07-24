@@ -2,6 +2,8 @@ import SwiftUI
 
 struct AruHostConsoleView: View {
     @ObservedObject var runtime: HostConsoleRuntime
+    @ObservedObject var updates: HostUpdateCoordinator
+    @Environment(\.scenePhase) private var scenePhase
     @State private var selection: HostConsoleSection = .overview
 
     var body: some View {
@@ -19,6 +21,13 @@ struct AruHostConsoleView: View {
             .padding(22)
         }
         .preferredColorScheme(.light)
+        .task(id: selection) {
+            await keepVisibleSectionFresh(selection)
+        }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active, runtime.phase == .ready else { return }
+            Task { await runtime.refresh(selection) }
+        }
     }
 
     private var header: some View {
@@ -49,29 +58,24 @@ struct AruHostConsoleView: View {
 
             Spacer()
 
+            if case .available(let update) = updates.state {
+                Button(L10n.updateAvailable(update.version)) {
+                    updates.open(update)
+                }
+                .buttonStyle(FloatingGlassButtonStyle(tint: HostPalette.lavender.opacity(0.20)))
+            }
+
+            if runtime.isRefreshing || !runtime.loadingSections.isEmpty {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(HostPalette.lavenderDeep)
+            }
+
             if let lastUpdated = runtime.lastUpdated {
                 Text(lastUpdated, style: .relative)
                     .font(.system(size: 11, weight: .medium, design: .rounded))
                     .foregroundStyle(HostPalette.secondaryInk.opacity(0.58))
             }
-
-            Button {
-                Task { await runtime.refresh(forceDriverProbe: true) }
-            } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "arrow.trianglehead.2.clockwise.rotate.90")
-                        .rotationEffect(.degrees(runtime.isRefreshing ? 360 : 0))
-                        .animation(
-                            runtime.isRefreshing
-                                ? .linear(duration: 0.85).repeatForever(autoreverses: false)
-                                : .default,
-                            value: runtime.isRefreshing
-                        )
-                    Text(L10n.refreshAll)
-                }
-            }
-            .buttonStyle(FloatingGlassButtonStyle())
-            .disabled(runtime.isRefreshing)
         }
         .padding(.horizontal, 26)
         .padding(.vertical, 18)
@@ -80,6 +84,8 @@ struct AruHostConsoleView: View {
     @ViewBuilder
     private var content: some View {
         switch runtime.phase {
+        case .preparingHost:
+            preparingHostView
         case .loading:
             loadingView
         case .credentialFailure(let message):
@@ -96,6 +102,21 @@ struct AruHostConsoleView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+    }
+
+    private var preparingHostView: some View {
+        VStack(spacing: 18) {
+            ProgressView().controlSize(.large).tint(HostPalette.lavenderDeep)
+            Text(L10n.preparingHostCore)
+                .font(.system(size: 15, weight: .medium, design: .rounded))
+                .foregroundStyle(HostPalette.secondaryInk)
+            Text(L10n.preparingHostCoreDetail)
+                .font(.system(size: 12, design: .rounded))
+                .foregroundStyle(HostPalette.secondaryInk.opacity(0.68))
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 440)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     @ViewBuilder
@@ -163,5 +184,14 @@ struct AruHostConsoleView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(40)
+    }
+
+    private func keepVisibleSectionFresh(_ section: HostConsoleSection) async {
+        while !Task.isCancelled {
+            if scenePhase == .active, runtime.phase == .ready {
+                await runtime.refresh(section)
+            }
+            try? await Task.sleep(for: .seconds(section.automaticRefreshSeconds))
+        }
     }
 }

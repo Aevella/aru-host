@@ -2,7 +2,7 @@
 
 Aru Host 是 Aru 的用户自有能力节点。它把电脑或 VPS 变成一台可由 iPhone 配对、查看和使用的 Host，同时让电脑协作者的身份、对话、页面、记忆、工具权限和运行状态留在用户自己的机器上。
 
-当前版本是 **TestFlight companion preview**，Host 协议版本为 `stub-0.28`。它与当前 Aru TestFlight 版本配套可用，但还不是面向完全非开发者的 Mac 双击安装包。
+当前稳定版是 **0.28.0**，Host 协议版本为 `stub-0.28`。它与当前 Aru TestFlight 版本配套使用，并提供面向普通 Mac 用户的 Apple 签名、公证安装包。
 
 ## 现在能做什么
 
@@ -16,15 +16,19 @@ Aru Host 是 Aru 的用户自有能力节点。它把电脑或 VPS 变成一台�
 
 Host 是电脑协作者的唯一数据真相；手机只保存配对凭证与可见投影。手机本地协作者与电脑协作者不会互相串库。
 
-## Mac：给 TestFlight 用户的最快路径
+## Mac：普通用户安装
 
-需要 macOS 26 与 Node.js 22 或 Homebrew。安装器会把 Host Core 安装为当前用户的 LaunchAgent：
+需要 macOS 26。打开 [最新版本页面](https://github.com/Aevella/aru-host/releases/latest)，下载 `aru-host-macos-<版本>.dmg`，把 **Aru Host** 拖进“应用程序”后打开即可。应用第一次启动时会自动安装同版本 Host Core，并把它作为当前用户的后台服务启动；不需要 Xcode、Node.js、Homebrew、终端命令或开发者证书。
+
+升级新版应用时，Host Core 会随应用一起升级；协作者、对话、页面、授权和设置仍保留在原来的用户数据目录。Aru Host 会检查 GitHub 的稳定版本，有更新时提供对应 `.dmg` 下载入口。
+
+源码安装器只保留给开发和运维场景。它会把 Host Core 安装为当前用户的 LaunchAgent：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Aevella/aru-host/main/install-macos.sh | bash
 ```
 
-安装完成后生成新的十分钟单次配对链接：
+命令行安装完成后生成新的十分钟单次配对链接：
 
 ```bash
 "$HOME/Library/Application Support/Aru Self-Hosted/bin/aru-selfhost" pairing
@@ -32,7 +36,7 @@ curl -fsSL https://raw.githubusercontent.com/Aevella/aru-host/main/install-macos
 
 在 iPhone 打开 **Aru → 自托管节点 → ＋ → 扫码连接**。完整的第一次入住流程见 [中文使用小手册](docs/getting-started.zh-Hans.md)。
 
-电脑协作者的创建、驱动选择和工具权限目前由 `macos-console` 管理。Console 源码与测试都在本仓库中；公开的 Developer ID 签名、公证和自动更新安装包仍在准备，因此普通用户暂时需要开发者协助构建 Console。Host Core 与手机端配对本身不依赖 Xcode。
+电脑协作者的创建、驱动选择和工具权限由 Aru Host 管理。关闭应用窗口不会停止 Host Core；后台任务和手机配对仍由当前用户的 LaunchAgent 持续持有。
 
 ## Linux / VPS
 
@@ -75,7 +79,7 @@ swift test
 open '.build-local/Aru Host Console.app'
 ```
 
-`build-local-app.sh` 要求稳定的 Apple Development 或 Developer ID 签名身份，避免每次重建都让 Keychain 把 Console 当成一款新应用。
+`build-local-app.sh` 要求稳定的 Apple Development 或 Developer ID 签名身份，避免每次重建都让 Keychain 把 Console 当成一款新应用。正式发行使用 `package-macos-distribution.sh` 完成 universal 构建、Developer ID 签名、公证、staple 和 Gatekeeper 验证。
 
 ## 发布包
 
