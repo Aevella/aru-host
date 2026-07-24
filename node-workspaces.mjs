@@ -18,7 +18,7 @@ const INVENTORY_SCHEMA = "aru.selfhost.node-workspace-inventory.v1";
 const WORKSPACE_SCHEMA = "aru.selfhost.node-workspace.v1";
 const HOST_MANAGED_OWNERSHIP = "host-managed";
 const USER_GRANTED_OWNERSHIP = "user-granted";
-const SUPPORTED_NODE_KINDS = new Set(["home-mac", "local-device"]);
+const SUPPORTED_NODE_KINDS = new Set(["home-mac", "home-linux", "local-device"]);
 const TOOL_NAMES = new Set([
   "aru_node_workspace_inventory",
   "aru_node_workspace_files",

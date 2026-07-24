@@ -1,4 +1,4 @@
-name: Release Aru Host for macOS
+name: Release Aru Host desktop
 
 on:
   push:
@@ -77,17 +77,15 @@ jobs:
             --output-dir dist \
             --notary-profile "$NOTARY_PROFILE"
 
-      - name: Publish GitHub release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release create "$GITHUB_REF_NAME" \
-            "dist/aru-host-macos-$ARU_HOST_VERSION.dmg" \
-            "dist/aru-host-macos-$ARU_HOST_VERSION.dmg.sha256" \
-            "dist/aru-host-macos-$ARU_HOST_VERSION.json" \
-            --verify-tag \
-            --title "Aru Host $ARU_HOST_VERSION" \
-            --generate-notes
+      - name: Retain verified macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-distribution
+          path: |
+            dist/aru-host-macos-${{ env.ARU_HOST_VERSION }}.dmg
+            dist/aru-host-macos-${{ env.ARU_HOST_VERSION }}.dmg.sha256
+            dist/aru-host-macos-${{ env.ARU_HOST_VERSION }}.json
+          if-no-files-found: error
 
       - name: Remove temporary signing keychain
         if: always()
@@ -95,3 +93,100 @@ jobs:
           if [[ -n "${ARU_HOST_RELEASE_KEYCHAIN:-}" ]]; then
             security delete-keychain "$ARU_HOST_RELEASE_KEYCHAIN" || true
           fi
+
+  linux-distribution:
+    name: Linux ${{ matrix.arch }} distribution
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Resolve release version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          echo "ARU_HOST_VERSION=$version" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: linux-console/package-lock.json
+
+      - name: Verify Host Core and Console source
+        run: |
+          npm ci --prefix linux-console
+          npm audit --prefix linux-console
+          node tests/provider-profiles-smoke.mjs
+          bash tests/linux-desktop-installer-smoke.sh
+          npm test --prefix linux-console
+
+      - name: Build and inspect Debian package
+        run: |
+          ./package-linux-desktop.sh \
+            --version "$ARU_HOST_VERSION" \
+            --arch "${{ matrix.arch }}" \
+            --output-dir dist
+
+      - name: Install package on matching Ubuntu architecture
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y "./dist/aru-host-linux-$ARU_HOST_VERSION-${{ matrix.arch }}.deb"
+          test "$(dpkg-query -W -f='${Version}' aru-host)" = "$ARU_HOST_VERSION"
+          test -x '/opt/Aru Host/aru-host'
+          test -f '/opt/Aru Host/resources/HostCore/release.json'
+
+      - name: Retain verified Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.arch }}-distribution
+          path: |
+            dist/aru-host-linux-${{ env.ARU_HOST_VERSION }}-${{ matrix.arch }}.deb
+            dist/aru-host-linux-${{ env.ARU_HOST_VERSION }}-${{ matrix.arch }}.deb.sha256
+            dist/aru-host-linux-${{ env.ARU_HOST_VERSION }}-${{ matrix.arch }}.json
+          if-no-files-found: error
+
+  publish-release:
+    needs: [macos-distribution, linux-distribution]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Resolve release version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          echo "ARU_HOST_VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Collect verified artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Verify release set and checksums
+        run: |
+          test "$(find dist -maxdepth 1 -type f | wc -l)" -eq 9
+          test -f "dist/aru-host-macos-$ARU_HOST_VERSION.dmg"
+          for arch in x64 arm64; do
+            test -f "dist/aru-host-linux-$ARU_HOST_VERSION-$arch.deb"
+          done
+          cd dist
+          for checksum in *.sha256; do sha256sum --check "$checksum"; done
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            dist/* \
+            --verify-tag \
+            --title "Aru Host $ARU_HOST_VERSION" \
+            --generate-notes

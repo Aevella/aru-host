@@ -25,7 +25,7 @@ ARU_MANAGED_WORKSPACE_ROOT=$data_dir/managed-workspace
 ARU_BASE_URL=http://127.0.0.1:$port
 ARU_TRANSPORT_KIND=lan
 ARU_DISPLAY_NAME=HTTP\ Smoke
-ARU_NODE_KIND=home-mac
+ARU_NODE_KIND=${ARU_TEST_NODE_KIND:-home-mac}
 ARU_CONTAINER_RUNTIME=$SELFHOST_DIR/tests/fake-container-runtime.sh
 ARU_FAKE_RUNTIME_STATE_DIR=$data_dir/fake-runtime
 EOF

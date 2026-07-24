@@ -7,15 +7,27 @@ export function createProviderSecretStore({
   service = DEFAULT_SERVICE,
   run = spawnSync,
 } = {}) {
+  const linuxSecretTool = "/usr/bin/secret-tool";
   let cachedAvailability;
 
   function availability() {
     if (cachedAvailability) return cachedAvailability;
+    if (platform === "linux") {
+      const result = run(linuxSecretTool, ["--version"], {
+        encoding: "utf8",
+        timeout: 3_000,
+        windowsHide: true,
+      });
+      cachedAvailability = result.error?.code === "ENOENT" || result.status !== 0
+        ? { supported: false, storage: "unavailable", failure: "secret-tool-not-found" }
+        : { supported: true, storage: "linux-secret-service", failure: null };
+      return cachedAvailability;
+    }
     if (platform !== "darwin") {
       cachedAvailability = {
         supported: false,
         storage: "unavailable",
-        failure: "macos-keychain-required",
+        failure: "platform-secret-store-unavailable",
       };
       return cachedAvailability;
     }
@@ -32,6 +44,18 @@ export function createProviderSecretStore({
 
   function read(profileId) {
     requireAvailable();
+    if (platform === "linux") {
+      const result = run(linuxSecretTool, [
+        "lookup", "service", service, "account", account(profileId),
+      ], {
+        encoding: "utf8",
+        timeout: 5_000,
+        windowsHide: true,
+      });
+      if (result.status === 1) return null;
+      if (result.status !== 0) throw new Error("无法从 Linux Secret Service 读取模型 API 密钥");
+      return String(result.stdout ?? "").replace(/[\r\n]+$/, "");
+    }
     const result = run("/usr/bin/security", [
       "find-generic-password",
       "-a", account(profileId),
@@ -50,6 +74,18 @@ export function createProviderSecretStore({
   function write(profileId, secret) {
     requireAvailable();
     const value = validatedSecret(secret);
+    if (platform === "linux") {
+      const result = run(linuxSecretTool, [
+        "store", "--label=Aru Host provider", "service", service, "account", account(profileId),
+      ], {
+        input: `${value}\n`,
+        encoding: "utf8",
+        timeout: 10_000,
+        windowsHide: true,
+      });
+      if (result.status !== 0) throw new Error("无法把模型 API 密钥保存到 Linux Secret Service");
+      return;
+    }
     const result = run("/usr/bin/security", [
       "add-generic-password",
       "-a", account(profileId),
@@ -67,6 +103,19 @@ export function createProviderSecretStore({
 
   function remove(profileId) {
     requireAvailable();
+    if (platform === "linux") {
+      const result = run(linuxSecretTool, [
+        "clear", "service", service, "account", account(profileId),
+      ], {
+        encoding: "utf8",
+        timeout: 5_000,
+        windowsHide: true,
+      });
+      if (result.status !== 0 && result.status !== 1) {
+        throw new Error("无法从 Linux Secret Service 删除模型 API 密钥");
+      }
+      return;
+    }
     const result = run("/usr/bin/security", [
       "delete-generic-password",
       "-a", account(profileId),
@@ -82,7 +131,7 @@ export function createProviderSecretStore({
 
   function requireAvailable() {
     if (!availability().supported) {
-      throw new Error("模型 API 密钥目前只能保存在 macOS 钥匙串中");
+      throw new Error("当前系统没有可用的安全凭据存储");
     }
   }
 

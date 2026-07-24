@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Aru Host</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="weather" aria-hidden="true"><span></span><span></span><span></span></div>
+  <div id="app" class="app-shell">
+    <header class="topbar">
+      <div class="brand"><img src="../assets/icon.svg" alt=""><div><h1>Aru Host</h1><p id="app-subtitle"></p></div></div>
+      <div class="topbar-status"><button id="update-button" class="quiet-button hidden"></button><span id="activity" class="activity hidden"></span><span id="node-name"></span></div>
+    </header>
+    <div class="body-shell">
+      <nav id="navigation" class="navigation" aria-label=""></nav>
+      <main id="content" class="content" tabindex="-1"></main>
+    </div>
+  </div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <dialog id="action-dialog" class="action-dialog"><form method="dialog"><header><h2 id="dialog-title"></h2><button value="cancel" class="icon-button" aria-label="Close">×</button></header><div id="dialog-body" class="dialog-body"></div><footer><button value="cancel" id="dialog-cancel" class="quiet-button"></button><button value="confirm" id="dialog-confirm" class="primary-button"></button></footer></form></dialog>
+  <script type="module" src="renderer.mjs"></script>
+</body>
+</html>

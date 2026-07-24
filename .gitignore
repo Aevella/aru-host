@@ -1,6 +1,9 @@
 .DS_Store
 .build/
 .build-local/
+node_modules/
+.host-core/
+.build-icons/
 dist/
 *.tar.gz
 *.tar.gz.sha256

@@ -30,7 +30,8 @@ profileHost = createProviderProfileHost({
   HttpError,
   secretStore,
   testProfile: async (profileId) => {
-    assert.equal(secretStore.read(profileId), "key-one");
+    const profile = state.providerProfiles.find((item) => item.profileId === profileId);
+    assert.equal(secretStore.read(profileId), profile.authMode === "none" ? null : "key-one");
   },
   now: () => ++clock,
 });
@@ -71,6 +72,18 @@ assert.equal(inventory.body.profiles.length, 1);
 assert.equal(inventory.body.profiles[0].baseURL, "https://api.example.test/");
 assert.equal(inventory.body.profiles[0].path, "v1/chat/completions");
 assert.equal(inventory.body.profiles[0].maxToolRounds, null);
+
+const noAuth = await call("POST", "/aru/v1/provider-profiles", {
+  displayName: "Local no-auth route",
+  protocol: "openai-compatible",
+  baseURL: "http://127.0.0.1:11434",
+  path: "v1/chat/completions",
+  model: "local-model",
+  authMode: "none",
+});
+assert.equal(noAuth.body.health, "ready");
+assert.equal(noAuth.body.hasSecret, false);
+assert.equal(secretStore.read(noAuth.body.profileId), null);
 
 await assert.rejects(
   () => call("PUT", `/aru/v1/provider-profiles/${profileId}`, {
@@ -126,6 +139,28 @@ const cachedAvailabilityStore = createProviderSecretStore({
 assert.equal(cachedAvailabilityStore.availability().supported, true);
 assert.equal(cachedAvailabilityStore.availability().supported, true);
 assert.equal(availabilityProbeCount, 1);
+
+const linuxSecretCalls = [];
+const linuxSecretStore = createProviderSecretStore({
+  platform: "linux",
+  run: (command, args, options) => {
+    linuxSecretCalls.push({ command, args, input: options?.input });
+    if (args[0] === "--version") return { status: 0, stdout: "secret-tool 0.20", stderr: "" };
+    if (args[0] === "lookup") return { status: 0, stdout: "linux-key\n", stderr: "" };
+    return { status: 0, stdout: "", stderr: "" };
+  },
+});
+assert.deepEqual(linuxSecretStore.availability(), {
+  supported: true,
+  storage: "linux-secret-service",
+  failure: null,
+});
+assert.equal(linuxSecretStore.read("provider_deadbeef"), "linux-key");
+linuxSecretStore.write("provider_deadbeef", "new-linux-key");
+linuxSecretStore.remove("provider_deadbeef");
+assert.equal(linuxSecretCalls[0].command, "/usr/bin/secret-tool");
+assert.deepEqual(linuxSecretCalls.map((call) => call.args[0]), ["--version", "lookup", "store", "clear"]);
+assert.equal(linuxSecretCalls[2].input, "new-linux-key\n");
 
 const unsupportedHost = createProviderProfileHost({
   state: {},

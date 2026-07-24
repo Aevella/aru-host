@@ -10,6 +10,10 @@ bash tests/http-smoke.sh
 bash tests/installer-smoke.sh
 bash tests/macos-installer-smoke.sh
 swift test --package-path macos-console
+npm ci --prefix linux-console
+npm audit --prefix linux-console
+bash tests/linux-desktop-installer-smoke.sh
+npm test --prefix linux-console
 ```
 
 Do not commit credentials, real pairing links, private network addresses, user exports, crash dumps, build directories or signing material. Tests and documentation should use neutral example identities and `example.com` addresses.

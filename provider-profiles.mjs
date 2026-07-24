@@ -88,7 +88,7 @@ export function createProviderProfileHost({
       lastCheckedAt: null,
       lastError: null,
     }, body);
-    secretStore.write(profile.profileId, body.apiKey);
+    if (profile.authMode !== "none") secretStore.write(profile.profileId, body.apiKey);
     state.providerProfiles.push(profile);
     saveState();
     return checkProfile(profile);
@@ -97,7 +97,10 @@ export function createProviderProfileHost({
   async function updateProfile(profile, body) {
     requireRevision(profile, body.expectedRevision);
     normalizedProfile(profile, body);
-    if (body.apiKey !== undefined && body.apiKey !== "") {
+    if (profile.authMode === "none") {
+      requireSecretStorage();
+      secretStore.remove(profile.profileId);
+    } else if (body.apiKey !== undefined && body.apiKey !== "") {
       requireSecretStorage();
       secretStore.write(profile.profileId, body.apiKey);
     }

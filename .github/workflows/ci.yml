@@ -40,3 +40,26 @@ jobs:
         run: swift test --package-path macos-console
       - name: Build macOS Host Core payload
         run: ./package-macos-release.sh dist/aru-host-macos.tar.gz
+
+  linux-desktop:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: linux-console/package-lock.json
+      - name: Verify current-user installer and Console
+        run: |
+          npm ci --prefix linux-console
+          npm audit --prefix linux-console
+          bash tests/linux-desktop-installer-smoke.sh
+          npm test --prefix linux-console
+      - name: Build, inspect, and install x64 desktop package
+        run: |
+          version="$(node -p 'require("./linux-console/package.json").version')"
+          ./package-linux-desktop.sh --version "$version" --arch x64 --output-dir dist
+          sudo apt-get update
+          sudo apt-get install -y "./dist/aru-host-linux-$version-x64.deb"
+          test "$(dpkg-query -W -f='${Version}' aru-host)" = "$version"

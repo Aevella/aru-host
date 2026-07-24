@@ -2,7 +2,7 @@
 
 ## Supported line
 
-Security fixes currently target the latest preview release and `main`. The public Host is a companion preview, not yet a notarized end-user Mac distribution.
+Security fixes target the latest stable release and `main`. macOS assets are Developer ID signed and notarized; Debian/Ubuntu desktop assets carry published SHA-256 receipts and are installed through the system package manager.
 
 ## Report a vulnerability
 
@@ -13,6 +13,7 @@ Please use GitHub's private vulnerability reporting for this repository. Do not 
 - Pairing bootstrap tokens are single-use and expire after ten minutes.
 - Device credentials are returned once and stored by Host Core only as SHA-256 hashes.
 - Secrets configured for model providers stay in the Host secret store and are not returned by inventory APIs.
+- macOS credentials use Keychain; Linux desktop credentials use Secret Service, with no plaintext fallback.
 - Backup plaintext and passphrases never enter the model tool surface.
 - Workspace containers do not receive the device credential.
 - External folders require an explicit local grant and can be revoked independently.

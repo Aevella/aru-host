@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="weather" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f7ede5"/>
+      <stop offset="0.48" stop-color="#d8d9f0"/>
+      <stop offset="1" stop-color="#b8d7ce"/>
+    </linearGradient>
+    <radialGradient id="light" cx="42%" cy="35%" r="62%">
+      <stop offset="0" stop-color="#ffffff" stop-opacity=".94"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity=".12"/>
+    </radialGradient>
+  </defs>
+  <rect width="512" height="512" rx="126" fill="url(#weather)"/>
+  <circle cx="256" cy="256" r="167" fill="url(#light)" stroke="#fff" stroke-opacity=".72" stroke-width="9"/>
+  <path d="M256 123c15 66 47 99 111 112-64 14-96 47-111 113-14-66-47-99-111-113 64-13 97-46 111-112Z" fill="#655c8a"/>
+  <circle cx="371" cy="142" r="23" fill="#fff" fill-opacity=".8"/>
+</svg>

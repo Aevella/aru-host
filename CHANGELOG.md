@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.28.1
+
+- Add the ordinary-user Debian/Ubuntu desktop distribution for `x64` and `arm64`, with an Electron Borrowed Light Console and matching embedded Host Core.
+- Install Host Core as a versioned current-user `systemd --user` service on first launch, preserve durable data on upgrade/ordinary uninstall, and keep a healthy previous-release rollback target.
+- Store Console and provider credentials through Linux Secret Service with no plaintext fallback.
+- Verify source, dependency audit, installer preservation, package metadata/content, and matching-architecture `apt install` before a combined Mac/Linux release is published.
+
 ## 0.28.0
 
 - Add the ordinary-user macOS distribution: universal Aru Host app, embedded matching Host Core, Developer ID signing, Apple notarization, stapling, Gatekeeper verification, and `.dmg` release metadata.

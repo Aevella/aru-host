@@ -2,7 +2,7 @@
 
 Aru Host 是 Aru 的用户自有能力节点。它把电脑或 VPS 变成一台可由 iPhone 配对、查看和使用的 Host，同时让电脑协作者的身份、对话、页面、记忆、工具权限和运行状态留在用户自己的机器上。
 
-当前稳定版是 **0.28.0**，Host 协议版本为 `stub-0.28`。它与当前 Aru TestFlight 版本配套使用，并提供面向普通 Mac 用户的 Apple 签名、公证安装包。
+当前稳定版是 **0.28.1**，Host 协议版本为 `stub-0.28`。它与当前 Aru TestFlight 版本配套使用，并提供面向普通 Mac 用户的 Apple 签名、公证安装包，以及面向 Debian/Ubuntu 桌面用户的 `x64` / `arm64` 安装包。
 
 ## 现在能做什么
 
@@ -38,7 +38,28 @@ curl -fsSL https://raw.githubusercontent.com/Aevella/aru-host/main/install-macos
 
 电脑协作者的创建、驱动选择和工具权限由 Aru Host 管理。关闭应用窗口不会停止 Host Core；后台任务和手机配对仍由当前用户的 LaunchAgent 持续持有。
 
-## Linux / VPS
+## Linux 桌面：普通用户安装
+
+支持当前 Debian/Ubuntu 桌面系统。打开 [最新版本页面](https://github.com/Aevella/aru-host/releases/latest)，普通 Intel/AMD 电脑下载 `aru-host-linux-<版本>-x64.deb`，ARM 电脑下载 `aru-host-linux-<版本>-arm64.deb`，再用系统的软件安装器打开并安装。安装完成后，从应用列表打开 **Aru Host**；第一次启动会自动准备同版本 Host Core，并把它作为当前用户的 `systemd` 后台服务启动，不需要预先安装 Node.js、Docker 或手动配置终端。
+
+Console 凭证只进入 Linux Secret Service；GNOME Keyring、KWallet 或其他兼容 Secret Service 需要在当前桌面会话中可用。关闭 Console 窗口不会停止 Host Core。升级新 `.deb` 不会替换协作者、对话、页面、权限和设置。
+
+不再使用时，先在 Console 首页点 **设置 → 移除这台电脑的 Host**，让当前用户的后台服务和设置干净退出，再用系统的软件管理器卸载 Aru Host 应用。这个普通卸载流程会保留协作者、对话、页面和其他 Host 数据，今后重装仍可接回；只有开发/诊断用的 `aru-selfhost --instance home uninstall --purge-data` 会显式删除它们。
+
+如果桌面没有图形化软件安装器，也可以在下载目录运行：
+
+```bash
+sudo apt install ./aru-host-linux-0.28.1-x64.deb
+```
+
+源码级当前用户安装器保留给开发和诊断：
+
+```bash
+./install-linux-desktop.sh
+~/.local/bin/aru-selfhost pairing
+```
+
+## Linux VPS
 
 Debian 或 Ubuntu，并且域名已经解析到 VPS 时：
 
@@ -81,6 +102,17 @@ open '.build-local/Aru Host Console.app'
 
 `build-local-app.sh` 要求稳定的 Apple Development 或 Developer ID 签名身份，避免每次重建都让 Keychain 把 Console 当成一款新应用。正式发行使用 `package-macos-distribution.sh` 完成 universal 构建、Developer ID 签名、公证、staple 和 Gatekeeper 验证。
 
+Linux Console：
+
+```bash
+cd linux-console
+npm ci
+npm test
+npm run pack:dir
+```
+
+正式 `.deb` 使用 `package-linux-desktop.sh` 生成并检查匹配 Host Core、桌面入口、依赖、SHA-256 和发行回执。
+
 ## 发布包
 
 ```bash
@@ -101,6 +133,10 @@ bash tests/http-smoke.sh
 bash tests/installer-smoke.sh
 bash tests/macos-installer-smoke.sh
 swift test --package-path macos-console
+npm ci --prefix linux-console
+npm audit --prefix linux-console
+bash tests/linux-desktop-installer-smoke.sh
+npm test --prefix linux-console
 ```
 
 本项目使用 [Apache License 2.0](LICENSE)。Aru iOS 客户端不在这个仓库中。
