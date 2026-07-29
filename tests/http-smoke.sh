@@ -678,7 +678,9 @@ printf '%s' "$mcp_tools" | node -e '
       "aru_collaborator_surface_inventory","aru_collaborator_surface_read",
       "aru_collaborator_surface_publish","aru_collaborator_surface_publish_project",
       "aru_collaborator_surface_runtime","aru_collaborator_surface_events",
-      "aru_collaborator_surface_rollback"
+      "aru_collaborator_surface_rollback",
+      "aru_collaborator_project_inventory","aru_collaborator_project_create",
+      "aru_collaborator_project_checkpoint","aru_collaborator_project_publish"
     ];
     if(expected.some(name=>!names.includes(name))||names.length!==expected.length)process.exit(1);
     if(tools.find(t=>t.name==="aru_job_cancel")?.annotations?.destructiveHint!==true)process.exit(2);

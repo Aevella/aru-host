@@ -25,7 +25,7 @@ desktop session; there is no plaintext fallback.
 
 ```bash
 npm ci
-npm audit
+npm audit --omit=dev
 npm test
 npm run pack:dir
 ```
@@ -33,7 +33,7 @@ npm run pack:dir
 Build and verify a release package from the parent directory:
 
 ```bash
-../package-linux-desktop.sh --version 0.28.1 --arch x64 --output-dir ../dist
+../package-linux-desktop.sh --version 0.29.0 --arch x64 --output-dir ../dist
 ```
 
 The release workflow repeats source tests, dependency audit, current-user

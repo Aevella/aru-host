@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct ArtifactVaultView: View {
-    @ObservedObject var runtime: HostConsoleRuntime
+    let runtime: HostConsoleRuntime
 
     var body: some View {
         ScrollView {

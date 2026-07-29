@@ -2,7 +2,7 @@ import SwiftUI
 
 @main
 struct AruHostConsoleApp: App {
-    @StateObject private var runtime = HostConsoleRuntime()
+    @State private var runtime = HostConsoleRuntime()
     @StateObject private var updates = HostUpdateCoordinator()
 
     var body: some Scene {

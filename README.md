@@ -2,7 +2,7 @@
 
 Aru Host 是 Aru 的用户自有能力节点。它把电脑或 VPS 变成一台可由 iPhone 配对、查看和使用的 Host，同时让电脑协作者的身份、对话、页面、记忆、工具权限和运行状态留在用户自己的机器上。
 
-当前稳定版是 **0.28.1**，Host 协议版本为 `stub-0.28`。它与当前 Aru TestFlight 版本配套使用，并提供面向普通 Mac 用户的 Apple 签名、公证安装包，以及面向 Debian/Ubuntu 桌面用户的 `x64` / `arm64` 安装包。
+当前稳定版是 **0.29.0**，Host 协议版本为 `stub-0.29`。它与当前 Aru TestFlight 版本配套使用，并提供面向普通 Mac 用户的 Apple 签名、公证安装包，以及面向 Debian/Ubuntu 桌面用户的 `x64` / `arm64` 安装包。
 
 ## 现在能做什么
 
@@ -10,7 +10,10 @@ Aru Host 是 Aru 的用户自有能力节点。它把电脑或 VPS 变成一台�
 - 在手机与 Mac Console 里继续同一位电脑协作者的同一段对话；
 - 使用 Codex 登录态或用户自己的 OpenAI-compatible / Anthropic API；
 - 管理协作者提示词、记忆、工具权限和连续工具回合上限；
+- 在手机或电脑 Console 管理一次性、重复的主动约定，并让协作者使用只绑定自己的主动工具；
+- 在通知路线接通后，把已经生成完成的主动回复推送到每部已登记的 iPhone；
 - 让协作者创建、修改、发布和回滚自己的持久化手机页面；
+- 从 GitHub 建立一份 Host 持有的页面项目，查看 Git 状态、保存不可变产物检查点，并显式发布到手机；
 - 提供 MCP 工具网关、插件工作坊、授权文件夹、持久作业和制品仓；
 - 保存加密备份包，并从任一已配对设备查看真实状态。
 
@@ -49,7 +52,7 @@ Console 凭证只进入 Linux Secret Service；GNOME Keyring、KWallet 或其他
 如果桌面没有图形化软件安装器，也可以在下载目录运行：
 
 ```bash
-sudo apt install ./aru-host-linux-0.28.1-x64.deb
+sudo apt install ./aru-host-linux-0.29.0-x64.deb
 ```
 
 源码级当前用户安装器保留给开发和诊断：
@@ -131,10 +134,13 @@ npm run pack:dir
 ```bash
 bash tests/http-smoke.sh
 bash tests/installer-smoke.sh
+node tests/apns-push-smoke.mjs
+node tests/collaborator-initiative-smoke.mjs
+node tests/collaborator-project-smoke.mjs
 bash tests/macos-installer-smoke.sh
 swift test --package-path macos-console
 npm ci --prefix linux-console
-npm audit --prefix linux-console
+npm audit --prefix linux-console --omit=dev
 bash tests/linux-desktop-installer-smoke.sh
 npm test --prefix linux-console
 ```

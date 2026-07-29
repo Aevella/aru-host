@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct BackupVaultView: View {
-    @ObservedObject var runtime: HostConsoleRuntime
+    let runtime: HostConsoleRuntime
     @State private var deleteCandidate: BackupPackage?
     @State private var mutationError: String?
 
@@ -79,7 +79,7 @@ struct BackupVaultView: View {
 }
 
 private struct BackupOrganizationPanel: View {
-    @ObservedObject var runtime: HostConsoleRuntime
+    let runtime: HostConsoleRuntime
     @State private var keepEveryBackup = true
     @State private var keepLatestCount = 30
     @State private var error: String?

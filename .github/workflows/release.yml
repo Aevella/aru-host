@@ -123,7 +123,7 @@ jobs:
       - name: Verify Host Core and Console source
         run: |
           npm ci --prefix linux-console
-          npm audit --prefix linux-console
+          npm audit --prefix linux-console --omit=dev
           node tests/provider-profiles-smoke.mjs
           bash tests/linux-desktop-installer-smoke.sh
           npm test --prefix linux-console

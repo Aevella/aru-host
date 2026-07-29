@@ -3,7 +3,7 @@ import AppKit
 import CoreImage
 
 struct HostOverviewView: View {
-    @ObservedObject var runtime: HostConsoleRuntime
+    let runtime: HostConsoleRuntime
     let onOpenCollaborators: () -> Void
     @State private var presentsRename = false
     @State private var presentsPairingCode = false
@@ -314,7 +314,7 @@ struct HostOverviewView: View {
 }
 
 struct HostPairingQRCodeSheet: View {
-    @ObservedObject var runtime: HostConsoleRuntime
+    let runtime: HostConsoleRuntime
     @Environment(\.dismiss) private var dismiss
     @State private var pairingLink: String?
     @State private var issuedAt: Date?
@@ -472,7 +472,7 @@ private enum HostPairingQRCodeRenderer {
 }
 
 private struct RenameNodeSheet: View {
-    @ObservedObject var runtime: HostConsoleRuntime
+    let runtime: HostConsoleRuntime
     @Environment(\.dismiss) private var dismiss
     @State private var displayName = ""
     @State private var errorMessage: String?

@@ -18,6 +18,9 @@ files=(
   collaborator-surfaces.mjs
   collaborator-surface-bundles.mjs
   collaborator-conversations.mjs
+  collaborator-initiative.mjs
+  collaborator-projects.mjs
+  apns-push.mjs
   codex-app-server-driver.mjs
   direct-api-driver.mjs
   provider-profiles.mjs

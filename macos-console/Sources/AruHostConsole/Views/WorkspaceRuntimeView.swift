@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct WorkspaceRuntimeView: View {
-    @ObservedObject var runtime: HostConsoleRuntime
+    let runtime: HostConsoleRuntime
     @State private var presentsPolicy = false
 
     var body: some View {
@@ -131,7 +131,7 @@ private struct JobRow: View {
 }
 
 private struct JobPolicySheet: View {
-    @ObservedObject var runtime: HostConsoleRuntime
+    let runtime: HostConsoleRuntime
     @Environment(\.dismiss) private var dismiss
     @State private var unlimited: Bool
     @State private var hours: String

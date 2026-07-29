@@ -1,4 +1,6 @@
 import Foundation
+import Observation
+import Synchronization
 import Testing
 @testable import AruHostConsole
 
@@ -153,6 +155,75 @@ import Testing
     #expect(cognition.references.first?.isArchived == true)
     #expect(HostCollaboratorCognitionRecordKind.memories.rawValue == "memories")
     #expect(HostCollaboratorCognitionRecordKind.references.rawValue == "references")
+}
+
+@Test func decodesComputerCollaboratorInitiativeControlPlane() throws {
+    let initiative = try JSONDecoder().decode(HostCollaboratorInitiative.self, from: Data(#"""
+    {
+      "schema":"aru.selfhost.collaborator-initiative.v1",
+      "collaboratorId":"hostcol_1234",
+      "revision":3,
+      "rules":[{
+        "ruleId":"hostinitiative_1234",
+        "title":"Check in",
+        "goal":"Ask how the project is going",
+        "instructions":"Be brief",
+        "conversationId":null,
+        "nextFireAt":200,
+        "recurrenceMinutes":60,
+        "notificationsEnabled":true,
+        "enabled":true,
+        "deliveryCount":2,
+        "lastAttemptAt":150,
+        "lastDeliveredAt":160,
+        "lastFailure":null,
+        "runningAt":null,
+        "createdAt":100,
+        "updatedAt":170,
+        "archivedAt":null
+      }],
+      "createdAt":90,
+      "updatedAt":170
+    }
+    """#.utf8))
+
+    #expect(initiative.collaboratorId == "hostcol_1234")
+    #expect(initiative.rules.first?.notificationsEnabled == true)
+    #expect(initiative.rules.first?.deliveryCount == 2)
+    #expect(initiative.rules.first?.isArchived == false)
+    #expect(initiative.rules.first?.isRunning == false)
+}
+
+@Test func decodesComputerCollaboratorPageProjectControlPlane() throws {
+    let inventory = try JSONDecoder().decode(HostCollaboratorProjectInventory.self, from: Data(#"""
+    {
+      "schema":"aru.selfhost.collaborator-project-inventory.v1",
+      "collaboratorId":"hostcol_1234",
+      "projects":[{
+        "schema":"aru.selfhost.collaborator-project.v1",
+        "projectId":"hostproject_1234",
+        "collaboratorId":"hostcol_1234",
+        "title":"Aelion page",
+        "revision":3,
+        "workspacePath":"projects/aelion-page",
+        "entryPath":"index.html",
+        "sourceURL":"https://github.com/aru/page",
+        "repositoryURL":"https://github.com/aru/page.git",
+        "surfaceId":"surface_1234",
+        "checkpointCount":1,
+        "latestCheckpoint":{"checkpointId":"checkpoint_1","ordinal":1,"note":"saved","artifactId":"artifact_1","createdAt":150},
+        "createdAt":100,
+        "updatedAt":200,
+        "archivedAt":null,
+        "repository":{"state":"ready","sourceURL":"https://github.com/aru/page","repositoryURL":"https://github.com/aru/page.git","branch":"main","commit":"abcdef","dirty":false,"upstream":"origin/main","ahead":0,"behind":0}
+      }]
+    }
+    """#.utf8))
+
+    #expect(inventory.projects.first?.workspacePath == "projects/aelion-page")
+    #expect(inventory.projects.first?.latestCheckpoint?.artifactId == "artifact_1")
+    #expect(inventory.projects.first?.repository?.branch == "main")
+    #expect(inventory.projects.first?.surfaceId == "surface_1234")
 }
 
 @Test func decodesCollaboratorToolAccessAndAdmission() throws {
@@ -486,4 +557,63 @@ import Testing
     #expect(inventory.devices.count == 2)
     #expect(inventory.devices.first(where: \.isCurrent)?.deviceId == "dev_console")
     #expect(inventory.devices.allSatisfy { $0.isActive })
+}
+
+@Test @MainActor func equalQuietOverviewRefreshDoesNotInvalidateItsConsumers() async throws {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [StableOverviewURLProtocol.self]
+    let runtime = HostConsoleRuntime(
+        session: URLSession(configuration: configuration),
+        baseURL: URL(string: "http://aru-host.test")!
+    )
+
+    await runtime.refresh(.overview, showsActivity: false)
+    #expect(runtime.diagnostics?.serverId == "home-mac")
+
+    let invalidated = Mutex(false)
+    withObservationTracking {
+        _ = runtime.diagnostics
+        _ = runtime.nodeSettings
+        _ = runtime.pairedDevices
+        _ = runtime.loadingSections
+    } onChange: {
+        invalidated.withLock { $0 = true }
+    }
+
+    await runtime.refresh(.overview, showsActivity: false)
+
+    #expect(!invalidated.withLock { $0 })
+    #expect(runtime.loadingSections.isEmpty)
+}
+
+private final class StableOverviewURLProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        let payload: String
+        switch request.url?.path {
+        case "/aru/v1/diagnostics":
+            payload = #"{"schema":"aru.selfhost.diagnostics.v1","serverId":"home-mac","serverVersion":"0.28.0","serverTime":1784090000000,"manifest":"ok","auth":"ok","capabilities":[],"packageCount":1,"artifactCount":2,"jobCount":3,"activeJobCount":0,"pluginCount":4,"activePluginCount":4,"hostedCollaboratorCount":1,"nodeWorkspaceCount":1,"readyAgentDriverCount":1,"deviceCount":2}"#
+        case "/aru/v1/node-settings":
+            payload = #"{"schema":"aru.selfhost.node-settings.v1","displayName":"Example Home Mac","revision":3,"updatedAt":1784090000000}"#
+        case "/aru/v1/devices":
+            payload = #"{"schema":"aru.selfhost.paired-device-inventory.v1","currentDeviceId":"dev_console","devices":[{"deviceId":"dev_phone","label":"Example iPhone","issuedAt":1784080000000,"revokedAt":null,"isCurrent":false},{"deviceId":"dev_console","label":"Aru Host Console","issuedAt":1784090000000,"revokedAt":null,"isCurrent":true}]}"#
+        default:
+            client?.urlProtocol(self, didFailWithError: URLError(.unsupportedURL))
+            return
+        }
+
+        let response = HTTPURLResponse(
+            url: request.url!,
+            statusCode: 200,
+            httpVersion: "HTTP/1.1",
+            headerFields: ["Content-Type": "application/json"]
+        )!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(payload.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
 }

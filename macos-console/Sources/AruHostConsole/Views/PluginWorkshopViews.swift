@@ -38,7 +38,7 @@ struct PluginEditorSeed: Identifiable {
 
 struct PluginEditorSheet: View {
     @Environment(\.dismiss) private var dismiss
-    @ObservedObject var runtime: HostConsoleRuntime
+    let runtime: HostConsoleRuntime
     let seed: PluginEditorSeed
 
     @State private var pluginId: String

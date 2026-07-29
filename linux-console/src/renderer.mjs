@@ -14,7 +14,7 @@ const copy = {
     artifactsTitle: "工作产物", artifactsDetail: "二进制结果由 Host 按哈希保存，下载和删除都走明确动作。", noArtifacts: "还没有产物", noArtifactsDetail: "隔离工作发布的文件会在这里出现。",
     collaboratorsTitle: "电脑协作者", collaboratorsDetail: "每位协作者拥有自己的 Host 对话、认知、页面和工具准入，驱动只是执行出口。", newCollaborator: "创建协作者", providerRoutes: "模型路线", newProvider: "添加模型路线", noCollaborators: "还没有电脑协作者", noCollaboratorsDetail: "选择一个已就绪的驱动，建立第一位由这台电脑持续承载的协作者。", driver: "驱动", provider: "模型路线", studio: "进入工作台", refreshDrivers: "重新探测驱动",
     providerProtocol: "协议", baseURL: "基础地址", requestPath: "请求路径", model: "模型", apiKey: "API 密钥", authMode: "鉴权方式", maxOutput: "最大输出 token，可留空", maxRounds: "最大工具轮数，可留空", routeReady: "可用", routeUnavailable: "不可用",
-    conversations: "对话", surfaces: "页面", cognition: "认知", newConversation: "新对话", conversationTitle: "对话标题，可留空", send: "发送", approve: "允许", deny: "拒绝", stop: "停止生成", noConversations: "还没有对话", newSurface: "新页面", surfaceTitle: "页面标题", htmlSource: "完整 HTML", note: "版本说明", networkAccess: "网络访问", networkNone: "关闭", networkOutbound: "允许出站", noSurfaces: "还没有页面", systemPrompt: "系统指令", instructionEnvironment: "指令环境", isolated: "独立", inheritCodex: "继承电脑 Codex 环境", memories: "记忆", references: "参考资料", noCognitionRecords: "这里还没有记录",
+    conversations: "对话", surfaces: "页面", cognition: "认知", initiative: "主动约定", newInitiative: "新建主动约定", initiativeTitle: "标题", initiativeGoal: "他到时候想主动做什么", initiativeInstructions: "语气、背景或判断说明", initiativeWhen: "首次触发", initiativeRepeat: "重复", initiativeOnce: "仅一次", initiativeHourly: "每小时", initiativeDaily: "每天", initiativeWeekly: "每周", initiativeNotify: "完成后通知已连接手机", initiativeRunNow: "现在运行", initiativePause: "暂停", initiativeResume: "继续", noInitiative: "还没有主动约定", initiativeHostOwned: "规则由 Host Core 持续执行，关闭窗口不会停止。", initiativeDeliveries: "已完成 {count} 次", projects: "页面项目", newProject: "新建页面项目", projectTitle: "项目名称", projectGitHub: "GitHub 仓库链接，可留空", projectEntry: "手机展示入口", projectHostOwned: "一个 Host 工作区、一份 Git 状态；保存进入产物，发布才更新手机。", noProjects: "还没有页面项目", projectSave: "保存进产物", projectPublish: "发布到手机", projectNote: "本次说明", projectNetwork: "手机页面联网", projectDirty: "有未提交改动", projectPublished: "已连接手机", projectUnpublished: "尚未发布", projectCheckpoints: "{count} 个检查点", newConversation: "新对话", conversationTitle: "对话标题，可留空", send: "发送", approve: "允许", deny: "拒绝", stop: "停止生成", noConversations: "还没有对话", newSurface: "新页面", surfaceTitle: "页面标题", htmlSource: "完整 HTML", note: "版本说明", networkAccess: "网络访问", networkNone: "关闭", networkOutbound: "允许出站", noSurfaces: "还没有页面", systemPrompt: "系统指令", instructionEnvironment: "指令环境", isolated: "独立", inheritCodex: "继承电脑 Codex 环境", memories: "记忆", references: "参考资料", noCognitionRecords: "这里还没有记录",
     updateAvailable: "可更新到 {version}", updateAction: "下载更新", updateHint: "会交给系统的软件安装器，Host 数据留在原目录。", operationDone: "已完成", destructiveTitle: "确认这个动作", failureTitle: "这里没有成功完成", repair: "修复安全连接", chooseFolder: "选择文件夹", name: "名称", status: "状态", size: "大小", updated: "更新于", unknown: "未知",
     settings: "设置", toolAccess: "工具准入", allTools: "允许当前和未来全部工具", selectedTools: "只允许指定工具", toolNames: "工具名称，用逗号分隔", approveSession: "本次运行允许", archive: "归档", restore: "恢复", editSurface: "编辑页面", rollbackVersion: "回滚版本", newMemory: "添加记忆", newReference: "添加参考资料", recordTitle: "标题", recordContent: "内容", bundleEditUnavailable: "工程页面请回到它的电脑工作区编辑", consoleVersionNote: "由 Linux Console 发布", consoleRollbackNote: "由 Linux Console 回滚", uninstallHost: "移除这台电脑的 Host", uninstallHostDetail: "停止并移除当前用户的后台服务和设置，协作者、对话、页面与其他数据仍保留。", hostRemoved: "Host 已从当前用户移除，数据仍然保留。现在可以关闭窗口并卸载系统里的 Aru Host 应用。", enabled: "已启用", disabled: "未启用", thisConsole: "当前 Console",
   },
@@ -31,7 +31,7 @@ const copy = {
     artifactsTitle: "Work artifacts", artifactsDetail: "Host stores binary results by hash. Download and deletion remain explicit actions.", noArtifacts: "No artifacts yet", noArtifactsDetail: "Files published by isolated work appear here.",
     collaboratorsTitle: "Computer collaborators", collaboratorsDetail: "Each collaborator owns Host conversations, cognition, pages, and tool admission. Drivers are execution outlets only.", newCollaborator: "Create collaborator", providerRoutes: "Model routes", newProvider: "Add model route", noCollaborators: "No computer collaborators", noCollaboratorsDetail: "Choose a ready driver and create the first collaborator continuously hosted by this computer.", driver: "Driver", provider: "Model route", studio: "Open studio", refreshDrivers: "Refresh drivers",
     providerProtocol: "Protocol", baseURL: "Base URL", requestPath: "Request path", model: "Model", apiKey: "API key", authMode: "Authentication", maxOutput: "Maximum output tokens, optional", maxRounds: "Maximum tool rounds, optional", routeReady: "Ready", routeUnavailable: "Unavailable",
-    conversations: "Conversations", surfaces: "Pages", cognition: "Cognition", newConversation: "New conversation", conversationTitle: "Conversation title, optional", send: "Send", approve: "Allow", deny: "Deny", stop: "Stop", noConversations: "No conversations yet", newSurface: "New page", surfaceTitle: "Page title", htmlSource: "Complete HTML", note: "Version note", networkAccess: "Network access", networkNone: "Off", networkOutbound: "Outbound", noSurfaces: "No pages yet", systemPrompt: "System instruction", instructionEnvironment: "Instruction environment", isolated: "Independent", inheritCodex: "Inherit computer Codex environment", memories: "Memories", references: "References", noCognitionRecords: "No records here yet",
+    conversations: "Conversations", surfaces: "Pages", cognition: "Cognition", initiative: "Initiative", newInitiative: "New proactive plan", initiativeTitle: "Title", initiativeGoal: "What should they proactively do?", initiativeInstructions: "Tone, context, or judgment guidance", initiativeWhen: "First run", initiativeRepeat: "Repeat", initiativeOnce: "Once", initiativeHourly: "Hourly", initiativeDaily: "Daily", initiativeWeekly: "Weekly", initiativeNotify: "Notify connected phones when complete", initiativeRunNow: "Run now", initiativePause: "Pause", initiativeResume: "Resume", noInitiative: "No proactive plans yet", initiativeHostOwned: "Host Core keeps schedules running after this window closes.", initiativeDeliveries: "{count} completed", projects: "Page projects", newProject: "New page project", projectTitle: "Project name", projectGitHub: "GitHub repository URL, optional", projectEntry: "Phone entry point", projectHostOwned: "One Host workspace and one Git state. Save creates an artifact; Publish updates the phone.", noProjects: "No page projects yet", projectSave: "Save to artifacts", projectPublish: "Publish to phone", projectNote: "Checkpoint note", projectNetwork: "Phone surface network", projectDirty: "Uncommitted changes", projectPublished: "Connected to phone", projectUnpublished: "Not published", projectCheckpoints: "{count} checkpoints", newConversation: "New conversation", conversationTitle: "Conversation title, optional", send: "Send", approve: "Allow", deny: "Deny", stop: "Stop", noConversations: "No conversations yet", newSurface: "New page", surfaceTitle: "Page title", htmlSource: "Complete HTML", note: "Version note", networkAccess: "Network access", networkNone: "Off", networkOutbound: "Outbound", noSurfaces: "No pages yet", systemPrompt: "System instruction", instructionEnvironment: "Instruction environment", isolated: "Independent", inheritCodex: "Inherit computer Codex environment", memories: "Memories", references: "References", noCognitionRecords: "No records here yet",
     updateAvailable: "Update to {version}", updateAction: "Download update", updateHint: "Your system installer handles the package and Host data remains in place.", operationDone: "Done", destructiveTitle: "Confirm this action", failureTitle: "This did not complete", repair: "Repair secure connection", chooseFolder: "Choose folder", name: "Name", status: "Status", size: "Size", updated: "Updated", unknown: "Unknown",
     settings: "Settings", toolAccess: "Tool access", allTools: "Allow all current and future tools", selectedTools: "Allow selected tools only", toolNames: "Tool names, comma separated", approveSession: "Allow for this run", archive: "Archive", restore: "Restore", editSurface: "Edit page", rollbackVersion: "Rollback version", newMemory: "Add memory", newReference: "Add reference", recordTitle: "Title", recordContent: "Content", bundleEditUnavailable: "Edit project pages in their computer workspace", consoleVersionNote: "Published from Linux Console", consoleRollbackNote: "Rolled back from Linux Console", uninstallHost: "Remove this computer's Host", uninstallHostDetail: "Stop and remove this user's background service and settings while preserving collaborators, conversations, pages, and other data.", hostRemoved: "Host was removed from this user and its data was preserved. You can now close this window and uninstall the Aru Host system package.", enabled: "Enabled", disabled: "Disabled", thisConsole: "This Console",
   },
@@ -303,12 +303,14 @@ async function renderCollaboratorStudio(collaborator) {
   setBusy(true);
   try {
     const id = encodeURIComponent(collaborator.collaboratorId);
-    const [conversations, surfaces, cognition] = await Promise.all([
-      api.request("GET", `/aru/v1/hosted-collaborators/${id}/conversations`), api.request("GET", `/aru/v1/hosted-collaborators/${id}/surfaces`), api.request("GET", `/aru/v1/hosted-collaborators/${id}/cognition`),
+    const [conversations, surfaces, projects, cognition, initiative] = await Promise.all([
+      api.request("GET", `/aru/v1/hosted-collaborators/${id}/conversations`), api.request("GET", `/aru/v1/hosted-collaborators/${id}/surfaces`), api.request("GET", `/aru/v1/hosted-collaborators/${id}/projects`), api.request("GET", `/aru/v1/hosted-collaborators/${id}/cognition`), api.request("GET", `/aru/v1/hosted-collaborators/${id}/initiative`),
     ]);
     content.innerHTML = pageHead("collaborators", collaborator.displayName, t("collaboratorsDetail"), `<button class="quiet-button" data-back>${esc(t("collaborators"))}</button>`)
-      + `<div class="metrics">${metric(conversations.conversations.length, t("conversations"))}${metric(surfaces.surfaces.length, t("surfaces"))}${metric(cognition.memories.length, t("memories"))}${metric(cognition.references.length, t("references"))}</div>`
+      + `<div class="metrics">${metric(conversations.conversations.length, t("conversations"))}${metric(projects.projects.length, t("projects"))}${metric(surfaces.surfaces.length, t("surfaces"))}${metric(cognition.memories.length, t("memories"))}</div>`
       + sectionBlock(t("conversations"), "", `<div class="section-title"><div></div><button class="quiet-button" data-new-conversation>${esc(t("newConversation"))}</button></div>${conversations.conversations.length ? `<div class="raised-list">${conversations.conversations.map((item) => row(item.title, item.lastMessagePreview || formatDate(item.updatedAt), `<button class="quiet-button" data-conversation="${escAttr(item.conversationId)}">${esc(t("open"))}</button>`)).join("")}</div>` : empty("◌", t("noConversations"), t("conversations"))}`)
+      + sectionBlock(t("initiative"), t("initiativeHostOwned"), `<div class="section-title"><div></div><button class="quiet-button" data-new-initiative>${esc(t("newInitiative"))}</button></div>${liveInitiativeRules(initiative).length ? `<div class="raised-list">${liveInitiativeRules(initiative).map((rule) => row(rule.title, `${rule.enabled ? formatDate(rule.nextFireAt) : t("initiativePause")} · ${t("initiativeDeliveries", { count: rule.deliveryCount })}${rule.lastFailure ? ` · ${rule.lastFailure}` : ""}`, `<button class="quiet-button" data-initiative-toggle="${escAttr(rule.ruleId)}" data-initiative-enabled="${String(rule.enabled)}">${esc(t(rule.enabled ? "initiativePause" : "initiativeResume"))}</button><button class="quiet-button" data-initiative-run="${escAttr(rule.ruleId)}">${esc(t("initiativeRunNow"))}</button><button class="danger-button" data-initiative-archive="${escAttr(rule.ruleId)}">${esc(t("archive"))}</button>`)).join("")}</div>` : empty("✦", t("noInitiative"), t("initiativeHostOwned"))}`)
+      + sectionBlock(t("projects"), t("projectHostOwned"), `<div class="section-title"><div></div><button class="quiet-button" data-new-project>${esc(t("newProject"))}</button></div>${liveProjects(projects).length ? `<div class="raised-list">${liveProjects(projects).map((project) => row(project.title, projectSummary(project), `<button class="quiet-button" data-project-save="${escAttr(project.projectId)}">${esc(t("projectSave"))}</button><button class="primary-button" data-project-publish="${escAttr(project.projectId)}">${esc(t("projectPublish"))}</button>`)).join("")}</div>` : empty("▱", t("noProjects"), t("projectHostOwned"))}`)
       + sectionBlock(t("surfaces"), "", `<div class="section-title"><div></div><button class="quiet-button" data-new-surface>${esc(t("newSurface"))}</button></div>${surfaces.surfaces.length ? `<div class="raised-list">${surfaces.surfaces.map((item) => row(item.title, `${item.networkAccess ?? "none"} · v${item.activeVersionOrdinal}`, `${item.delivery === "bundle" ? "" : `<button class="quiet-button" data-edit-surface="${escAttr(item.surfaceId)}">${esc(t("edit"))}</button>`}${item.activeVersionOrdinal > 1 ? `<button class="quiet-button" data-rollback-surface="${escAttr(item.surfaceId)}">${esc(t("rollback"))}</button>` : ""}<button class="quiet-button" data-archive-surface="${escAttr(item.surfaceId)}">${esc(t(item.archivedAt ? "restore" : "archive"))}</button>`)).join("")}</div>` : empty("▱", t("noSurfaces"), t("surfaces"))}`)
       + sectionBlock(t("cognition"), "", `<div class="detail-panel"><label class="field"><span>${esc(t("instructionEnvironment"))}</span><select id="cognition-environment"><option value="isolated" ${cognition.instructionEnvironment === "isolated" ? "selected" : ""}>${esc(t("isolated"))}</option><option value="inheritCodex" ${cognition.instructionEnvironment === "inheritCodex" ? "selected" : ""}>${esc(t("inheritCodex"))}</option></select></label><label class="field"><span>${esc(t("systemPrompt"))}</span><textarea id="system-prompt">${esc(cognition.systemPrompt)}</textarea></label><button class="primary-button" data-save-cognition>${esc(t("save"))}</button>${recordList(t("memories"), cognition.memories, "memories")}${recordList(t("references"), cognition.references, "references")}</div>`);
     content.querySelector("[data-back]").addEventListener("click", () => selectSection("collaborators"));
@@ -317,6 +319,13 @@ async function renderCollaboratorStudio(collaborator) {
       await mutate(() => api.request("POST", `/aru/v1/hosted-collaborators/${id}/conversations`, { title: values.title || null }), null, () => renderCollaboratorStudio(collaborator));
     });
     content.querySelectorAll("[data-conversation]").forEach((button) => button.addEventListener("click", () => openConversation(collaborator, button.dataset.conversation)));
+    content.querySelector("[data-new-initiative]").addEventListener("click", () => createInitiative(collaborator, initiative));
+    content.querySelectorAll("[data-initiative-toggle]").forEach((button) => button.addEventListener("click", () => mutate(() => api.request("PUT", `/aru/v1/hosted-collaborators/${id}/initiative/rules/${encodeURIComponent(button.dataset.initiativeToggle)}`, { expectedRevision: initiative.revision, enabled: button.dataset.initiativeEnabled !== "true" }), null, () => renderCollaboratorStudio(collaborator))));
+    content.querySelectorAll("[data-initiative-run]").forEach((button) => button.addEventListener("click", () => mutate(() => api.request("POST", `/aru/v1/hosted-collaborators/${id}/initiative/rules/${encodeURIComponent(button.dataset.initiativeRun)}/run`, { expectedRevision: initiative.revision }), null, () => renderCollaboratorStudio(collaborator))));
+    content.querySelectorAll("[data-initiative-archive]").forEach((button) => button.addEventListener("click", () => mutate(() => api.request("POST", `/aru/v1/hosted-collaborators/${id}/initiative/rules/${encodeURIComponent(button.dataset.initiativeArchive)}/archive`, { expectedRevision: initiative.revision }), null, () => renderCollaboratorStudio(collaborator))));
+    content.querySelector("[data-new-project]").addEventListener("click", () => createProject(collaborator));
+    content.querySelectorAll("[data-project-save]").forEach((button) => button.addEventListener("click", () => saveProject(collaborator, projects, button.dataset.projectSave)));
+    content.querySelectorAll("[data-project-publish]").forEach((button) => button.addEventListener("click", () => publishProject(collaborator, projects, surfaces, button.dataset.projectPublish)));
     content.querySelector("[data-new-surface]").addEventListener("click", () => editSurface(collaborator, null));
     content.querySelectorAll("[data-edit-surface]").forEach((button) => button.addEventListener("click", () => editSurface(collaborator, button.dataset.editSurface)));
     content.querySelectorAll("[data-rollback-surface]").forEach((button) => button.addEventListener("click", () => rollbackSurface(collaborator, button.dataset.rollbackSurface)));
@@ -330,6 +339,91 @@ async function renderCollaboratorStudio(collaborator) {
     content.querySelectorAll("[data-archive-record]").forEach((button) => button.addEventListener("click", () => mutate(() => api.request("POST", `/aru/v1/hosted-collaborators/${id}/cognition/${button.dataset.recordKind}/${encodeURIComponent(button.dataset.archiveRecord)}/${button.dataset.recordArchived === "true" ? "restore" : "archive"}`, { expectedRevision: cognition.revision }), null, () => renderCollaboratorStudio(collaborator))));
   } catch (error) { renderSectionFailure(error); }
   finally { setBusy(false); }
+}
+
+function liveInitiativeRules(initiative) {
+  return initiative.rules.filter((rule) => rule.archivedAt === null).sort((left, right) => right.updatedAt - left.updatedAt);
+}
+
+function liveProjects(inventory) {
+  return inventory.projects.filter((project) => project.archivedAt === null).sort((left, right) => right.updatedAt - left.updatedAt);
+}
+
+function projectSummary(project) {
+  const repository = project.repository;
+  const git = repository
+    ? [repository.branch, repository.commit?.slice(0, 8), repository.dirty ? t("projectDirty") : null].filter(Boolean).join(" · ")
+    : project.workspacePath;
+  return `${git} · ${t("projectCheckpoints", { count: project.checkpointCount })} · ${t(project.surfaceId ? "projectPublished" : "projectUnpublished")}`;
+}
+
+async function createProject(collaborator) {
+  const values = await openForm(t("newProject"), [
+    { name: "title", label: t("projectTitle"), required: true },
+    { name: "repositoryURL", label: t("projectGitHub") },
+    { name: "entryPath", label: t("projectEntry"), value: "index.html", required: true },
+  ], t("create"));
+  if (!values) return;
+  const root = `/aru/v1/hosted-collaborators/${encodeURIComponent(collaborator.collaboratorId)}/projects`;
+  await mutate(() => api.request("POST", root, {
+    title: values.title,
+    repositoryURL: values.repositoryURL || null,
+    entryPath: values.entryPath,
+  }), null, () => renderCollaboratorStudio(collaborator));
+}
+
+async function saveProject(collaborator, inventory, projectId) {
+  const project = inventory.projects.find((item) => item.projectId === projectId);
+  const values = await openForm(t("projectSave"), [
+    { name: "note", label: t("projectNote") },
+  ], t("projectSave"));
+  if (!values) return;
+  const root = `/aru/v1/hosted-collaborators/${encodeURIComponent(collaborator.collaboratorId)}/projects/${encodeURIComponent(project.projectId)}`;
+  await mutate(() => api.request("POST", `${root}/checkpoint`, {
+    expectedRevision: project.revision,
+    note: values.note,
+  }), null, () => renderCollaboratorStudio(collaborator));
+}
+
+async function publishProject(collaborator, inventory, surfaces, projectId) {
+  const project = inventory.projects.find((item) => item.projectId === projectId);
+  const surface = surfaces.surfaces.find((item) => item.surfaceId === project.surfaceId);
+  const values = await openForm(t("projectPublish"), [
+    { name: "note", label: t("projectNote") },
+    { name: "networkAccess", label: t("projectNetwork"), type: "select", value: surface?.networkAccess ?? "none", options: [["none", t("networkNone")], ["outbound", t("networkOutbound")]] },
+  ], t("projectPublish"));
+  if (!values) return;
+  const root = `/aru/v1/hosted-collaborators/${encodeURIComponent(collaborator.collaboratorId)}/projects/${encodeURIComponent(project.projectId)}`;
+  await mutate(() => api.request("POST", `${root}/publish`, {
+    expectedRevision: project.revision,
+    expectedSurfaceRevision: surface?.revision ?? null,
+    note: values.note,
+    networkAccess: values.networkAccess,
+  }), null, () => renderCollaboratorStudio(collaborator));
+}
+
+async function createInitiative(collaborator, initiative) {
+  const values = await openForm(t("newInitiative"), [
+    { name: "title", label: t("initiativeTitle"), required: true },
+    { name: "goal", label: t("initiativeGoal"), type: "textarea", required: true },
+    { name: "instructions", label: t("initiativeInstructions"), type: "textarea" },
+    { name: "fireAfterMinutes", label: t("initiativeWhen"), type: "select", value: "30", options: [["1", "1 min"], ["5", "5 min"], ["15", "15 min"], ["30", "30 min"], ["60", "1 h"], ["180", "3 h"]] },
+    { name: "recurrenceMinutes", label: t("initiativeRepeat"), type: "select", value: "0", options: [["0", t("initiativeOnce")], ["60", t("initiativeHourly")], ["1440", t("initiativeDaily")], ["10080", t("initiativeWeekly")]] },
+    { name: "notificationsEnabled", label: t("initiativeNotify"), type: "select", value: "true", options: [["true", t("enabled")], ["false", t("disabled")]] },
+  ], t("create"));
+  if (!values) return;
+  const id = encodeURIComponent(collaborator.collaboratorId);
+  const fireAfterMinutes = Number(values.fireAfterMinutes);
+  await mutate(() => api.request("POST", `/aru/v1/hosted-collaborators/${id}/initiative`, {
+    expectedRevision: initiative.revision,
+    title: values.title,
+    goal: values.goal,
+    instructions: values.instructions,
+    nextFireAt: Date.now() + fireAfterMinutes * 60_000,
+    recurrenceMinutes: Number(values.recurrenceMinutes) || null,
+    notificationsEnabled: values.notificationsEnabled === "true",
+    enabled: true,
+  }), null, () => renderCollaboratorStudio(collaborator));
 }
 
 async function editSurface(collaborator, surfaceId) {

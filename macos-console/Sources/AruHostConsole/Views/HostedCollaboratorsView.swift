@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct HostedCollaboratorsView: View {
-    @ObservedObject var runtime: HostConsoleRuntime
+    let runtime: HostConsoleRuntime
     @StateObject private var providerRuntime = HostProviderProfileRuntime()
     @State private var presentsCreateCollaborator = false
     @State private var selectedCollaborator: HostedCollaborator?
@@ -257,7 +257,7 @@ private struct CollaboratorRow: View {
 }
 
 private struct CreateCollaboratorSheet: View {
-    @ObservedObject var runtime: HostConsoleRuntime
+    let runtime: HostConsoleRuntime
     let providerProfiles: [HostProviderProfile]
     @Environment(\.dismiss) private var dismiss
     @State private var displayName = ""
@@ -358,7 +358,7 @@ private struct CreateCollaboratorSheet: View {
 }
 
 private struct CollaboratorDriverBindingSheet: View {
-    @ObservedObject var runtime: HostConsoleRuntime
+    let runtime: HostConsoleRuntime
     let collaborator: HostedCollaborator
     let providerProfiles: [HostProviderProfile]
 

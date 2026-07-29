@@ -29,6 +29,7 @@ export function createCollaboratorConversationHost({
   executeTool,
   requestInstructions = collaboratorInstructions,
   configurationRevision = () => null,
+  onTurnSettled = () => {},
   now = Date.now,
   defer = setImmediate,
 }) {
@@ -159,7 +160,7 @@ export function createCollaboratorConversationHost({
     return publicConversation(conversation, true);
   }
 
-  function enqueueMessage(conversation, collaborator, body, device) {
+  function enqueueMessage(conversation, collaborator, body, device, options = {}) {
     if (conversation.archivedAt) {
       throw new HttpError(409, "conversation.archived", "archived conversation cannot accept messages");
     }
@@ -175,7 +176,7 @@ export function createCollaboratorConversationHost({
     const userMessage = {
       messageId: `hostmsg_${randomUUID()}`,
       clientRequestId,
-      role: "user",
+      role: options.role ?? "user",
       content: text,
       status: "completed",
       createdAt: timestamp,
@@ -201,6 +202,8 @@ export function createCollaboratorConversationHost({
       completedAt: null,
       failure: null,
       cancelledByDeviceId: null,
+      source: options.source ?? "client",
+      ruleId: options.ruleId ?? null,
     };
     conversation.messages.push(userMessage, assistantMessage);
     conversation.activeTurn = turn;
@@ -214,6 +217,31 @@ export function createCollaboratorConversationHost({
     saveConversation(conversation);
     defer(() => runTurn(conversation.collaboratorId, conversation.conversationId, collaborator));
     return publicConversation(conversation, true);
+  }
+
+  function runProactive(collaborator, rule) {
+    const device = { deviceId: "host-scheduler" };
+    let conversation = null;
+    if (rule.conversationId) {
+      try { conversation = loadConversation(collaborator.collaboratorId, rule.conversationId); }
+      catch (error) {
+        if (!(error instanceof HttpError) || error.status !== 404) throw error;
+      }
+    }
+    if (!conversation) {
+      conversation = loadConversation(
+        collaborator.collaboratorId,
+        createConversation(collaborator, { title: rule.title || "主动消息" }, device).conversationId,
+      );
+    }
+    return enqueueMessage(conversation, collaborator, {
+      clientRequestId: `initiative_${rule.ruleId}_${now()}`,
+      text: rule.seed,
+    }, device, {
+      role: "system",
+      source: "proactive",
+      ruleId: rule.ruleId,
+    });
   }
 
   async function runTurn(collaboratorId, conversationId, collaborator) {
@@ -517,6 +545,7 @@ export function createCollaboratorConversationHost({
     appendEvent(conversation, "turn.completed", { turnId: turn.turnId });
     touch(conversation, null);
     saveConversation(conversation);
+    emitTurnSettled(conversation, turn, "completed", null);
     clearActiveConversation(conversation);
   }
 
@@ -530,6 +559,7 @@ export function createCollaboratorConversationHost({
     appendEvent(conversation, "turn.failed", { turnId: turn.turnId, message: failure });
     touch(conversation, null);
     saveConversation(conversation);
+    emitTurnSettled(conversation, turn, "failed", failure);
     clearActiveConversation(conversation);
   }
 
@@ -543,7 +573,20 @@ export function createCollaboratorConversationHost({
     appendEvent(conversation, "turn.interrupted", { turnId: turn.turnId, message: failure });
     touch(conversation, null);
     saveConversation(conversation);
+    emitTurnSettled(conversation, turn, "interrupted", failure);
     clearActiveConversation(conversation);
+  }
+
+  function emitTurnSettled(conversation, turn, outcome, failure) {
+    const assistantMessage = message(conversation, turn.assistantMessageId);
+    const event = {
+      outcome,
+      failure,
+      conversation: publicConversation(conversation, true),
+      turn: publicTurn(turn),
+      assistantMessage: assistantMessage ? { ...assistantMessage } : null,
+    };
+    void Promise.resolve(onTurnSettled(event)).catch(() => {});
   }
 
   function clearActiveConversation(conversation) {
@@ -588,7 +631,9 @@ export function createCollaboratorConversationHost({
       lastMessagePreview: conversation.messages.at(-1)?.content.slice(0, 180) ?? "",
     };
     if (includeBody) {
-      value.messages = conversation.messages.map(({ clientRequestId: _, ...item }) => item);
+      value.messages = conversation.messages
+        .filter((item) => item.role !== "system")
+        .map(({ clientRequestId: _, ...item }) => item);
       value.approvals = conversation.approvals.map(publicApproval);
     }
     return value;
@@ -660,6 +705,7 @@ export function createCollaboratorConversationHost({
   return {
     route,
     inventory,
+    runProactive,
     status() {
       const conversations = [];
       if (existsSync(root)) {

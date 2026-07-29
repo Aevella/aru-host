@@ -116,6 +116,7 @@ export function createCollaboratorSurfaceBundleStore({
   function walk(root, relativeDirectory, files) {
     const directory = join(root, relativeDirectory);
     for (const name of readdirSync(directory).sort()) {
+      if (name.startsWith(".")) continue;
       const relativePath = relativeDirectory ? `${relativeDirectory}/${name}` : name;
       const path = join(directory, name);
       const stat = lstatSync(path);

@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct PluginSupervisorView: View {
-    @ObservedObject var runtime: HostConsoleRuntime
+    let runtime: HostConsoleRuntime
     @State private var selectedPluginID: String?
     @State private var editorSeed: PluginEditorSeed?
     @State private var confirmation: PluginConfirmation?
