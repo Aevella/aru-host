@@ -56,7 +56,7 @@ jobs:
       - name: Verify current-user installer and Console
         run: |
           npm ci --prefix linux-console
-          npm audit --prefix linux-console
+          npm audit --prefix linux-console --omit=dev
           bash tests/linux-desktop-installer-smoke.sh
           npm test --prefix linux-console
       - name: Build, inspect, and install x64 desktop package

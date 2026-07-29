@@ -10,6 +10,7 @@ extension HostConsoleRuntime {
               value.collaboratorId == collaboratorId else {
             throw HostConsoleModelError.invalidCollaboratorSchema
         }
+        guard collaboratorCognitions[collaboratorId] != value else { return }
         collaboratorCognitions[collaboratorId] = value
     }
 

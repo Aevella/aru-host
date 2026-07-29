@@ -9,9 +9,11 @@ extension HostConsoleRuntime {
               inventory.collaboratorId == collaboratorId else {
             throw HostConsoleModelError.invalidCollaboratorSchema
         }
-        collaboratorProjects[collaboratorId] = inventory.projects.sorted {
+        let projects = inventory.projects.sorted {
             $0.updatedAt == $1.updatedAt ? $0.projectId < $1.projectId : $0.updatedAt > $1.updatedAt
         }
+        guard collaboratorProjects[collaboratorId] != projects else { return }
+        collaboratorProjects[collaboratorId] = projects
     }
 
     @discardableResult

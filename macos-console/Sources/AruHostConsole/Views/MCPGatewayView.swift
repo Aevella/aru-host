@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct MCPGatewayView: View {
-    @ObservedObject var runtime: HostConsoleRuntime
+    let runtime: HostConsoleRuntime
     @State private var query = ""
     @State private var scope: MCPDirectoryScope = .all
     @State private var collaboratorForEditing: HostedCollaborator?
@@ -320,7 +320,7 @@ private struct CollaboratorScopeButtonStyle: ButtonStyle {
 }
 
 private struct CollaboratorToolAccessSheet: View {
-    @ObservedObject var runtime: HostConsoleRuntime
+    let runtime: HostConsoleRuntime
     let collaborator: HostedCollaborator
     let tools: [MCPToolSummary]
     let plugins: [HostPlugin]

@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct CollaboratorConversationStudioView: View {
-    @ObservedObject var runtime: HostConsoleRuntime
+    let runtime: HostConsoleRuntime
     let collaborator: HostedCollaborator
 
     @State private var selectedConversationId: String?

@@ -2,7 +2,7 @@ import SwiftUI
 import WebKit
 
 struct CollaboratorSurfaceStudioView: View {
-    @ObservedObject var runtime: HostConsoleRuntime
+    let runtime: HostConsoleRuntime
     let collaborator: HostedCollaborator
 
     @Environment(\.dismiss) private var dismiss

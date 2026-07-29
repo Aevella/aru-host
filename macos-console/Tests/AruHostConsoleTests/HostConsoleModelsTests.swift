@@ -1,4 +1,6 @@
 import Foundation
+import Observation
+import Synchronization
 import Testing
 @testable import AruHostConsole
 
@@ -555,4 +557,63 @@ import Testing
     #expect(inventory.devices.count == 2)
     #expect(inventory.devices.first(where: \.isCurrent)?.deviceId == "dev_console")
     #expect(inventory.devices.allSatisfy { $0.isActive })
+}
+
+@Test @MainActor func equalQuietOverviewRefreshDoesNotInvalidateItsConsumers() async throws {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [StableOverviewURLProtocol.self]
+    let runtime = HostConsoleRuntime(
+        session: URLSession(configuration: configuration),
+        baseURL: URL(string: "http://aru-host.test")!
+    )
+
+    await runtime.refresh(.overview, showsActivity: false)
+    #expect(runtime.diagnostics?.serverId == "home-mac")
+
+    let invalidated = Mutex(false)
+    withObservationTracking {
+        _ = runtime.diagnostics
+        _ = runtime.nodeSettings
+        _ = runtime.pairedDevices
+        _ = runtime.loadingSections
+    } onChange: {
+        invalidated.withLock { $0 = true }
+    }
+
+    await runtime.refresh(.overview, showsActivity: false)
+
+    #expect(!invalidated.withLock { $0 })
+    #expect(runtime.loadingSections.isEmpty)
+}
+
+private final class StableOverviewURLProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        let payload: String
+        switch request.url?.path {
+        case "/aru/v1/diagnostics":
+            payload = #"{"schema":"aru.selfhost.diagnostics.v1","serverId":"home-mac","serverVersion":"0.28.0","serverTime":1784090000000,"manifest":"ok","auth":"ok","capabilities":[],"packageCount":1,"artifactCount":2,"jobCount":3,"activeJobCount":0,"pluginCount":4,"activePluginCount":4,"hostedCollaboratorCount":1,"nodeWorkspaceCount":1,"readyAgentDriverCount":1,"deviceCount":2}"#
+        case "/aru/v1/node-settings":
+            payload = #"{"schema":"aru.selfhost.node-settings.v1","displayName":"Example Home Mac","revision":3,"updatedAt":1784090000000}"#
+        case "/aru/v1/devices":
+            payload = #"{"schema":"aru.selfhost.paired-device-inventory.v1","currentDeviceId":"dev_console","devices":[{"deviceId":"dev_phone","label":"Example iPhone","issuedAt":1784080000000,"revokedAt":null,"isCurrent":false},{"deviceId":"dev_console","label":"Aru Host Console","issuedAt":1784090000000,"revokedAt":null,"isCurrent":true}]}"#
+        default:
+            client?.urlProtocol(self, didFailWithError: URLError(.unsupportedURL))
+            return
+        }
+
+        let response = HTTPURLResponse(
+            url: request.url!,
+            statusCode: 200,
+            httpVersion: "HTTP/1.1",
+            headerFields: ["Content-Type": "application/json"]
+        )!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(payload.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
 }

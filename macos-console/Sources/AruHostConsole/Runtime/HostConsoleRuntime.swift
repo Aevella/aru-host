@@ -1,56 +1,59 @@
 import Foundation
+import Observation
 
 @MainActor
-final class HostConsoleRuntime: ObservableObject {
-    @Published private(set) var phase: HostConsolePhase = .loading
-    @Published private(set) var manifest: HostManifest?
-    @Published private(set) var diagnostics: HostDiagnostics?
-    @Published private(set) var nodeSettings: HostNodeSettings?
-    @Published private(set) var pairedDevices: [HostPairedDevice] = []
-    @Published private(set) var backups: [BackupPackage] = []
-    @Published private(set) var backupSettings: HostBackupSettings?
-    @Published private(set) var mcpGateway: MCPGatewaySnapshot?
-    @Published private(set) var plugins: [HostPlugin] = []
-    @Published private(set) var pluginDrafts: [HostPluginDraft] = []
-    @Published private(set) var pluginActionMessage: String?
-    @Published private(set) var pluginActionFailed = false
-    @Published private(set) var workspaces: [HostNodeWorkspace] = []
-    @Published private(set) var jobs: [HostWorkspaceJob] = []
-    @Published private(set) var jobPolicy: HostWorkspaceJobPolicy?
-    @Published private(set) var artifacts: [HostArtifact] = []
-    @Published private(set) var driverInventory: AgentDriverInventory?
-    @Published private(set) var collaborators: [HostedCollaborator] = []
-    @Published private(set) var collaboratorSurfaces: [String: [HostCollaboratorSurface]] = [:]
-    @Published var collaboratorProjects: [String: [HostCollaboratorProject]] = [:]
-    @Published private(set) var collaboratorConversations: [String: [HostCollaboratorConversation]] = [:]
-    @Published private(set) var collaboratorConversationDetails: [String: HostCollaboratorConversation] = [:]
-    @Published var collaboratorCognitions: [String: HostCollaboratorCognition] = [:]
-    @Published var collaboratorInitiatives: [String: HostCollaboratorInitiative] = [:]
-    @Published private(set) var sectionErrors: [HostConsoleSection: String] = [:]
-    @Published private(set) var loadingSections: Set<HostConsoleSection> = []
-    @Published private(set) var mutatingPluginIds: Set<String> = []
-    @Published private(set) var isRefreshing = false
-    @Published private(set) var isPairing = false
-    @Published private(set) var isCreatingCollaborator = false
-    @Published private(set) var mutatingCollaboratorIds: Set<String> = []
-    @Published private(set) var mutatingSurfaceIds: Set<String> = []
-    @Published var mutatingProjectIds: Set<String> = []
-    @Published private(set) var mutatingConversationIds: Set<String> = []
-    @Published var mutatingCognitionIds: Set<String> = []
-    @Published var mutatingInitiativeIds: Set<String> = []
-    @Published private(set) var isUpdatingJobPolicy = false
-    @Published private(set) var isUpdatingWorkspaces = false
-    @Published private(set) var isUpdatingNodeSettings = false
-    @Published private(set) var mutatingDeviceIds: Set<String> = []
-    @Published private(set) var mutatingBackupIds: Set<String> = []
-    @Published private(set) var isUpdatingBackupSettings = false
-    @Published private(set) var lastUpdated: Date?
+@Observable
+final class HostConsoleRuntime {
+    private(set) var phase: HostConsolePhase = .loading
+    private(set) var manifest: HostManifest?
+    private(set) var diagnostics: HostDiagnostics?
+    private(set) var nodeSettings: HostNodeSettings?
+    private(set) var pairedDevices: [HostPairedDevice] = []
+    private(set) var backups: [BackupPackage] = []
+    private(set) var backupSettings: HostBackupSettings?
+    private(set) var mcpGateway: MCPGatewaySnapshot?
+    private(set) var plugins: [HostPlugin] = []
+    private(set) var pluginDrafts: [HostPluginDraft] = []
+    private(set) var pluginActionMessage: String?
+    private(set) var pluginActionFailed = false
+    private(set) var workspaces: [HostNodeWorkspace] = []
+    private(set) var jobs: [HostWorkspaceJob] = []
+    private(set) var jobPolicy: HostWorkspaceJobPolicy?
+    private(set) var artifacts: [HostArtifact] = []
+    private(set) var driverInventory: AgentDriverInventory?
+    private(set) var collaborators: [HostedCollaborator] = []
+    private(set) var collaboratorSurfaces: [String: [HostCollaboratorSurface]] = [:]
+    var collaboratorProjects: [String: [HostCollaboratorProject]] = [:]
+    private(set) var collaboratorConversations: [String: [HostCollaboratorConversation]] = [:]
+    private(set) var collaboratorConversationDetails: [String: HostCollaboratorConversation] = [:]
+    var collaboratorCognitions: [String: HostCollaboratorCognition] = [:]
+    var collaboratorInitiatives: [String: HostCollaboratorInitiative] = [:]
+    private(set) var sectionErrors: [HostConsoleSection: String] = [:]
+    private(set) var loadingSections: Set<HostConsoleSection> = []
+    private(set) var mutatingPluginIds: Set<String> = []
+    private(set) var isRefreshing = false
+    private(set) var isPairing = false
+    private(set) var isCreatingCollaborator = false
+    private(set) var mutatingCollaboratorIds: Set<String> = []
+    private(set) var mutatingSurfaceIds: Set<String> = []
+    var mutatingProjectIds: Set<String> = []
+    private(set) var mutatingConversationIds: Set<String> = []
+    var mutatingCognitionIds: Set<String> = []
+    var mutatingInitiativeIds: Set<String> = []
+    private(set) var isUpdatingJobPolicy = false
+    private(set) var isUpdatingWorkspaces = false
+    private(set) var isUpdatingNodeSettings = false
+    private(set) var mutatingDeviceIds: Set<String> = []
+    private(set) var mutatingBackupIds: Set<String> = []
+    private(set) var isUpdatingBackupSettings = false
+    private(set) var lastUpdated: Date?
 
     private let session: URLSession
     private let vault: HostCredentialVault
     private let configuredBaseURL: URL?
     private let hostCoreInstaller: any HostCoreInstalling
     private var credential: String?
+    @ObservationIgnored private var refreshingSections: Set<HostConsoleSection> = []
 
     init(
         session: URLSession = .shared,
@@ -156,18 +159,26 @@ final class HostConsoleRuntime: ObservableObject {
         }
     }
 
-    func refresh(_ section: HostConsoleSection, forceDriverProbe: Bool = false) async {
-        guard !loadingSections.contains(section) else { return }
-        loadingSections.insert(section)
-        defer { loadingSections.remove(section) }
+    func refresh(
+        _ section: HostConsoleSection,
+        forceDriverProbe: Bool = false,
+        showsActivity: Bool = true
+    ) async {
+        guard !refreshingSections.contains(section) else { return }
+        refreshingSections.insert(section)
+        if showsActivity { loadingSections.insert(section) }
+        defer {
+            refreshingSections.remove(section)
+            if showsActivity { loadingSections.remove(section) }
+        }
         do {
             try await load(section, forceDriverProbe: forceDriverProbe && section == .collaborators)
-            sectionErrors[section] = nil
+            setSectionError(nil, for: section)
             lastUpdated = Date()
         } catch HostConsoleHTTPError.unauthorized {
             await handleUnauthorizedCredential()
         } catch {
-            sectionErrors[section] = error.localizedDescription
+            setSectionError(error.localizedDescription, for: section)
         }
     }
 
@@ -436,7 +447,9 @@ final class HostConsoleRuntime: ObservableObject {
               inventory.collaboratorId == collaboratorId else {
             throw HostConsoleModelError.invalidCollaboratorSchema
         }
-        collaboratorSurfaces[collaboratorId] = inventory.surfaces
+        if collaboratorSurfaces[collaboratorId] != inventory.surfaces {
+            collaboratorSurfaces[collaboratorId] = inventory.surfaces
+        }
         lastUpdated = Date()
     }
 
@@ -448,7 +461,9 @@ final class HostConsoleRuntime: ObservableObject {
               inventory.collaboratorId == collaboratorId else {
             throw HostConsoleModelError.invalidCollaboratorSchema
         }
-        collaboratorConversations[collaboratorId] = inventory.conversations
+        if collaboratorConversations[collaboratorId] != inventory.conversations {
+            collaboratorConversations[collaboratorId] = inventory.conversations
+        }
         lastUpdated = Date()
     }
 
@@ -883,18 +898,40 @@ final class HostConsoleRuntime: ObservableObject {
     private func load(_ section: HostConsoleSection, forceDriverProbe: Bool) async throws {
         switch section {
         case .overview:
-            diagnostics = try await request("/aru/v1/diagnostics", authenticated: true)
-            try await loadNodeIdentityAndAccess()
+            async let diagnosticsRequest: HostDiagnostics = request(
+                "/aru/v1/diagnostics",
+                authenticated: true
+            )
+            async let settingsRequest: HostNodeSettings = request(
+                "/aru/v1/node-settings",
+                authenticated: true
+            )
+            async let devicesRequest: HostPairedDeviceInventory = request(
+                "/aru/v1/devices",
+                authenticated: true
+            )
+            let (nextDiagnostics, nextSettings, inventory) = try await (
+                diagnosticsRequest,
+                settingsRequest,
+                devicesRequest
+            )
+            let nextDevices = Self.sortedDevices(inventory.devices)
+            assignIfChanged(nextDiagnostics, to: \HostConsoleRuntime.diagnostics)
+            assignIfChanged(nextSettings, to: \HostConsoleRuntime.nodeSettings)
+            assignIfChanged(nextDevices, to: \HostConsoleRuntime.pairedDevices)
         case .backups:
             async let inventoryRequest: BackupInventory = request("/aru/v1/backups", authenticated: true)
             async let settingsRequest: HostBackupSettings = request(
                 "/aru/v1/backups/settings",
                 authenticated: true)
             let (inventory, settings) = try await (inventoryRequest, settingsRequest)
-            backups = inventory.packages.sorted { $0.uploadedAt > $1.uploadedAt }
-            backupSettings = settings
+            assignIfChanged(
+                inventory.packages.sorted { $0.uploadedAt > $1.uploadedAt },
+                to: \HostConsoleRuntime.backups
+            )
+            assignIfChanged(settings, to: \HostConsoleRuntime.backupSettings)
         case .mcp:
-            mcpGateway = try await loadMCPCatalog()
+            assignIfChanged(try await loadMCPCatalog(), to: \HostConsoleRuntime.mcpGateway)
         case .plugins:
             try await loadPluginState()
         case .workspaces:
@@ -902,15 +939,15 @@ final class HostConsoleRuntime: ObservableObject {
                 "/aru/v1/node-workspaces",
                 authenticated: true
             )
-            workspaces = inventory.workspaces
+            assignIfChanged(inventory.workspaces, to: \HostConsoleRuntime.workspaces)
         case .runtime:
             let inventory: HostWorkspaceJobInventory = try await request("/aru/v1/jobs", authenticated: true)
             let policy: HostWorkspaceJobPolicy = try await request("/aru/v1/jobs/policy", authenticated: true)
-            jobs = inventory.jobs
-            jobPolicy = policy
+            assignIfChanged(inventory.jobs, to: \HostConsoleRuntime.jobs)
+            assignIfChanged(policy, to: \HostConsoleRuntime.jobPolicy)
         case .artifacts:
             let inventory: HostArtifactInventory = try await request("/aru/v1/artifacts", authenticated: true)
-            artifacts = inventory.artifacts
+            assignIfChanged(inventory.artifacts, to: \HostConsoleRuntime.artifacts)
         case .collaborators:
             let driverPath = forceDriverProbe ? "/aru/v1/agent-drivers/refresh" : "/aru/v1/agent-drivers"
             let driverMethod = forceDriverProbe ? "POST" : "GET"
@@ -925,8 +962,8 @@ final class HostConsoleRuntime: ObservableObject {
             )
             try drivers.validate()
             try roots.validate()
-            driverInventory = drivers
-            collaborators = roots.collaborators
+            assignIfChanged(drivers, to: \HostConsoleRuntime.driverInventory)
+            assignIfChanged(roots.collaborators, to: \HostConsoleRuntime.collaborators)
             for collaborator in roots.collaborators {
                 try await refreshSurfaces(collaboratorId: collaborator.id)
                 try await refreshConversations(collaboratorId: collaborator.id)
@@ -936,19 +973,37 @@ final class HostConsoleRuntime: ObservableObject {
     }
 
     private func loadNodeIdentityAndAccess() async throws {
-        let settings: HostNodeSettings = try await request(
+        async let settingsRequest: HostNodeSettings = request(
             "/aru/v1/node-settings",
             authenticated: true
         )
-        let inventory: HostPairedDeviceInventory = try await request(
+        async let devicesRequest: HostPairedDeviceInventory = request(
             "/aru/v1/devices",
             authenticated: true
         )
-        nodeSettings = settings
-        pairedDevices = inventory.devices.sorted {
+        let (settings, inventory) = try await (settingsRequest, devicesRequest)
+        assignIfChanged(settings, to: \HostConsoleRuntime.nodeSettings)
+        assignIfChanged(Self.sortedDevices(inventory.devices), to: \HostConsoleRuntime.pairedDevices)
+    }
+
+    private static func sortedDevices(_ devices: [HostPairedDevice]) -> [HostPairedDevice] {
+        devices.sorted {
             if $0.isCurrent != $1.isCurrent { return $0.isCurrent }
             return $0.issuedAt > $1.issuedAt
         }
+    }
+
+    private func assignIfChanged<Value: Equatable>(
+        _ value: Value,
+        to keyPath: ReferenceWritableKeyPath<HostConsoleRuntime, Value>
+    ) {
+        guard self[keyPath: keyPath] != value else { return }
+        self[keyPath: keyPath] = value
+    }
+
+    private func setSectionError(_ message: String?, for section: HostConsoleSection) {
+        guard sectionErrors[section] != message else { return }
+        sectionErrors[section] = message
     }
 
     private func loadMCPCatalog() async throws -> MCPGatewaySnapshot {
@@ -1083,8 +1138,14 @@ final class HostConsoleRuntime: ObservableObject {
             authenticated: true
         )
         let (inventory, drafts) = try await (inventoryRequest, draftRequest)
-        plugins = inventory.plugins.sorted { $0.updatedAt > $1.updatedAt }
-        pluginDrafts = drafts.drafts.sorted { $0.updatedAt > $1.updatedAt }
+        assignIfChanged(
+            inventory.plugins.sorted { $0.updatedAt > $1.updatedAt },
+            to: \HostConsoleRuntime.plugins
+        )
+        assignIfChanged(
+            drafts.drafts.sorted { $0.updatedAt > $1.updatedAt },
+            to: \HostConsoleRuntime.pluginDrafts
+        )
     }
 
     private func reloadPluginSurfaces() async throws {

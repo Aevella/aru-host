@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct CollaboratorCognitionStudioView: View {
-    @ObservedObject var runtime: HostConsoleRuntime
+    let runtime: HostConsoleRuntime
     let collaborator: HostedCollaborator
 
     @State private var environment = HostCollaboratorInstructionEnvironment.isolated

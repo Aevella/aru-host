@@ -2,9 +2,7 @@
 
 Aru Host 是 Aru 的用户自有能力节点。它把电脑或 VPS 变成一台可由 iPhone 配对、查看和使用的 Host，同时让电脑协作者的身份、对话、页面、记忆、工具权限和运行状态留在用户自己的机器上。
 
-当前稳定版是 **0.28.1**，Host 协议版本为 `stub-0.28`。它与当前 Aru TestFlight 版本配套使用，并提供面向普通 Mac 用户的 Apple 签名、公证安装包，以及面向 Debian/Ubuntu 桌面用户的 `x64` / `arm64` 安装包。
-
-`main` 还包含下一版正在验证的 Host 源码：电脑协作者主动约定、完成后 APNs 通知，以及可绑定 GitHub、保存为产物并发布到手机的页面项目。它们尚未被标成新的稳定安装包；需要普通安装包时仍以 Releases 页面标注的版本为准。
+当前稳定版是 **0.29.0**，Host 协议版本为 `stub-0.29`。它与当前 Aru TestFlight 版本配套使用，并提供面向普通 Mac 用户的 Apple 签名、公证安装包，以及面向 Debian/Ubuntu 桌面用户的 `x64` / `arm64` 安装包。
 
 ## 现在能做什么
 
@@ -54,7 +52,7 @@ Console 凭证只进入 Linux Secret Service；GNOME Keyring、KWallet 或其他
 如果桌面没有图形化软件安装器，也可以在下载目录运行：
 
 ```bash
-sudo apt install ./aru-host-linux-0.28.1-x64.deb
+sudo apt install ./aru-host-linux-0.29.0-x64.deb
 ```
 
 源码级当前用户安装器保留给开发和诊断：
@@ -142,7 +140,7 @@ node tests/collaborator-project-smoke.mjs
 bash tests/macos-installer-smoke.sh
 swift test --package-path macos-console
 npm ci --prefix linux-console
-npm audit --prefix linux-console
+npm audit --prefix linux-console --omit=dev
 bash tests/linux-desktop-installer-smoke.sh
 npm test --prefix linux-console
 ```

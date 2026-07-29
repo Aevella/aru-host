@@ -1,8 +1,8 @@
 import SwiftUI
 
 struct AruHostConsoleView: View {
-    @ObservedObject var runtime: HostConsoleRuntime
-    @ObservedObject var updates: HostUpdateCoordinator
+    let runtime: HostConsoleRuntime
+    let updates: HostUpdateCoordinator
     @Environment(\.scenePhase) private var scenePhase
     @State private var selection: HostConsoleSection = .overview
 
@@ -13,7 +13,7 @@ struct AruHostConsoleView: View {
 
             FoundationGlass {
                 VStack(spacing: 0) {
-                    header
+                    HostConsoleHeader(runtime: runtime, updates: updates)
                     Divider().overlay(Color.white.opacity(0.42))
                     content
                 }
@@ -28,57 +28,6 @@ struct AruHostConsoleView: View {
             guard phase == .active, runtime.phase == .ready else { return }
             Task { await runtime.refresh(selection) }
         }
-    }
-
-    private var header: some View {
-        HStack(spacing: 14) {
-            ZStack {
-                Circle().fill(Color.white.opacity(0.36))
-                Image(systemName: "sparkles")
-                    .font(.system(size: 17, weight: .medium))
-                    .foregroundStyle(HostPalette.lavenderDeep)
-            }
-            .frame(width: 38, height: 38)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(L10n.appName)
-                    .font(.system(size: 18, weight: .medium, design: .rounded))
-                    .foregroundStyle(HostPalette.ink)
-                Text(L10n.appSubtitle)
-                    .font(.system(size: 11, weight: .medium, design: .rounded))
-                    .foregroundStyle(HostPalette.secondaryInk.opacity(0.62))
-            }
-
-            if let nodeName = runtime.manifest?.displayName, runtime.phase == .ready {
-                Text(nodeName)
-                    .font(.system(size: 11, weight: .medium, design: .rounded))
-                    .foregroundStyle(HostPalette.secondaryInk.opacity(0.58))
-                    .padding(.leading, 8)
-            }
-
-            Spacer()
-
-            if case .available(let update) = updates.state {
-                Button(L10n.updateAvailable(update.version)) {
-                    updates.open(update)
-                }
-                .buttonStyle(FloatingGlassButtonStyle(tint: HostPalette.lavender.opacity(0.20)))
-            }
-
-            if runtime.isRefreshing || !runtime.loadingSections.isEmpty {
-                ProgressView()
-                    .controlSize(.small)
-                    .tint(HostPalette.lavenderDeep)
-            }
-
-            if let lastUpdated = runtime.lastUpdated {
-                Text(lastUpdated, style: .relative)
-                    .font(.system(size: 11, weight: .medium, design: .rounded))
-                    .foregroundStyle(HostPalette.secondaryInk.opacity(0.58))
-            }
-        }
-        .padding(.horizontal, 26)
-        .padding(.vertical, 18)
     }
 
     @ViewBuilder
@@ -189,9 +138,65 @@ struct AruHostConsoleView: View {
     private func keepVisibleSectionFresh(_ section: HostConsoleSection) async {
         while !Task.isCancelled {
             if scenePhase == .active, runtime.phase == .ready {
-                await runtime.refresh(section)
+                await runtime.refresh(section, showsActivity: false)
             }
             try? await Task.sleep(for: .seconds(section.automaticRefreshSeconds))
         }
+    }
+}
+
+private struct HostConsoleHeader: View {
+    let runtime: HostConsoleRuntime
+    @ObservedObject var updates: HostUpdateCoordinator
+
+    var body: some View {
+        HStack(spacing: 14) {
+            ZStack {
+                Circle().fill(Color.white.opacity(0.36))
+                Image(systemName: "sparkles")
+                    .font(.system(size: 17, weight: .medium))
+                    .foregroundStyle(HostPalette.lavenderDeep)
+            }
+            .frame(width: 38, height: 38)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(L10n.appName)
+                    .font(.system(size: 18, weight: .medium, design: .rounded))
+                    .foregroundStyle(HostPalette.ink)
+                Text(L10n.appSubtitle)
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundStyle(HostPalette.secondaryInk.opacity(0.62))
+            }
+
+            if let nodeName = runtime.manifest?.displayName, runtime.phase == .ready {
+                Text(nodeName)
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundStyle(HostPalette.secondaryInk.opacity(0.58))
+                    .padding(.leading, 8)
+            }
+
+            Spacer()
+
+            if case .available(let update) = updates.state {
+                Button(L10n.updateAvailable(update.version)) {
+                    updates.open(update)
+                }
+                .buttonStyle(FloatingGlassButtonStyle(tint: HostPalette.lavender.opacity(0.20)))
+            }
+
+            if runtime.isRefreshing || !runtime.loadingSections.isEmpty {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(HostPalette.lavenderDeep)
+            }
+
+            if let lastUpdated = runtime.lastUpdated {
+                Text(lastUpdated, style: .relative)
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundStyle(HostPalette.secondaryInk.opacity(0.58))
+            }
+        }
+        .padding(.horizontal, 26)
+        .padding(.vertical, 18)
     }
 }

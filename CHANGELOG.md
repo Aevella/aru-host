@@ -1,11 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.29.0
 
 - Add Host-owned one-shot and recurring initiative rules, owner-bound collaborator tools, Mac/Linux Console controls, and completed-turn APNs delivery to separately registered paired phones.
 - Add Host-owned page projects that can start empty or clone a `github.com` repository into one managed checkout, expose Git state to clients, save immutable `.tar.gz` artifact checkpoints, and publish the selected build directory to the phone as a separate action.
 - Keep checkpoint, phone publication, and Git push as three explicit boundaries: checkpoints exclude `.git`, phone releases are immutable surface bundles, and Host does not push repository commits on the user's behalf.
 - Extend the ordinary Chinese guide and operator reference for multiple paired phones, proactive messages, notification readiness, GitHub page projects, artifacts, and source-versus-stable-release status.
+- Scope Console refresh publication to the owning surface, so one background or local mutation no longer invalidates every unrelated Host view.
 
 ## 0.28.1
 

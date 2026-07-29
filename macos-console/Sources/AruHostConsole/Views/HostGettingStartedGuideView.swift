@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct HostGettingStartedGuideView: View {
-    @ObservedObject var runtime: HostConsoleRuntime
+    let runtime: HostConsoleRuntime
     let onOpenCollaborators: () -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var presentsPairingCode = false

@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 struct NodeWorkspacesView: View {
-    @ObservedObject var runtime: HostConsoleRuntime
+    let runtime: HostConsoleRuntime
     @State private var revocationCandidate: HostNodeWorkspace?
     @State private var mutationError: String?
 

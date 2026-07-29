@@ -22,5 +22,6 @@ Please use GitHub's private vulnerability reporting for this repository. Do not 
 - Source plugins are digest-addressed and execute in a fresh restricted process or pinned container with declared permissions.
 - Page projects accept only credential-free `https://github.com/<owner>/<repo>` input URLs. Host may use the computer's existing Git authentication, but it does not persist repository credentials in project records; checkpoints and published phone bundles exclude `.git` metadata and reject symbolic links.
 - Public deployments must terminate HTTPS at Caddy or another operator-owned reverse proxy.
+- Linux release CI audits the production dependency surface with `npm audit --omit=dev`; Electron packaging tools run only against trusted repository input and are not included in the installed Console. The lockfile still pins patched `brace-expansion` releases for every build-tool dependency range.
 
 Run `aru-selfhost doctor` after installation or upgrade. If a credential or pairing link may have leaked, revoke the paired device from a trusted client and generate a new one-time pairing link.

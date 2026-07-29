@@ -1,5 +1,5 @@
 const diagnostics = {
-  serverVersion: "stub-0.28",
+  serverVersion: "stub-0.29",
   serverId: "home-linux-ae71",
   hostedCollaboratorCount: 3,
   activeJobCount: 1,
@@ -15,12 +15,12 @@ const nodeSettings = { displayName: "示例 Linux Host", revision: 4 };
 const devices = {
   devices: [
     { deviceId: "console", label: "Aru Host Console", issuedAt: "2026-07-24T07:20:00Z", isCurrent: true, revokedAt: null },
-    { deviceId: "phone", label: "Example iPhone", issuedAt: "2026-07-24T07:25:00Z", isCurrent: false, revokedAt: null },
+    { deviceId: "phone", label: "示例 iPhone", issuedAt: "2026-07-24T07:25:00Z", isCurrent: false, revokedAt: null },
   ],
 };
 const collaborator = {
   collaboratorId: "root_example",
-  displayName: "Example Collaborator",
+  displayName: "示例协作者",
   driverId: "codex",
   providerProfileId: null,
   activationStatus: "driver-ready",
@@ -46,11 +46,11 @@ window.aruHost = Object.freeze({
   bootstrap: async () => {
     if (failureMode) throw new Error("Linux Secret Service 暂时不可用，请先解锁当前桌面钥匙串。");
     return ({
-    manifest: { serverVersion: "stub-0.28" },
+    manifest: { serverVersion: "stub-0.29" },
     diagnostics,
     nodeSettings,
     deviceInventory: devices,
-    update: { version: "0.28.2", url: "https://github.com/Aevella/aru-host/releases/latest" },
+    update: { version: "0.29.1", url: "https://github.com/Aevella/aru-host/releases/latest" },
     secretStorage: "linux-secret-service",
     });
   },
@@ -63,7 +63,7 @@ window.aruHost = Object.freeze({
     if (method === "GET" && path === "/aru/v1/provider-profiles") return { secretStorage: { supported: true }, profiles: [provider] };
     if (method === "GET" && path.endsWith("/conversations")) return { conversations: [{ conversationId: "conversation_1", title: "Linux 入住检查", lastMessagePreview: "Host 还在这里。", updatedAt: "2026-07-24T07:50:00Z" }] };
     if (method === "GET" && path.endsWith("/surfaces")) return { surfaces: [{ surfaceId: "surface_1", title: "在场页", revision: 3, activeVersionOrdinal: 2, networkAccess: "none", delivery: "inline", archivedAt: null }] };
-    if (method === "GET" && path.endsWith("/cognition")) return { revision: 5, instructionEnvironment: "isolated", systemPrompt: "保持清醒、诚实和在场。", memories: [{ memoryId: "memory_1", title: "名字", content: "她叫 Example Collaborator。", updatedAt: "2026-07-24T07:40:00Z", archivedAt: null }], references: [] };
+    if (method === "GET" && path.endsWith("/cognition")) return { revision: 5, instructionEnvironment: "isolated", systemPrompt: "保持清醒、诚实和在场。", memories: [{ memoryId: "memory_1", title: "名字", content: "她叫示例协作者。", updatedAt: "2026-07-24T07:40:00Z", archivedAt: null }], references: [] };
     throw new Error(`Visual fixture has no response for ${method} ${path}`);
   },
   mcpCatalog: async () => ({ tools: [] }),

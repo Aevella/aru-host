@@ -2,7 +2,7 @@ import SwiftUI
 
 struct HostConsoleSidebar: View {
     @Binding var selection: HostConsoleSection
-    @ObservedObject var runtime: HostConsoleRuntime
+    let runtime: HostConsoleRuntime
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
