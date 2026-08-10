@@ -82,7 +82,6 @@ export function createCollaboratorHost({
 }) {
   state.agentDriverProbes ??= [];
   state.hostedCollaborators ??= [];
-  let codexExecutable = resolveDriverExecutable(LOCAL_DRIVER_DEFINITIONS[0]);
   const surfaces = createCollaboratorSurfaceHost({
     dataDir,
     readJSONBody,
@@ -107,7 +106,8 @@ export function createCollaboratorHost({
     now,
   });
   const codexDriver = createCodexAppServerDriver({
-    resolveExecutable: () => codexExecutable,
+    executable: resolveDriverExecutable(LOCAL_DRIVER_DEFINITIONS[0]),
+    resolveExecutable: () => resolveDriverExecutable(LOCAL_DRIVER_DEFINITIONS[0]),
     log,
   });
   let providerProfiles;
@@ -189,7 +189,7 @@ export function createCollaboratorHost({
 
   function refreshDrivers() {
     state.agentDriverProbes = LOCAL_DRIVER_DEFINITIONS.map((definition) => probeDriver(definition, now()));
-    codexExecutable = resolveDriverExecutable(LOCAL_DRIVER_DEFINITIONS[0]);
+    codexDriver.refreshExecutable();
     saveState();
     return driverInventory();
   }
