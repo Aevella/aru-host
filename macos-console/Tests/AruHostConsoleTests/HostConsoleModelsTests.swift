@@ -72,7 +72,7 @@ import Testing
       "schema":"aru.selfhost.collaborator-surface.v1",
       "surfaceId":"surface_1",
       "collaboratorId":"hostcol_1",
-      "title":"Aelion's room",
+      "title":"Mira's room",
       "revision":2,
       "activeVersionId":"version_2",
       "activeVersionOrdinal":2,
@@ -203,9 +203,9 @@ import Testing
         "schema":"aru.selfhost.collaborator-project.v1",
         "projectId":"hostproject_1234",
         "collaboratorId":"hostcol_1234",
-        "title":"Aelion page",
+        "title":"Mira page",
         "revision":3,
-        "workspacePath":"projects/aelion-page",
+        "workspacePath":"projects/mira-page",
         "entryPath":"index.html",
         "sourceURL":"https://github.com/aru/page",
         "repositoryURL":"https://github.com/aru/page.git",
@@ -220,7 +220,7 @@ import Testing
     }
     """#.utf8))
 
-    #expect(inventory.projects.first?.workspacePath == "projects/aelion-page")
+    #expect(inventory.projects.first?.workspacePath == "projects/mira-page")
     #expect(inventory.projects.first?.latestCheckpoint?.artifactId == "artifact_1")
     #expect(inventory.projects.first?.repository?.branch == "main")
     #expect(inventory.projects.first?.surfaceId == "surface_1234")
@@ -232,7 +232,7 @@ import Testing
       "schema":"aru.selfhost.hosted-collaborator-inventory.v1",
       "collaborators":[{
         "collaboratorId":"hostcol_1234",
-        "displayName":"Aelion",
+        "displayName":"Mira",
         "driverId":"codex",
         "revision":3,
         "activationStatus":"driver-ready",
@@ -313,7 +313,7 @@ import Testing
         "schema":"aru.selfhost.collaborator-surface.v1",
         "surfaceId":"surface_1234",
         "collaboratorId":"hostcol_1234",
-        "title":"Aelion's desk",
+        "title":"Mira's desk",
         "revision":4,
         "activeVersionId":"surfacever_2",
         "activeVersionOrdinal":2,
@@ -339,7 +339,7 @@ import Testing
       "schema":"aru.selfhost.collaborator-surface.v1",
       "surfaceId":"surface_1234",
       "collaboratorId":"hostcol_1234",
-      "title":"Aelion's desk",
+      "title":"Mira's desk",
       "revision":4,
       "activeVersionId":"surfacever_2",
       "activeVersionOrdinal":2,

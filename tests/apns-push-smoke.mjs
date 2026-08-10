@@ -20,7 +20,7 @@ let saves = 0;
 const deliveries = [];
 const credentialStore = {
   availability: () => ({ supported: true, storage: "test" }),
-  read: () => ({ teamId: "AY22VQ377R", keyId: "AAAAAAAAAA", privateKey: "test" }),
+  read: () => ({ teamId: "TEAMID0000", keyId: "AAAAAAAAAA", privateKey: "test" }),
 };
 const host = createAPNsPushHost({
   state,

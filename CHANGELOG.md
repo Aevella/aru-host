@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.29.1
+
+- Recover computer collaborators when Codex becomes available after Host startup, while keeping passive driver status reads free of executable probes.
+- Replace private-style test fixture identities with neutral examples.
+
 ## 0.29.0
 
 - Add Host-owned one-shot and recurring initiative rules, owner-bound collaborator tools, Mac/Linux Console controls, and completed-turn APNs delivery to separately registered paired phones.

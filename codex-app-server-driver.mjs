@@ -10,6 +10,7 @@ export function createCodexAppServerDriver({ executable, resolveExecutable, log 
   let process = null;
   let socket = null;
   let connecting = null;
+  let knownExecutable = executable ?? null;
   let requestSequence = 0;
   const pendingRequests = new Map();
   const threadHandlers = new Map();
@@ -17,12 +18,12 @@ export function createCodexAppServerDriver({ executable, resolveExecutable, log 
   function status() {
     if (socket?.readyState === WebSocket.OPEN) return "running";
     if (connecting) return "starting";
-    return executablePath() ? "ready" : "unavailable";
+    return knownExecutable ? "ready" : "unavailable";
   }
 
   async function ensureConnected() {
     if (socket?.readyState === WebSocket.OPEN) return;
-    const command = executablePath();
+    const command = refreshExecutable();
     if (!command) throw new Error("codex executable is unavailable");
     if (typeof WebSocket !== "function") {
       throw new Error("Aru Host requires Node.js with WebSocket support");
@@ -204,11 +205,14 @@ export function createCodexAppServerDriver({ executable, resolveExecutable, log 
     threadHandlers.clear();
   }
 
-  function executablePath() {
-    return typeof resolveExecutable === "function" ? resolveExecutable() : executable;
+  function refreshExecutable() {
+    if (typeof resolveExecutable === "function") {
+      knownExecutable = resolveExecutable() ?? null;
+    }
+    return knownExecutable;
   }
 
-  return { status, ensureConnected, startTurn, interrupt };
+  return { status, refreshExecutable, ensureConnected, startTurn, interrupt };
 }
 
 function newThreadInstructions(instructions, historyContext) {
