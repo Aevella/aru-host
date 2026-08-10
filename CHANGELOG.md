@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.29.1
 
 - Recover computer collaborators when Codex becomes available after Host startup, while keeping passive driver status reads free of executable probes.
 - Replace private-style test fixture identities with neutral examples.
