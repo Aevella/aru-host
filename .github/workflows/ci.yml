@@ -27,6 +27,7 @@ jobs:
           node tests/collaborator-conversation-smoke.mjs
           node tests/collaborator-initiative-smoke.mjs
           node tests/collaborator-project-smoke.mjs
+          node tests/mobile-collaborator-replicas.test.mjs
           node tests/direct-api-driver-smoke.mjs
           node tests/provider-profiles-smoke.mjs
           node tests/conversation-turn-relay.test.mjs

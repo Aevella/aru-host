@@ -902,7 +902,7 @@ printf '%s' "$mcp_call" | node -e '
   let b="";process.stdin.on("data",c=>b+=c);process.stdin.on("end",()=>{
     const r=JSON.parse(b);if(!r.result?.structuredContent?.serverId||r.result?.isError!==false)process.exit(1)
   });'
-if printf '%s' "$mcp_call" | grep -Fq "$credential"; then
+if printf '%s' "$mcp_call" | grep -Fq -- "$credential"; then
   echo "credential leaked into MCP response" >&2
   exit 1
 fi
@@ -1019,7 +1019,7 @@ printf '%s' "$result" | node -e '
     if(!/^[0-9a-f]{64}$/.test(r.artifacts[0]?.sha256??""))process.exit(5);
   });'
 
-if printf '%s' "$result" | grep -Fq "$credential"; then
+if printf '%s' "$result" | grep -Fq -- "$credential"; then
   echo "credential leaked into workspace response" >&2
   exit 1
 fi

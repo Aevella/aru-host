@@ -204,6 +204,13 @@ export function createCollaboratorConversationHost({
       cancelledByDeviceId: null,
       source: options.source ?? "client",
       ruleId: options.ruleId ?? null,
+      ruleVersion: options.ruleVersion ?? null,
+      deliveryId: options.deliveryId ?? null,
+      sourceCollaboratorId: options.sourceCollaboratorId ?? null,
+      sourceConversationId: options.sourceConversationId ?? null,
+      baseMessageId: options.baseMessageId ?? null,
+      basisMessages: options.basisMessages ?? [],
+      executionEpoch: options.executionEpoch ?? null,
     };
     conversation.messages.push(userMessage, assistantMessage);
     conversation.activeTurn = turn;
@@ -241,6 +248,55 @@ export function createCollaboratorConversationHost({
       role: "system",
       source: "proactive",
       ruleId: rule.ruleId,
+    });
+  }
+
+  function runReplicaProactive(executor, replica, rule, deliveryId) {
+    const device = { deviceId: "host-mobile-replica-scheduler" };
+    const collaborator = {
+      ...executor,
+      collaboratorId: `mobilereplica_${replica.sourceCollaboratorId}`,
+      displayName: replica.displayName,
+      authority: "mobile-replica",
+      mobileInstructions: replicaInstructions(replica),
+      revision: replica.revision,
+    };
+    const source = replica.conversations.find(
+      (candidate) => candidate.conversationId === rule.conversationId,
+    ) ?? null;
+    const conversation = loadConversation(
+      collaborator.collaboratorId,
+      createConversation(collaborator, { title: source?.title || rule.title || "主动消息" }, device).conversationId,
+    );
+    for (const item of source?.messages ?? []) {
+      const content = String(item.content ?? "").trim();
+      if (!content) continue;
+      conversation.messages.push({
+        messageId: `hostmsg_${randomUUID()}`,
+        clientRequestId: null,
+        role: validatedReplicaRole(item.role),
+        content,
+        status: "completed",
+        createdAt: Number(item.createdAt) || now(),
+        updatedAt: Number(item.createdAt) || now(),
+      });
+    }
+    touch(conversation, device.deviceId);
+    saveConversation(conversation);
+    return enqueueMessage(conversation, collaborator, {
+      clientRequestId: `mobile_initiative_${deliveryId}`,
+      text: proactiveReplicaSeed(rule),
+    }, device, {
+      role: "system",
+      source: "mobile-replica-proactive",
+      ruleId: rule.ruleId,
+      ruleVersion: rule.sourceVersion,
+      deliveryId,
+      sourceCollaboratorId: replica.sourceCollaboratorId,
+      sourceConversationId: source?.conversationId ?? null,
+      baseMessageId: source?.baseMessageId ?? null,
+      basisMessages: source?.messages ?? [],
+      executionEpoch: replica.epoch,
     });
   }
 
@@ -706,6 +762,7 @@ export function createCollaboratorConversationHost({
     route,
     inventory,
     runProactive,
+    runReplicaProactive,
     status() {
       const conversations = [];
       if (existsSync(root)) {
@@ -723,6 +780,31 @@ export function createCollaboratorConversationHost({
       };
     },
   };
+}
+
+function replicaInstructions(replica) {
+  return [
+    `You are ${replica.displayName}, the phone collaborator whose read-only execution replica is running on Aru Host.`,
+    "Speak as this phone collaborator. The phone remains the durable authority for identity, conversations, memory, and rules.",
+    "This Host run may produce one proactive reply, but it must never rewrite the phone replica or the independent computer collaborator.",
+    String(replica.systemPrompt ?? "").trim(),
+    replica.memories?.length ? `Memories:\n${replica.memories.map((item) => `- ${item.content}`).join("\n")}` : "",
+    replica.references?.length ? `References:\n${replica.references.map((item) => `## ${item.title}\n${item.content}`).join("\n\n")}` : "",
+  ].filter(Boolean).join("\n\n");
+}
+
+function proactiveReplicaSeed(rule) {
+  return [
+    "This is a scheduled proactive turn. Decide what is genuinely worth saying now and reply directly to the user.",
+    rule.title ? `Rule: ${rule.title}` : "",
+    rule.goal ? `Goal: ${rule.goal}` : "",
+    rule.instructions ? `Instructions: ${rule.instructions}` : "",
+  ].filter(Boolean).join("\n");
+}
+
+function validatedReplicaRole(value) {
+  const role = String(value ?? "").trim();
+  return ["user", "assistant", "system", "tool"].includes(role) ? role : "user";
 }
 
 function dynamicTool(tool) {
@@ -806,6 +888,16 @@ function publicDriverItem(item, workspace) {
   };
   if (item.type === "commandExecution") {
     value.command = String(item.command ?? "").slice(0, 600) || null;
+  }
+  if (item.type === "reasoning") {
+    const summary = Array.isArray(item.summary)
+      ? item.summary.map((part) => String(part ?? "").trim()).filter(Boolean)
+      : [];
+    value.summary = summary.join("\n") || null;
+  }
+  if (item.type === "mcpToolCall") {
+    value.server = String(item.server ?? "").trim() || null;
+    value.tool = String(item.tool ?? "").trim() || null;
   }
   if (item.type === "dynamicToolCall") value.tool = item.tool ?? null;
   if (item.type === "fileChange") {

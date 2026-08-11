@@ -131,7 +131,7 @@ import Testing
       "memories":[{
         "memoryId":"hostmem_1",
         "title":"Preferred name",
-        "content":"Use AA when invited.",
+        "content":"Use River when invited.",
         "createdAt":100,
         "updatedAt":110,
         "archivedAt":null

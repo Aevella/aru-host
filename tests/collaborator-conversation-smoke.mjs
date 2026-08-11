@@ -34,6 +34,28 @@ const driver = {
     const { handler } = options;
     this.calls.push(options);
     queueMicrotask(async () => {
+      await handler.onNotification("item/completed", {
+        threadId: "thread_test",
+        turnId: "driver_turn_test",
+        item: {
+          id: "item_reasoning",
+          type: "reasoning",
+          summary: ["Check the runner connection.", "Inspect the MCP configuration."],
+          content: ["private internal reasoning"],
+        },
+      });
+      await handler.onNotification("item/completed", {
+        threadId: "thread_test",
+        turnId: "driver_turn_test",
+        item: {
+          id: "item_mcp",
+          type: "mcpToolCall",
+          server: "github",
+          tool: "search_code",
+          arguments: { token: "private" },
+          result: { content: "private" },
+        },
+      });
       await requestApproval(handler, "item/commandExecution/requestApproval", {
         threadId: "thread_test",
         turnId: "driver_turn_test",
@@ -157,6 +179,19 @@ const events = await call(
 );
 assert.equal(events.body.events.filter((event) => event.kind === "approval.requested").length, 5);
 assert.equal(events.body.events.at(-1).kind, "turn.completed");
+const reasoningEvent = events.body.events.find((event) =>
+  event.kind === "driver.itemCompleted" && event.payload.item.id === "item_reasoning");
+assert.equal(
+  reasoningEvent.payload.item.summary,
+  "Check the runner connection.\nInspect the MCP configuration.",
+);
+assert.equal("content" in reasoningEvent.payload.item, false);
+const mcpEvent = events.body.events.find((event) =>
+  event.kind === "driver.itemCompleted" && event.payload.item.id === "item_mcp");
+assert.equal(mcpEvent.payload.item.server, "github");
+assert.equal(mcpEvent.payload.item.tool, "search_code");
+assert.equal("arguments" in mcpEvent.payload.item, false);
+assert.equal("result" in mcpEvent.payload.item, false);
 
 const ledger = JSON.parse(readFileSync(
   join(root, "collaborator-conversations", collaborator.collaboratorId, `${conversationId}.json`),

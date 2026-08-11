@@ -50,7 +50,7 @@ window.aruHost = Object.freeze({
     diagnostics,
     nodeSettings,
     deviceInventory: devices,
-    update: { version: "0.29.1", url: "https://github.com/Aevella/aru-host/releases/latest" },
+    update: { version: "0.29.2", url: "https://github.com/Aevella/aru-host/releases/latest" },
     secretStorage: "linux-secret-service",
     });
   },

@@ -104,6 +104,13 @@ try {
   assert.equal(initiative.rules[1].runningAt, null);
   assert.equal(initiative.rules[1].lastFailure, "provider unavailable");
 
+  const recurringFirstScheduledAt = recurring.nextFireAt;
+  clock = recurringFirstScheduledAt + 5 * 60_000;
+  host.runDue();
+  initiative = host.read(collaborator.collaboratorId);
+  assert.equal(initiative.rules[1].nextFireAt, recurringFirstScheduledAt + 6 * 60_000);
+  assert.equal(initiative.rules[1].runningAt, clock);
+
   const selfTools = host.selfTools();
   assert.deepEqual(
     selfTools.map((tool) => tool.name),
@@ -126,7 +133,7 @@ try {
   initiative = host.callSelfTool("aru_collaborator_initiative_create", {
     expectedRevision: initiative.revision,
     title: "我想主动靠近",
-    goal: "在之后主动问 AA 今天有没有好好吃饭",
+    goal: "在之后主动问用户今天有没有好好吃饭",
     fireAfterMinutes: 3,
     recurrenceMinutes: 0,
   }, modelDevice, collaborator).value;

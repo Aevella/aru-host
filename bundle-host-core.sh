@@ -14,6 +14,7 @@ files=(
   backup-settings.mjs
   conversation-turn-relay.mjs
   collaborator-host.mjs
+  mobile-collaborator-replicas.mjs
   collaborator-cognition.mjs
   collaborator-surfaces.mjs
   collaborator-surface-bundles.mjs

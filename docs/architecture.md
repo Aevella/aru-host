@@ -6,7 +6,7 @@ Aru Host has three one-way responsibilities:
 2. **Agent drivers** adapt Codex or a user-selected model API into the Host turn and event contract. A driver session is a runtime receipt, never collaborator identity.
 3. **Clients and Console** render authenticated projections and send intents. Closing a client does not move authority or delete Host state.
 
-The iPhone remains authoritative for its local collaborators. A computer-hosted collaborator remains authoritative on the paired Host. The two roots can appear together in Aru without sharing a database or silently changing ownership.
+The iPhone remains authoritative for its local collaborators. A computer-hosted collaborator remains authoritative on the paired Host. The two roots can appear together in Aru without sharing a database or silently changing ownership. A phone-owned collaborator may publish a bounded, epoch-scoped, read-only execution replica for Host proactive turns; stable delivery ids return the result to the phone, while append-versus-branch is decided against the phone-supplied conversation head.
 
 Local Aru workspace data is not mirrored into a second live workspace. Remote jobs use Host-owned execution state and return text changes or hash-verified artifacts through explicit publication flows.
 

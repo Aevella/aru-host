@@ -17,7 +17,7 @@ const dataDir = join(root, "data");
 const codexHome = join(root, "codex");
 mkdirSync(dataDir, { recursive: true });
 mkdirSync(codexHome, { recursive: true });
-writeFileSync(join(codexHome, "AGENTS.md"), "The user's computer-level nickname is AA.\n");
+writeFileSync(join(codexHome, "AGENTS.md"), "The user's computer-level nickname is River.\n");
 
 let clock = 1_000;
 const host = createCollaboratorCognitionHost({
@@ -34,7 +34,7 @@ const device = { deviceId: "phone" };
 try {
   const initial = host.initialize(collaborator.collaboratorId, "isolated");
   assert.equal(initial.instructionEnvironment, "isolated");
-  assert.doesNotMatch(host.requestInstructions(collaborator), /nickname is AA/);
+  assert.doesNotMatch(host.requestInstructions(collaborator), /nickname is River/);
 
   let result = host.callSelfTool("aru_collaborator_cognition_update", {
     expectedRevision: initial.revision,
@@ -42,16 +42,16 @@ try {
     systemPrompt: "You speak with quiet precision.",
   }, device, collaborator).value;
   assert.equal(result.revision, 2);
-  assert.match(host.requestInstructions(collaborator), /nickname is AA/);
+  assert.match(host.requestInstructions(collaborator), /nickname is River/);
   assert.match(host.requestInstructions(collaborator), /quiet precision/);
 
   result = host.callSelfTool("aru_collaborator_memory_save", {
     expectedRevision: result.revision,
-    title: "AA",
-    content: "AA prefers direct explanations.",
+    title: "Communication preference",
+    content: "The user prefers direct explanations.",
   }, device, collaborator).value;
   assert.equal(result.memories.length, 1);
-  assert.match(host.requestInstructions(collaborator), /AA prefers direct explanations/);
+  assert.match(host.requestInstructions(collaborator), /The user prefers direct explanations/);
 
   result = host.callSelfTool("aru_collaborator_reference_save", {
     expectedRevision: result.revision,
@@ -67,7 +67,7 @@ try {
     archived: true,
   }, device, collaborator).value;
   assert.ok(result.memories[0].archivedAt);
-  assert.doesNotMatch(host.requestInstructions(collaborator), /AA prefers direct explanations/);
+  assert.doesNotMatch(host.requestInstructions(collaborator), /The user prefers direct explanations/);
 
   assert.throws(
     () => host.callSelfTool("aru_collaborator_cognition_update", {

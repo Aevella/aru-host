@@ -214,7 +214,9 @@ export function createCollaboratorInitiativeHost({
     rule.runningAt = timestamp;
     if (rule.recurrenceMinutes) {
       const interval = rule.recurrenceMinutes * 60 * 1_000;
-      rule.nextFireAt = Math.max(scheduledAt, timestamp) + interval;
+      const elapsed = Math.max(0, timestamp - scheduledAt);
+      const elapsedIntervals = Math.floor(elapsed / interval);
+      rule.nextFireAt = scheduledAt + (elapsedIntervals + 1) * interval;
       rule.enabled = true;
     } else {
       rule.nextFireAt = null;
