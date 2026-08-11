@@ -141,7 +141,7 @@ ownInitiative = await conversationOptions.executeTool(
   {
     expectedRevision: ownInitiative.revision,
     title: "Keep in touch",
-    goal: "Check in with AA later",
+    goal: "Check in with the user later",
     fireAfterMinutes: 15,
     recurrenceMinutes: 0,
   },

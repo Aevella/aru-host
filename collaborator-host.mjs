@@ -7,6 +7,7 @@ import { createCodexAppServerDriver } from "./codex-app-server-driver.mjs";
 import { createCollaboratorConversationHost } from "./collaborator-conversations.mjs";
 import { createCollaboratorInitiativeHost } from "./collaborator-initiative.mjs";
 import { createCollaboratorProjectHost } from "./collaborator-projects.mjs";
+import { createMobileCollaboratorReplicaHost } from "./mobile-collaborator-replicas.mjs";
 import { createDirectAPIDriver } from "./direct-api-driver.mjs";
 import { createProviderProfileHost } from "./provider-profiles.mjs";
 import { createProviderSecretStore } from "./provider-secret-store.mjs";
@@ -21,14 +22,20 @@ const LOCAL_DRIVER_DEFINITIONS = [
     id: "codex",
     displayName: "Codex",
     command: "codex",
-    executableCandidates: [
-      "codex",
-      "/Applications/Codex.app/Contents/Resources/codex",
-      `${homedir()}/Applications/Codex.app/Contents/Resources/codex`,
-      `${homedir()}/.local/bin/codex`,
-      "/opt/homebrew/bin/codex",
-      "/usr/local/bin/codex",
-    ],
+    executableCandidates: process.platform === "win32"
+      ? [
+        "codex",
+        `${process.env.APPDATA ?? `${homedir()}\\AppData\\Roaming`}\\npm\\codex.cmd`,
+        `${process.env.LOCALAPPDATA ?? `${homedir()}\\AppData\\Local`}\\Programs\\codex\\codex.exe`,
+      ]
+      : [
+        "codex",
+        "/Applications/Codex.app/Contents/Resources/codex",
+        `${homedir()}/Applications/Codex.app/Contents/Resources/codex`,
+        `${homedir()}/.local/bin/codex`,
+        "/opt/homebrew/bin/codex",
+        "/usr/local/bin/codex",
+      ],
     adapter: "codex-app-server",
     transport: "loopback-websocket",
     integrationGuide: "https://github.com/openai/codex/tree/main/codex-rs/app-server",
@@ -37,13 +44,19 @@ const LOCAL_DRIVER_DEFINITIONS = [
     id: "claude-code",
     displayName: "Claude Code",
     command: "claude",
-    executableCandidates: [
-      "claude",
-      `${homedir()}/.local/bin/claude`,
-      `${homedir()}/.claude/local/claude`,
-      "/opt/homebrew/bin/claude",
-      "/usr/local/bin/claude",
-    ],
+    executableCandidates: process.platform === "win32"
+      ? [
+        "claude",
+        `${process.env.APPDATA ?? `${homedir()}\\AppData\\Roaming`}\\npm\\claude.cmd`,
+        `${homedir()}\\.local\\bin\\claude.exe`,
+      ]
+      : [
+        "claude",
+        `${homedir()}/.local/bin/claude`,
+        `${homedir()}/.claude/local/claude`,
+        "/opt/homebrew/bin/claude",
+        "/usr/local/bin/claude",
+      ],
     adapter: "claude-agent-sdk",
     transport: "stream-json",
     integrationGuide: "https://docs.anthropic.com/en/docs/claude-code/sdk",
@@ -67,6 +80,7 @@ export function createCollaboratorHost({
   sendJSON,
   HttpError,
   managedWorkspaceRoot,
+  maximumReplicaBytes = 64 * 1024 * 1024,
   toolCatalog = () => [],
   executeTool = async () => {
     throw new Error("Aru tool execution is unavailable");
@@ -130,24 +144,44 @@ export function createCollaboratorHost({
     now,
   });
   let initiative;
+  let mobileReplicas;
   const conversations = conversationHostFactory({
     dataDir,
     driverForCollaborator,
     collaboratorForId,
+    maximumRequestBytes: maximumReplicaBytes,
     readJSONBody,
     sendJSON,
     HttpError,
     toolCatalog: conversationToolCatalog,
     executeTool: executeConversationTool,
-    requestInstructions: cognition.requestInstructions,
-    configurationRevision: (collaborator) => cognition.summary(collaborator.collaboratorId).revision,
+    requestInstructions: (collaborator) => collaborator.authority === "mobile-replica"
+      ? collaborator.mobileInstructions
+      : cognition.requestInstructions(collaborator),
+    configurationRevision: (collaborator) => collaborator.authority === "mobile-replica"
+      ? collaborator.revision
+      : cognition.summary(collaborator.collaboratorId).revision,
     onTurnSettled: async (event) => {
+      if (await mobileReplicas?.settle(event)) return;
       const collaborator = collaboratorForId(event.conversation.collaboratorId);
       const enriched = { ...event, collaborator };
       initiative?.settle(enriched);
       await onTurnSettled(enriched);
     },
     now,
+  });
+  mobileReplicas = createMobileCollaboratorReplicaHost({
+    dataDir,
+    readJSONBody,
+    sendJSON,
+    HttpError,
+    collaboratorForId,
+    maximumRequestBytes: maximumReplicaBytes,
+    trigger: (executor, replica, rule, deliveryId) =>
+      conversations.runReplicaProactive(executor, replica, rule, deliveryId),
+    onDelivery: onTurnSettled,
+    now,
+    log,
   });
   initiative = createCollaboratorInitiativeHost({
     dataDir,
@@ -163,15 +197,18 @@ export function createCollaboratorHost({
     log,
   });
 
-  function conversationToolCatalog() {
+  function conversationToolCatalog(collaborator) {
+    const externalTools = toolCatalog().filter((tool) =>
+      !tool.name.startsWith("aru_collaborator_surface_")
+      && !tool.name.startsWith("aru_collaborator_project_"));
+    if (collaborator?.authority === "mobile-replica") return externalTools;
     return [
-      ...toolCatalog().filter((tool) =>
-        !tool.name.startsWith("aru_collaborator_surface_")
-        && !tool.name.startsWith("aru_collaborator_project_")),
+      ...externalTools,
       ...surfaces.selfTools(),
       ...projects.selfTools(),
       ...cognition.selfTools(),
       ...initiative.selfTools(),
+      ...mobileReplicas.selfTools(),
     ];
   }
 
@@ -184,6 +221,8 @@ export function createCollaboratorHost({
     if (cognitionCall.matched) return cognitionCall.value;
     const initiativeCall = initiative.callSelfTool(name, args, device, collaborator);
     if (initiativeCall.matched) return initiativeCall.value;
+    const mobileReplicaCall = mobileReplicas.callSelfTool(name, args, device, collaborator);
+    if (mobileReplicaCall.matched) return mobileReplicaCall.value;
     return executeTool(name, args, device);
   }
 
@@ -276,6 +315,9 @@ export function createCollaboratorHost({
       const device = requireDevice();
       const body = await readJSONBody(req, 64 * 1024);
       sendJSON(res, 201, createHostedCollaborator(body, device));
+      return true;
+    }
+    if (await mobileReplicas.route(req, res, path, requireDevice)) {
       return true;
     }
     if (await conversations.route(req, res, path, requireDevice)) {
@@ -520,8 +562,14 @@ export function createCollaboratorHost({
       return projects.callTool(name, args, device, collaboratorForId);
     },
     conversationStatus: conversations.status,
-    start: initiative.start,
-    stop: initiative.stop,
+    start() {
+      initiative.start();
+      mobileReplicas.start();
+    },
+    stop() {
+      initiative.stop();
+      mobileReplicas.stop();
+    },
   };
 }
 

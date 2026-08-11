@@ -150,6 +150,8 @@ deterministic dev flows.
 | `POST /aru/v1/agent-drivers/refresh` | Bearer | rerun bounded local driver version probes |
 | `GET/POST /aru/v1/hosted-collaborators` | Bearer | list or create computer-authoritative collaborator roots |
 | `GET/PUT /aru/v1/hosted-collaborators/:id` | Bearer | read or update one hosted root and selected driver |
+| `GET/PUT/DELETE /aru/v1/mobile-collaborator-replicas/:sourceCollaboratorId` | Bearer | inspect, publish, or revoke one phone-authoritative read-only execution replica |
+| `GET .../mobile-collaborator-replicas/:sourceCollaboratorId/deliveries` | Bearer | read stable proactive deliveries for idempotent phone import and append-or-branch reconciliation |
 | `GET/POST /aru/v1/hosted-collaborators/:id/initiative` | Bearer | list or create durable one-shot/recurring proactive rules |
 | `PUT .../initiative/rules/:ruleId`, `POST .../initiative/rules/:ruleId/archive`, `/restore`, `/run` | Bearer | revision-safely edit, archive, restore, or explicitly run one rule |
 | `GET/POST /aru/v1/hosted-collaborators/:id/projects` | Bearer | list or create Host-workspace page projects, optionally by cloning GitHub |
@@ -255,6 +257,15 @@ it. `apns-push.mjs` is downstream of durable conversation settlement: it sends
 only completed initiative turns whose rule requested phone notification, never
 an in-progress seed or a manually sent message. Each paired device owns its own
 registration, and revocation removes its delivery eligibility.
+
+`mobile-collaborator-replicas.mjs` owns a distinct phone-authoritative execution
+lane. The phone publishes a bounded snapshot with an epoch, selected proactive
+rules, admitted cognition, and conversation bases; Host never mutates that
+snapshot or promotes it into a computer-hosted root. A claimed rule runs through
+the ordinary driver/tool loop with a stable delivery id. Settlement stores one
+bounded delivery receipt and sends APNs only after completion. When the phone
+returns, it imports that id once and decides whether the unchanged base can append
+or the independently advanced conversation must keep both histories as branches.
 
 The same initiative owner publishes four current-root tools to hosted
 conversations: `aru_collaborator_initiative_read`, `create`, `update`, and

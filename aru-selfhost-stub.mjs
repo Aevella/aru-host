@@ -194,6 +194,7 @@ const conversationTurnRelay = createConversationTurnRelay({
   HttpError,
   maximumRequestBytes: config.maxWorkspaceBytes,
   log,
+  onTurnUpdated: (turn) => remotePush.deliverConversationTurnRelayUpdate(turn),
 });
 
 // A fresh single-use pairing token on every boot (unless pinned for dev).
@@ -233,6 +234,7 @@ const collaboratorHost = createCollaboratorHost({
   sendJSON,
   HttpError,
   managedWorkspaceRoot: config.managedWorkspaceRoot,
+  maximumReplicaBytes: config.maxWorkspaceBytes,
   toolCatalog: () => [...officialMCPTools(), ...pluginSupervisor.dynamicMCPTools()],
   executeTool: executeMCPTool,
   createArtifact: persistDirectArtifact,
@@ -485,6 +487,9 @@ function manifest() {
         conversationEndpoint: "/aru/v1/hosted-collaborators/{collaboratorId}/conversations",
         cognitionEndpoint: "/aru/v1/hosted-collaborators/{collaboratorId}/cognition",
         initiativeEndpoint: "/aru/v1/hosted-collaborators/{collaboratorId}/initiative",
+        mobileReplicaEndpoint: "/aru/v1/mobile-collaborator-replicas/{sourceCollaboratorId}",
+        mobileReplicaAuthority: "phone-authoritative-read-only-replica",
+        mobileReplicaConflictPolicy: "append-at-base-or-branch",
         projectEndpoint: "/aru/v1/hosted-collaborators/{collaboratorId}/projects",
         providerProfileEndpoint: "/aru/v1/provider-profiles",
         surfaceExecution: true,

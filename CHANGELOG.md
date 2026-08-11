@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.29.2
+
+- Let a phone-owned collaborator publish a bounded, read-only execution replica to Host so scheduled proactive turns can finish while the phone sleeps; the phone remains authoritative and imports each stable delivery idempotently or branches when its conversation head has moved.
+- Deliver completed replica replies through the existing per-device APNs route without turning Host into a second phone-chat database.
+- Preserve provider reasoning summaries in the computer-collaborator event ledger without persisting raw private reasoning.
+- Make macOS Host upgrades wait for the previous LaunchAgent to stop and remove the artificial plugin-runtime startup timeout that could temporarily disable a healthy runtime.
+
 ## 0.29.1
 
 - Recover computer collaborators when Codex becomes available after Host startup, while keeping passive driver status reads free of executable probes.

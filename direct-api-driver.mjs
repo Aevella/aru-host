@@ -47,7 +47,7 @@ export function createDirectAPIDriver({ profileForId, readSecret, fetchImpl = fe
     const profile = profileForId(profileId);
     if (!profile) throw new Error("unknown provider profile");
     const secret = readSecret(profileId);
-    if (!secret) throw new Error("API key is missing from the macOS Keychain");
+    if (!secret) throw new Error("API key is missing from the operating-system secret store");
     try {
       const request = profile.protocol === "anthropic-messages"
         ? anthropicRequest(profile, secret, "只回复 OK", [], [], 1)

@@ -129,3 +129,53 @@ test("rejects malformed provider bodies at the device boundary", async () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("provider failures retain a bounded redacted diagnostic", async () => {
+  const root = mkdtempSync(join(tmpdir(), "aru-turn-relay-provider-failure-"));
+  const state = { conversationTurns: [] };
+  const responses = [];
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    error: {
+      message: "system messages must be first; key sk-private-token-value-1234567890",
+    },
+  }), {
+    status: 400,
+    headers: { "content-type": "application/json" },
+  });
+
+  try {
+    const relay = createConversationTurnRelay({
+      dataDir: root,
+      state,
+      saveState: () => {},
+      readJSONBody: async (request) => request.body,
+      sendJSON: (_response, status, body) => responses.push({ status, body }),
+      HttpError: class HttpError extends Error {},
+      maximumRequestBytes: 1024,
+      log: () => {},
+    });
+    const device = { deviceId: "device-one" };
+    await relay.route({
+      method: "POST",
+      body: {
+        clientTurnId: "assistant-failure",
+        conversationId: "conversation-failure",
+        protocolId: "openai-compatible",
+        request: {
+          endpoint: "https://provider.example/v1/chat/completions",
+          headers: {},
+          bodyBase64: Buffer.from('{"stream":true}').toString("base64"),
+        },
+      },
+    }, {}, "/aru/v1/conversation-turns", () => device);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(state.conversationTurns[0].state, "failed");
+    assert.match(state.conversationTurns[0].failureMessage, /system messages must be first/);
+    assert.match(state.conversationTurns[0].failureMessage, /\[redacted\]/);
+    assert.doesNotMatch(state.conversationTurns[0].failureMessage, /private-token/);
+  } finally {
+    globalThis.fetch = previousFetch;
+    rmSync(root, { recursive: true, force: true });
+  }
+});

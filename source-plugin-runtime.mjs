@@ -229,10 +229,21 @@ export function createSourcePluginRuntime({
     }
     if (permissions.network === "outbound") args.push("--allow-net");
     args.push(realpathSync(runnerPath), realpathSync(entry));
+    // Deliberately scrubbed environment: no node credentials, no operator
+    // secrets. Windows additionally needs SystemRoot/COMSPEC for the Node
+    // runtime itself to initialize networking and process facilities.
+    const scrubbedEnv = process.platform === "win32"
+      ? {
+        LANG: "C", LC_ALL: "C", TZ: "UTC",
+        SystemRoot: process.env.SystemRoot ?? "C:\\Windows",
+        COMSPEC: process.env.COMSPEC ?? "C:\\Windows\\System32\\cmd.exe",
+        TEMP: process.env.TEMP ?? "", TMP: process.env.TMP ?? "",
+      }
+      : { LANG: "C", LC_ALL: "C", TZ: "UTC" };
     return spawn(nodeBinary, args, {
       stdio: ["pipe", "pipe", "pipe"],
       cwd: realpathSync(dirname(entry)),
-      env: { LANG: "C", LC_ALL: "C", TZ: "UTC" },
+      env: scrubbedEnv,
     });
   }
 
@@ -311,7 +322,6 @@ function digestSource(sourceCode) {
 function nodeSupportsPermissions(nodeBinary) {
   const result = spawnSync(nodeBinary, ["--permission", "--eval", ""], {
     encoding: "utf8",
-    timeout: 5_000,
   });
   return result.status === 0;
 }

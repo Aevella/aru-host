@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SELFHOST_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-VERSION="${ARU_HOST_VERSION:-0.29.1-dev}"
+VERSION="${ARU_HOST_VERSION:-0.29.2-dev}"
 BUILD_NUMBER="${ARU_HOST_BUILD_NUMBER:-1}"
 OUTPUT_APP="$SCRIPT_DIR/.build-local/Aru Host Console.app"
 SIGNING_IDENTITY="${ARU_HOST_CONSOLE_SIGNING_IDENTITY:-}"

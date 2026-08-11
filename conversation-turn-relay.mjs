@@ -24,6 +24,7 @@ export function createConversationTurnRelay({
   HttpError,
   maximumRequestBytes,
   log,
+  onTurnUpdated = async () => {},
 }) {
   const resultDirectory = join(dataDir, "conversation-turns");
   mkdirSync(resultDirectory, { recursive: true });
@@ -118,6 +119,7 @@ export function createConversationTurnRelay({
     state.conversationTurns.push(turn);
     saveState();
     sendJSON(res, 202, publicTurn(turn));
+    await notifyTurnUpdated(turn);
     setImmediate(() => execute(turn, endpoint, headers, providerBody));
     return true;
   }
@@ -130,6 +132,7 @@ export function createConversationTurnRelay({
     turn.startedAt = Date.now();
     turn.updatedAt = turn.startedAt;
     saveState();
+    await notifyTurnUpdated(turn);
     try {
       const response = await fetch(endpoint, {
         method: "POST",
@@ -148,6 +151,7 @@ export function createConversationTurnRelay({
       turn.resultFilename = temporaryFilename;
       turn.updatedAt = Date.now();
       saveState();
+      await notifyTurnUpdated(turn);
       if (response.body) {
         for await (const chunk of response.body) {
           if (!chunk?.byteLength) continue;
@@ -162,11 +166,12 @@ export function createConversationTurnRelay({
       turn.state = response.ok ? "succeeded" : "failed";
       if (!response.ok) {
         turn.failureCode = "conversation_turn.provider_http_error";
-        turn.failureMessage = `Provider returned HTTP ${response.status}.`;
+        turn.failureMessage = providerFailureMessage(finalPath, response.status);
       }
       turn.completedAt = Date.now();
       turn.updatedAt = turn.completedAt;
       saveState();
+      await notifyTurnUpdated(turn);
       log(`conversation turn ${turn.turnId} ${turn.state} via ${turn.providerHost}`);
     } catch {
       turn.state = controller.signal.aborted ? "cancelled" : "failed";
@@ -179,6 +184,7 @@ export function createConversationTurnRelay({
       turn.completedAt = Date.now();
       turn.updatedAt = turn.completedAt;
       saveState();
+      await notifyTurnUpdated(turn);
       log(`conversation turn ${turn.turnId} ${turn.state}: ${turn.failureMessage}`);
     } finally {
       if (temporaryPath) rmSync(temporaryPath, { force: true });
@@ -214,6 +220,7 @@ export function createConversationTurnRelay({
       turn.completedAt = Date.now();
       turn.updatedAt = turn.completedAt;
       saveState();
+      void notifyTurnUpdated(turn);
     }
     return sendJSON(res, 200, publicTurn(turn));
   }
@@ -282,7 +289,35 @@ export function createConversationTurnRelay({
     if (turn.resultFilename) rmSync(join(resultDirectory, turn.resultFilename), { force: true });
   }
 
+  async function notifyTurnUpdated(turn) {
+    try {
+      await onTurnUpdated(turn);
+    } catch (error) {
+      log(`conversation turn activity update failed: ${String(error?.message ?? error)}`);
+    }
+  }
+
   return { route, diagnosticsCapability, purge };
+}
+
+function providerFailureMessage(resultPath, status) {
+  const fallback = `Provider returned HTTP ${status}.`;
+  try {
+    const value = JSON.parse(readFileSync(resultPath, "utf8"));
+    const detail = [value?.error?.message, value?.error, value?.message]
+      .find((candidate) => typeof candidate === "string" && candidate.trim());
+    if (!detail) return fallback;
+    const safe = detail
+      .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]{8,}\b/gi, "Bearer [redacted]")
+      .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/gi, "[redacted]")
+      .replace(/\b[A-Za-z0-9_-]{32,}\b/g, "[redacted]")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 500);
+    return safe ? `Provider returned HTTP ${status}: ${safe}` : fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 function requiredText(value, name) {

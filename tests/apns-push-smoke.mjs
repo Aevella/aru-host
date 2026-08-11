@@ -18,6 +18,7 @@ const state = {
 let clock = 10_000;
 let saves = 0;
 const deliveries = [];
+const liveActivityDeliveries = [];
 const credentialStore = {
   availability: () => ({ supported: true, storage: "test" }),
   read: () => ({ teamId: "TEAMID0000", keyId: "AAAAAAAAAA", privateKey: "test" }),
@@ -31,6 +32,7 @@ const host = createAPNsPushHost({
   serverId: "server_test",
   credentialStore,
   sendPush: async (value) => { deliveries.push(value); },
+  sendLiveActivity: async (value) => { liveActivityDeliveries.push(value); },
   now: () => ++clock,
 });
 
@@ -69,6 +71,37 @@ assert.equal(deliveries.at(-1).registration.deviceId, "phone_one");
 
 await host.deliverHostedCollaboratorTurn({ ...completedEvent(), turn: { source: "client" } });
 assert.equal(deliveries.length, 3);
+
+await registerLiveActivity("phone_one", "cc".repeat(32), "sandbox");
+await host.deliverConversationTurnRelayUpdate({
+  deviceId: "phone_one",
+  conversationId: "conversation-local",
+  state: "running",
+  providerStatus: null,
+});
+assert.equal(liveActivityDeliveries.length, 1);
+assert.equal(liveActivityDeliveries[0].payload.event, "update");
+assert.equal(liveActivityDeliveries[0].payload.phase, "thinking");
+
+await host.deliverConversationTurnRelayUpdate({
+  deviceId: "phone_one",
+  conversationId: "conversation-local",
+  state: "running",
+  providerStatus: 200,
+});
+assert.equal(liveActivityDeliveries.at(-1).payload.phase, "responding");
+
+await host.deliverConversationTurnRelayUpdate({
+  deviceId: "phone_one",
+  conversationId: "conversation-local",
+  state: "succeeded",
+  providerStatus: 200,
+});
+assert.equal(liveActivityDeliveries.at(-1).payload.event, "end");
+assert.deepEqual(liveActivityDeliveries.at(-1).payload.alert, {
+  title: "Example Collaborator",
+  body: "Reply ready",
+});
 console.log("ARU_APNS_PUSH_SMOKE_OK");
 
 async function register(deviceId, deviceToken, environment) {
@@ -79,6 +112,29 @@ async function register(deviceId, deviceToken, environment) {
     topic: "cn.aelion.aru",
   }, deviceId);
   assert.equal(response.status, 200);
+}
+
+async function registerLiveActivity(deviceId, activityToken, environment) {
+  const req = {
+    method: "PUT",
+    body: {
+      schema: "aru.selfhost.live-activity-registration.v1",
+      activityToken,
+      activityId: "activity-one",
+      conversationId: "conversation-local",
+      collaboratorName: "Example Collaborator",
+      completionBody: "Reply ready",
+      environment,
+      topic: "cn.aelion.aru",
+    },
+  };
+  const res = {};
+  const matched = await host.route(
+    req, res, "/aru/v1/live-activities/current", () => ({ deviceId }),
+  );
+  assert.equal(matched, true);
+  assert.equal(res.status, 200);
+  assert.equal(res.body.providerConfigured, true);
 }
 
 async function call(method, body, deviceId) {
