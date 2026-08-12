@@ -192,6 +192,8 @@ export function createCollaboratorHost({
     collaboratorIds: () => state.hostedCollaborators
       .filter((collaborator) => !collaborator.archivedAt)
       .map((collaborator) => collaborator.collaboratorId),
+    conversationExists: (collaboratorId, conversationId) =>
+      conversations.hasConversation(collaboratorId, conversationId),
     trigger: (collaborator, rule) => conversations.runProactive(collaborator, rule),
     now,
     log,
@@ -212,14 +214,14 @@ export function createCollaboratorHost({
     ];
   }
 
-  async function executeConversationTool(name, args, device, collaborator) {
+  async function executeConversationTool(name, args, device, collaborator, context) {
     const surfaceCall = surfaces.callSelfTool(name, args, device, collaborator);
     if (surfaceCall.matched) return surfaceCall.value;
     const projectCall = projects.callSelfTool(name, args, device, collaborator);
     if (projectCall.matched) return projectCall.value;
     const cognitionCall = cognition.callSelfTool(name, args, device, collaborator);
     if (cognitionCall.matched) return cognitionCall.value;
-    const initiativeCall = initiative.callSelfTool(name, args, device, collaborator);
+    const initiativeCall = initiative.callSelfTool(name, args, device, collaborator, context);
     if (initiativeCall.matched) return initiativeCall.value;
     const mobileReplicaCall = mobileReplicas.callSelfTool(name, args, device, collaborator);
     if (mobileReplicaCall.matched) return mobileReplicaCall.value;

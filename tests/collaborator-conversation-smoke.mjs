@@ -199,6 +199,39 @@ const ledger = JSON.parse(readFileSync(
 ));
 assert.equal(ledger.activeTurn.state, "completed");
 assert.equal(ledger.messages.at(-1).content, "hello from computer");
+
+const newest = await call(
+  "POST",
+  `/aru/v1/hosted-collaborators/${collaborator.collaboratorId}/conversations`,
+  { title: "Newest target" },
+);
+const followed = host.runProactive(collaborator, {
+  ruleId: "hostinitiative_follow",
+  title: "Follow latest",
+  conversationMode: "follow_latest",
+  conversationId: null,
+  seed: "follow latest",
+});
+assert.equal(followed.conversationId, newest.body.conversationId);
+const fixed = host.runProactive(collaborator, {
+  ruleId: "hostinitiative_fixed",
+  title: "Fixed target",
+  conversationMode: "fixed",
+  conversationId,
+  seed: "fixed target",
+});
+assert.equal(fixed.conversationId, conversationId);
+assert.throws(
+  () => host.runProactive(collaborator, {
+    ruleId: "hostinitiative_missing",
+    title: "Missing fixed target",
+    conversationMode: "fixed",
+    conversationId: "hostconv_missing",
+    seed: "must not silently create",
+  }),
+  (error) => error instanceof HttpError && error.status === 404,
+);
+
 console.log("ARU_COLLABORATOR_CONVERSATION_SMOKE_OK");
 
 async function decide(approvalId, decision) {

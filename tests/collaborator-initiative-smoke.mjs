@@ -60,7 +60,8 @@ try {
   initiative = host.read(collaborator.collaboratorId);
   assert.equal(initiative.rules[0].runningAt, clock);
   assert.equal(initiative.rules[0].enabled, false);
-  assert.equal(initiative.rules[0].conversationId, "hostconv_initiative");
+  assert.equal(initiative.rules[0].conversationMode, "follow_latest");
+  assert.equal(initiative.rules[0].conversationId, null);
 
   clock += 5;
   host.settle({
@@ -136,10 +137,17 @@ try {
     goal: "在之后主动问用户今天有没有好好吃饭",
     fireAfterMinutes: 3,
     recurrenceMinutes: 0,
-  }, modelDevice, collaborator).value;
+  }, modelDevice, collaborator, {
+    conversationId: "hostconv_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+  }).value;
   const selfRule = initiative.rules.at(-1);
   assert.equal(selfRule.nextFireAt, clock + 180_000);
   assert.equal(selfRule.recurrenceMinutes, null);
+  assert.equal(selfRule.conversationMode, "fixed");
+  assert.equal(
+    selfRule.conversationId,
+    "hostconv_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+  );
   assert.equal(selfRule.notificationsEnabled, true);
   assert.equal(selfRule.enabled, true);
   assert.equal(selfRule.updatedByDeviceId, undefined);

@@ -228,12 +228,11 @@ export function createCollaboratorConversationHost({
 
   function runProactive(collaborator, rule) {
     const device = { deviceId: "host-scheduler" };
-    let conversation = null;
-    if (rule.conversationId) {
-      try { conversation = loadConversation(collaborator.collaboratorId, rule.conversationId); }
-      catch (error) {
-        if (!(error instanceof HttpError) || error.status !== 404) throw error;
-      }
+    let conversation;
+    if (rule.conversationMode === "fixed") {
+      conversation = loadConversation(collaborator.collaboratorId, rule.conversationId);
+    } else {
+      conversation = latestLiveConversation(collaborator.collaboratorId);
     }
     if (!conversation) {
       conversation = loadConversation(
@@ -421,7 +420,7 @@ export function createCollaboratorConversationHost({
     try {
       const value = await executeTool(tool.name, params.arguments ?? {}, {
         deviceId: `hosted-collaborator:${collaborator.collaboratorId}`,
-      }, collaborator);
+      }, collaborator, { conversationId: conversation.conversationId });
       appendEvent(conversation, "tool.completed", {
         turnId: conversation.activeTurn.turnId,
         toolCallId,
@@ -726,6 +725,21 @@ export function createCollaboratorConversationHost({
     catch { throw new HttpError(500, "conversation.unreadable", "conversation ledger is unreadable"); }
   }
 
+  function latestLiveConversation(collaboratorId) {
+    return loadConversations(collaboratorId)
+      .filter((conversation) => !conversation.archivedAt)
+      .sort((left, right) => right.updatedAt - left.updatedAt)[0] ?? null;
+  }
+
+  function hasConversation(collaboratorId, conversationId) {
+    try {
+      return !loadConversation(collaboratorId, conversationId).archivedAt;
+    } catch (error) {
+      if (error instanceof HttpError && error.status === 404) return false;
+      throw error;
+    }
+  }
+
   function saveConversation(conversation) {
     const directory = collaboratorDirectory(conversation.collaboratorId);
     mkdirSync(directory, { recursive: true, mode: 0o700 });
@@ -761,6 +775,7 @@ export function createCollaboratorConversationHost({
   return {
     route,
     inventory,
+    hasConversation,
     runProactive,
     runReplicaProactive,
     status() {

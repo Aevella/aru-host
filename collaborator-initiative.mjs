@@ -14,6 +14,9 @@ const INITIATIVE_SCHEMA = "aru.selfhost.collaborator-initiative.v1";
 const RULE_PREFIX = "hostinitiative";
 const COLLABORATOR_ID = /^hostcol_[A-Fa-f0-9-]+$/;
 const RULE_ID = /^hostinitiative_[A-Fa-f0-9-]+$/;
+const CONVERSATION_ID = /^hostconv_[A-Fa-f0-9-]+$/;
+const CONVERSATION_MODES = new Set(["follow_latest", "fixed"]);
+const SCHEDULE_KINDS = new Set(["one_time", "daily", "interval"]);
 
 export function createCollaboratorInitiativeHost({
   dataDir,
@@ -22,6 +25,7 @@ export function createCollaboratorInitiativeHost({
   HttpError,
   collaboratorForId,
   collaboratorIds,
+  conversationExists = () => true,
   trigger,
   now = Date.now,
   defer = setImmediate,
@@ -108,9 +112,19 @@ export function createCollaboratorInitiativeHost({
       title: validatedText(body?.title, true, "title", 120),
       goal: validatedText(body?.goal, true, "goal", 4_000),
       instructions: validatedText(body?.instructions, true, "instructions", 16_000),
-      conversationId: null,
+      conversationMode: validatedEnum(
+        body?.conversationMode ?? "follow_latest", CONVERSATION_MODES, "conversationMode",
+      ),
+      conversationId: validatedOptionalConversationId(body?.conversationId),
+      scheduleKind: validatedEnum(
+        body?.scheduleKind ?? (body?.recurrenceMinutes ? "interval" : "one_time"),
+        SCHEDULE_KINDS,
+        "scheduleKind",
+      ),
       nextFireAt: validatedOptionalTimestamp(body?.nextFireAt),
       recurrenceMinutes: validatedOptionalPositiveInteger(body?.recurrenceMinutes),
+      dailyTimeMinutes: validatedOptionalMinuteOfDay(body?.dailyTimeMinutes),
+      scheduleTimeZoneIdentifier: validatedOptionalTimeZone(body?.scheduleTimeZoneIdentifier),
       notificationsEnabled: body?.notificationsEnabled === true,
       enabled: body?.enabled !== false,
       deliveryCount: 0,
@@ -123,7 +137,7 @@ export function createCollaboratorInitiativeHost({
       archivedAt: null,
       updatedByDeviceId: device.deviceId,
     });
-    validateRuleContent(initiative.rules.at(-1));
+    validateRuleContent(initiative.rules.at(-1), collaboratorId);
     touch(initiative, device.deviceId);
     save(initiative);
     return publicInitiative(initiative);
@@ -143,17 +157,44 @@ export function createCollaboratorInitiativeHost({
         );
       }
     }
-    if (body?.nextFireAt !== undefined) {
-      rule.nextFireAt = validatedOptionalTimestamp(body.nextFireAt);
+    if (body?.conversationMode !== undefined) {
+      rule.conversationMode = validatedEnum(
+        body.conversationMode, CONVERSATION_MODES, "conversationMode",
+      );
+      rule.conversationId = rule.conversationMode === "fixed"
+        ? validatedOptionalConversationId(body?.conversationId)
+        : null;
     }
-    if (body?.recurrenceMinutes !== undefined) {
-      rule.recurrenceMinutes = validatedOptionalPositiveInteger(body.recurrenceMinutes);
+    if (body?.scheduleKind !== undefined) {
+      rule.scheduleKind = validatedEnum(body.scheduleKind, SCHEDULE_KINDS, "scheduleKind");
+      rule.nextFireAt = validatedOptionalTimestamp(body?.nextFireAt);
+      rule.recurrenceMinutes = rule.scheduleKind === "interval"
+        ? validatedOptionalPositiveInteger(body?.recurrenceMinutes)
+        : null;
+      rule.dailyTimeMinutes = rule.scheduleKind === "daily"
+        ? validatedOptionalMinuteOfDay(body?.dailyTimeMinutes)
+        : null;
+      rule.scheduleTimeZoneIdentifier = rule.scheduleKind === "daily"
+        ? validatedOptionalTimeZone(body?.scheduleTimeZoneIdentifier)
+        : null;
+    } else {
+      if (body?.nextFireAt !== undefined) {
+        rule.nextFireAt = validatedOptionalTimestamp(body.nextFireAt);
+      }
+      if (body?.recurrenceMinutes !== undefined) {
+        rule.recurrenceMinutes = recurrenceFromSelfTool(body.recurrenceMinutes);
+        rule.scheduleKind = rule.recurrenceMinutes ? "interval" : "one_time";
+        rule.dailyTimeMinutes = null;
+        rule.scheduleTimeZoneIdentifier = null;
+      }
     }
     if (body?.notificationsEnabled !== undefined) {
       rule.notificationsEnabled = body.notificationsEnabled === true;
     }
     if (body?.enabled !== undefined) rule.enabled = body.enabled === true;
-    validateRuleContent(rule);
+    validateRuleContent(rule, collaboratorId, {
+      validatesTarget: body?.conversationMode !== undefined,
+    });
     rule.updatedAt = now();
     rule.updatedByDeviceId = device.deviceId;
     touch(initiative, device.deviceId);
@@ -212,11 +253,18 @@ export function createCollaboratorInitiativeHost({
     rule.lastAttemptAt = timestamp;
     rule.lastFailure = null;
     rule.runningAt = timestamp;
-    if (rule.recurrenceMinutes) {
+    if (rule.scheduleKind === "interval") {
       const interval = rule.recurrenceMinutes * 60 * 1_000;
       const elapsed = Math.max(0, timestamp - scheduledAt);
       const elapsedIntervals = Math.floor(elapsed / interval);
       rule.nextFireAt = scheduledAt + (elapsedIntervals + 1) * interval;
+      rule.enabled = true;
+    } else if (rule.scheduleKind === "daily") {
+      rule.nextFireAt = nextDailyFireAt(
+        rule.dailyTimeMinutes,
+        rule.scheduleTimeZoneIdentifier,
+        timestamp,
+      );
       rule.enabled = true;
     } else {
       rule.nextFireAt = null;
@@ -232,7 +280,6 @@ export function createCollaboratorInitiativeHost({
         manual,
         seed: proactiveSeed(rule),
       });
-      rule.conversationId = conversation.conversationId;
       rule.updatedAt = now();
       touch(initiative, actorDeviceId);
       save(initiative);
@@ -308,7 +355,7 @@ export function createCollaboratorInitiativeHost({
       operation(
         "aru_collaborator_initiative_create",
         "Create my proactive message plan",
-        "Create one of your own durable proactive message rules. The Host schedules a normal future collaborator turn; recurrenceMinutes 0 means one time, and phone notification is enabled unless notificationsEnabled is false.",
+        "Create one of your own durable proactive message rules. The target defaults to the conversation in which you call this tool, so do not ask the user for or invent a conversation id. The Host schedules a normal future collaborator turn; recurrenceMinutes 0 means one time, and phone notification is enabled unless notificationsEnabled is false.",
         {
           expectedRevision: revision,
           title: string("Short user-visible name for this proactive intention."),
@@ -363,7 +410,7 @@ export function createCollaboratorInitiativeHost({
     ];
   }
 
-  function callSelfTool(name, args, device, collaborator) {
+  function callSelfTool(name, args, device, collaborator, context = null) {
     if (!name.startsWith("aru_collaborator_initiative_")) return { matched: false };
     if (Object.prototype.hasOwnProperty.call(args ?? {}, "collaboratorId")) {
       throw new HttpError(
@@ -382,7 +429,11 @@ export function createCollaboratorInitiativeHost({
     if (name === "aru_collaborator_initiative_create") {
       return {
         matched: true,
-        value: createRule(collaboratorId, createBodyFromSelfTool(args), device),
+        value: createRule(
+          collaboratorId,
+          createBodyFromSelfTool(args, context?.conversationId),
+          device,
+        ),
       };
     }
     if (name === "aru_collaborator_initiative_update") {
@@ -411,12 +462,16 @@ export function createCollaboratorInitiativeHost({
     return { matched: false };
   }
 
-  function createBodyFromSelfTool(args) {
+  function createBodyFromSelfTool(args, currentConversationId) {
+    const conversationId = validatedOptionalConversationId(currentConversationId);
     return {
       expectedRevision: args?.expectedRevision,
       title: args?.title,
       goal: args?.goal,
       instructions: args?.instructions ?? "",
+      conversationMode: conversationId ? "fixed" : "follow_latest",
+      conversationId,
+      scheduleKind: args?.recurrenceMinutes > 0 ? "interval" : "one_time",
       nextFireAt: relativeFireAt(args?.fireAfterMinutes),
       recurrenceMinutes: recurrenceFromSelfTool(args?.recurrenceMinutes),
       notificationsEnabled: args?.notificationsEnabled !== false,
@@ -476,9 +531,19 @@ export function createCollaboratorInitiativeHost({
               title: { type: "string" },
               goal: { type: "string" },
               instructions: { type: "string" },
+              conversationMode: {
+                type: "string",
+                enum: ["follow_latest", "fixed"],
+              },
               conversationId: nullableString,
+              scheduleKind: {
+                type: "string",
+                enum: ["one_time", "daily", "interval"],
+              },
               nextFireAt: nullableInteger,
               recurrenceMinutes: nullableInteger,
+              dailyTimeMinutes: nullableInteger,
+              scheduleTimeZoneIdentifier: nullableString,
               notificationsEnabled: { type: "boolean" },
               enabled: { type: "boolean" },
               deliveryCount: { type: "integer", minimum: 0 },
@@ -491,8 +556,10 @@ export function createCollaboratorInitiativeHost({
               archivedAt: nullableInteger,
             },
             required: [
-              "ruleId", "title", "goal", "instructions", "conversationId", "nextFireAt",
-              "recurrenceMinutes", "notificationsEnabled", "enabled", "deliveryCount",
+              "ruleId", "title", "goal", "instructions", "conversationMode",
+              "conversationId", "scheduleKind", "nextFireAt", "recurrenceMinutes",
+              "dailyTimeMinutes", "scheduleTimeZoneIdentifier",
+              "notificationsEnabled", "enabled", "deliveryCount",
               "lastAttemptAt", "lastDeliveredAt", "lastFailure", "runningAt", "createdAt",
               "updatedAt", "archivedAt",
             ],
@@ -584,8 +651,18 @@ export function createCollaboratorInitiativeHost({
     rule.goal = typeof rule.goal === "string" ? rule.goal : "";
     rule.instructions = typeof rule.instructions === "string" ? rule.instructions : "";
     rule.conversationId = typeof rule.conversationId === "string" ? rule.conversationId : null;
+    rule.conversationMode = CONVERSATION_MODES.has(rule.conversationMode)
+      ? rule.conversationMode
+      : (rule.conversationId ? "fixed" : "follow_latest");
     rule.nextFireAt = optionalTimestamp(rule.nextFireAt);
     rule.recurrenceMinutes = validatedOptionalPositiveInteger(rule.recurrenceMinutes);
+    rule.scheduleKind = SCHEDULE_KINDS.has(rule.scheduleKind)
+      ? rule.scheduleKind
+      : (rule.recurrenceMinutes ? "interval" : "one_time");
+    rule.dailyTimeMinutes = validatedOptionalMinuteOfDay(rule.dailyTimeMinutes);
+    rule.scheduleTimeZoneIdentifier = validatedOptionalTimeZone(
+      rule.scheduleTimeZoneIdentifier,
+    );
     rule.notificationsEnabled = rule.notificationsEnabled === true;
     rule.enabled = rule.enabled === true;
     rule.deliveryCount = Number.isSafeInteger(rule.deliveryCount) ? rule.deliveryCount : 0;
@@ -637,9 +714,27 @@ export function createCollaboratorInitiativeHost({
       && rule.nextFireAt !== null && rule.nextFireAt <= timestamp;
   }
 
-  function validateRuleContent(rule) {
+  function validateRuleContent(rule, collaboratorId, { validatesTarget = true } = {}) {
     if (!rule.goal.trim() && !rule.instructions.trim()) {
       throw new Error("initiative goal or instructions is required");
+    }
+    if (rule.conversationMode === "fixed") {
+      if (!rule.conversationId) throw new Error("fixed initiative conversation is required");
+      if (validatesTarget && !conversationExists(collaboratorId, rule.conversationId)) {
+        throw new Error("initiative conversation is unavailable");
+      }
+    } else {
+      rule.conversationId = null;
+    }
+    if (rule.scheduleKind === "interval" && !rule.recurrenceMinutes) {
+      throw new Error("interval initiative recurrenceMinutes is required");
+    }
+    if (rule.scheduleKind === "daily"
+      && (rule.dailyTimeMinutes === null || !rule.scheduleTimeZoneIdentifier)) {
+      throw new Error("daily initiative time and time zone are required");
+    }
+    if (rule.enabled && rule.nextFireAt === null) {
+      throw new Error("enabled initiative nextFireAt is required");
     }
   }
 
@@ -669,6 +764,57 @@ export function createCollaboratorInitiativeHost({
     if (value === null || value === undefined) return null;
     if (!Number.isSafeInteger(value) || value <= 0) throw new Error("recurrenceMinutes is invalid");
     return value;
+  }
+
+  function validatedEnum(value, allowed, field) {
+    if (!allowed.has(value)) throw new Error(`${field} is invalid`);
+    return value;
+  }
+
+  function validatedOptionalConversationId(value) {
+    if (value === null || value === undefined || value === "") return null;
+    if (!CONVERSATION_ID.test(String(value))) throw new Error("conversationId is invalid");
+    return String(value);
+  }
+
+  function validatedOptionalMinuteOfDay(value) {
+    if (value === null || value === undefined) return null;
+    if (!Number.isSafeInteger(value) || value < 0 || value >= 24 * 60) {
+      throw new Error("dailyTimeMinutes is invalid");
+    }
+    return value;
+  }
+
+  function validatedOptionalTimeZone(value) {
+    if (value === null || value === undefined || value === "") return null;
+    const identifier = String(value);
+    try { new Intl.DateTimeFormat("en-US", { timeZone: identifier }).format(0); }
+    catch { throw new Error("scheduleTimeZoneIdentifier is invalid"); }
+    return identifier;
+  }
+
+  function nextDailyFireAt(minutes, timeZone, after) {
+    const formatter = new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    });
+    const targetHour = Math.floor(minutes / 60);
+    const targetMinute = minutes % 60;
+    for (let offset = 60_000; offset <= 27 * 60 * 60 * 1_000; offset += 60_000) {
+      const candidate = after + offset;
+      const parts = Object.fromEntries(
+        formatter.formatToParts(candidate).map((part) => [part.type, part.value]),
+      );
+      if (Number(parts.hour) === targetHour && Number(parts.minute) === targetMinute) {
+        return candidate - (candidate % 60_000);
+      }
+    }
+    throw new Error("could not resolve next daily initiative time");
   }
 
   function optionalTimestamp(value) {

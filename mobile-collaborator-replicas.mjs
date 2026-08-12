@@ -273,10 +273,16 @@ export function createMobileCollaboratorReplicaHost({
   }
 
   function advanceRule(rule, timestamp) {
-    if (rule.recurrenceMinutes > 0) {
+    if (rule.scheduleKind === "interval" && rule.recurrenceMinutes > 0) {
       const interval = rule.recurrenceMinutes * 60 * 1000;
       const elapsed = Math.max(0, timestamp - rule.nextFireAt);
       rule.nextFireAt += (Math.floor(elapsed / interval) + 1) * interval;
+    } else if (rule.scheduleKind === "daily") {
+      rule.nextFireAt = nextDailyFireAt(
+        rule.dailyTimeMinutes,
+        rule.scheduleTimeZoneIdentifier,
+        timestamp,
+      );
     } else {
       rule.nextFireAt = null;
       rule.enabled = false;
@@ -420,16 +426,47 @@ function validatedRules(value, current, epoch) {
     const sourceUpdatedAt = positiveInteger(item?.updatedAt, "rule.updatedAt");
     const sourceVersion = requiredText(item?.sourceVersion, "rule.sourceVersion");
     const preservesHostSettlement = previous?.sourceVersion === sourceVersion;
+    const conversationId = item?.conversationId
+      ? validatedId(item.conversationId, "conversation")
+      : null;
+    const conversationMode = ["follow_latest", "fixed"].includes(item?.conversationMode)
+      ? item.conversationMode
+      : (conversationId ? "fixed" : "follow_latest");
+    const recurrenceMinutes = item?.recurrenceMinutes == null
+      ? null
+      : positiveInteger(item.recurrenceMinutes, "recurrenceMinutes");
+    const scheduleKind = ["one_time", "daily", "interval"].includes(item?.scheduleKind)
+      ? item.scheduleKind
+      : (recurrenceMinutes ? "interval" : "one_time");
+    const dailyTimeMinutes = item?.dailyTimeMinutes == null
+      ? null
+      : nonnegativeInteger(item.dailyTimeMinutes, "dailyTimeMinutes");
+    const scheduleTimeZoneIdentifier = item?.scheduleTimeZoneIdentifier == null
+      ? null
+      : requiredText(item.scheduleTimeZoneIdentifier, "scheduleTimeZoneIdentifier");
+    if (dailyTimeMinutes != null && dailyTimeMinutes >= 1440) {
+      throw new Error("dailyTimeMinutes must identify one minute in a day");
+    }
+    if (scheduleKind === "interval" && !recurrenceMinutes) {
+      throw new Error("interval schedule requires recurrenceMinutes");
+    }
+    if (scheduleKind === "daily" && (dailyTimeMinutes == null || !scheduleTimeZoneIdentifier)) {
+      throw new Error("daily schedule requires local time and time zone");
+    }
     return {
       ruleId,
-      conversationId: item?.conversationId ? validatedId(item.conversationId, "conversation") : null,
+      conversationMode,
+      conversationId,
       title: String(item?.title ?? ""),
       goal: String(item?.goal ?? ""),
       instructions: String(item?.instructions ?? ""),
       nextFireAt: preservesHostSettlement
         ? previous.nextFireAt
         : (item?.nextFireAt == null ? null : positiveInteger(item.nextFireAt, "nextFireAt")),
-      recurrenceMinutes: item?.recurrenceMinutes == null ? null : positiveInteger(item.recurrenceMinutes, "recurrenceMinutes"),
+      scheduleKind,
+      recurrenceMinutes,
+      dailyTimeMinutes,
+      scheduleTimeZoneIdentifier,
       notificationsEnabled: item?.notificationsEnabled === true,
       enabled: preservesHostSettlement ? previous.enabled : item?.enabled === true,
       sourceUpdatedAt,
@@ -437,6 +474,49 @@ function validatedRules(value, current, epoch) {
       inFlightDeliveryId: previous?.inFlightDeliveryId ?? null,
     };
   });
+}
+
+function nextDailyFireAt(dailyTimeMinutes, timeZoneIdentifier, after) {
+  const hour = Math.floor(dailyTimeMinutes / 60);
+  const minute = dailyTimeMinutes % 60;
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timeZoneIdentifier,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  });
+  const partsAt = (timestamp) => Object.fromEntries(
+    formatter.formatToParts(new Date(timestamp))
+      .filter((part) => part.type !== "literal")
+      .map((part) => [part.type, Number(part.value)]),
+  );
+  const local = partsAt(after);
+  const localDate = new Date(Date.UTC(local.year, local.month - 1, local.day));
+  for (let dayOffset = 0; dayOffset < 4; dayOffset += 1) {
+    const targetDate = new Date(localDate.getTime() + dayOffset * 86_400_000);
+    const target = {
+      year: targetDate.getUTCFullYear(),
+      month: targetDate.getUTCMonth() + 1,
+      day: targetDate.getUTCDate(),
+      hour,
+      minute,
+    };
+    let candidate = Date.UTC(target.year, target.month - 1, target.day, hour, minute);
+    for (let iteration = 0; iteration < 4; iteration += 1) {
+      const actual = partsAt(candidate);
+      const targetWall = Date.UTC(target.year, target.month - 1, target.day, hour, minute);
+      const actualWall = Date.UTC(actual.year, actual.month - 1, actual.day, actual.hour, actual.minute);
+      candidate += targetWall - actualWall;
+    }
+    const actual = partsAt(candidate);
+    const matches = actual.year === target.year && actual.month === target.month
+      && actual.day === target.day && actual.hour === hour && actual.minute === minute;
+    if (matches && candidate > after) return candidate;
+  }
+  throw new Error("daily schedule could not resolve its next wall-clock occurrence");
 }
 
 function requestEpoch(urlString) {
