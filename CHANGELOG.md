@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.29.3
+
+- Advertise the exact provider protocols accepted by durable conversation-turn relay so phones can decide whether Host can own a turn before submitting it.
+- Accept native Claude, ChatGPT Codex, and Kimi subscription routes in addition to the existing OpenAI-compatible and Anthropic Messages routes without flattening their protocol identities.
+
 ## 0.29.2
 
 - Let a phone-owned collaborator publish a bounded, read-only execution replica to Host so scheduled proactive turns can finish while the phone sleeps; the phone remains authoritative and imports each stable delivery idempotently or branches when its conversation head has moved.

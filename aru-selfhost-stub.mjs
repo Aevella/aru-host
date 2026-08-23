@@ -63,7 +63,10 @@ import { createCollaboratorHost } from "./collaborator-host.mjs";
 import { createNodeWorkspaceHost } from "./node-workspaces.mjs";
 import { createNodeControl } from "./node-control.mjs";
 import { createBackupSettings } from "./backup-settings.mjs";
-import { createConversationTurnRelay } from "./conversation-turn-relay.mjs";
+import {
+  createConversationTurnRelay,
+  SUPPORTED_CONVERSATION_TURN_PROTOCOLS,
+} from "./conversation-turn-relay.mjs";
 import { createAPNsPushHost } from "./apns-push.mjs";
 
 class HttpError extends Error {
@@ -432,6 +435,7 @@ function manifest() {
       "conversation-turn-relay": {
         enabled: true,
         endpoint: "/aru/v1/conversation-turns",
+        protocols: [...SUPPORTED_CONVERSATION_TURN_PROTOCOLS],
         execution: "durable-provider-response-v1",
         idempotency: "device-and-client-turn-id",
         secretRetention: "request-lifetime-only",

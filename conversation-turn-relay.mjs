@@ -11,6 +11,14 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 
+export const SUPPORTED_CONVERSATION_TURN_PROTOCOLS = Object.freeze([
+  "openai-compatible",
+  "anthropic-messages",
+  "claude-subscription",
+  "chatgpt-codex-subscription",
+  "kimi-code-subscription",
+]);
+
 const TURN_SCHEMA = "aru.selfhost.conversation-turn.v1";
 const ACTIVE_STATES = new Set(["accepted", "running"]);
 const TERMINAL_STATES = new Set(["succeeded", "failed", "interrupted", "cancelled"]);
@@ -328,7 +336,7 @@ function requiredText(value, name) {
 }
 
 function requiredProtocol(value) {
-  if (value !== "openai-compatible" && value !== "anthropic-messages") {
+  if (!SUPPORTED_CONVERSATION_TURN_PROTOCOLS.includes(value)) {
     throw new Error("protocolId is unsupported");
   }
   return value;

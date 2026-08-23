@@ -3,7 +3,10 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { createConversationTurnRelay } from "../conversation-turn-relay.mjs";
+import {
+  createConversationTurnRelay,
+  SUPPORTED_CONVERSATION_TURN_PROTOCOLS,
+} from "../conversation-turn-relay.mjs";
 
 test("durable turn submission is idempotent and never persists provider secrets", async () => {
   const root = mkdtempSync(join(tmpdir(), "aru-turn-relay-"));
@@ -126,6 +129,49 @@ test("rejects malformed provider bodies at the device boundary", async () => {
         && error.code === "conversation_turn.invalid_request");
     assert.equal(state.conversationTurns.length, 0);
   } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("accepts every advertised provider protocol identity", async () => {
+  const root = mkdtempSync(join(tmpdir(), "aru-turn-relay-protocols-"));
+  const state = { conversationTurns: [] };
+  const responses = [];
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response("{}", { status: 200 });
+  try {
+    const relay = createConversationTurnRelay({
+      dataDir: root,
+      state,
+      saveState: () => {},
+      readJSONBody: async (request) => request.body,
+      sendJSON: (_response, status, body) => responses.push({ status, body }),
+      HttpError: class HttpError extends Error {},
+      maximumRequestBytes: 1024,
+      log: () => {},
+    });
+    for (const [index, protocolId] of SUPPORTED_CONVERSATION_TURN_PROTOCOLS.entries()) {
+      await relay.route({
+        method: "POST",
+        body: {
+          clientTurnId: `assistant-${index}`,
+          conversationId: "conversation-protocols",
+          protocolId,
+          request: {
+            endpoint: "https://provider.example/v1/messages",
+            headers: {},
+            bodyBase64: Buffer.from('{"stream":true}').toString("base64"),
+          },
+        },
+      }, {}, "/aru/v1/conversation-turns", () => ({ deviceId: "device-one" }));
+      assert.equal(responses.at(-1).status, 202);
+    }
+    assert.deepEqual(
+      state.conversationTurns.map((turn) => turn.protocolId),
+      SUPPORTED_CONVERSATION_TURN_PROTOCOLS,
+    );
+  } finally {
+    globalThis.fetch = previousFetch;
     rmSync(root, { recursive: true, force: true });
   }
 });

@@ -67,6 +67,8 @@ curl -fsS "http://127.0.0.1:$port/.well-known/aru.json" \
         if(m.capabilities?.["node-workspaces"]?.commandExecution!==false) process.exit(16);
         if(m.capabilities?.["node-workspaces"]?.defaultWorkspace!=="host-managed") process.exit(18);
         if(m.capabilities?.["node-settings"]?.enabled!==true) process.exit(17);
+        const relayProtocols=m.capabilities?.["conversation-turn-relay"]?.protocols;
+        if(JSON.stringify(relayProtocols)!==JSON.stringify(["openai-compatible","anthropic-messages","claude-subscription","chatgpt-codex-subscription","kimi-code-subscription"])) process.exit(24);
       });'
 
 pairing_url="$(grep -E '^aru://pair\?' "$log_file" | tail -1)"
