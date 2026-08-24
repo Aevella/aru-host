@@ -21,6 +21,8 @@ jobs:
           bash tests/http-smoke.sh
           bash tests/installer-smoke.sh
           node tests/apns-push-smoke.mjs
+          node tests/wake-bridge-smoke.mjs
+          node tests/wake-send-smoke.mjs
           node tests/codex-app-server-driver-smoke.mjs
           node tests/collaborator-host-smoke.mjs
           node tests/collaborator-cognition-smoke.mjs

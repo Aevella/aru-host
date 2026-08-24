@@ -22,6 +22,7 @@ files=(
   collaborator-initiative.mjs
   collaborator-projects.mjs
   apns-push.mjs
+  wake-bridge.mjs
   codex-app-server-driver.mjs
   direct-api-driver.mjs
   provider-profiles.mjs

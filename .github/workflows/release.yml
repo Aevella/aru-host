@@ -25,6 +25,8 @@ jobs:
 
       - name: Verify Host Core and Console
         run: |
+          node tests/wake-bridge-smoke.mjs
+          node tests/wake-send-smoke.mjs
           bash tests/macos-installer-smoke.sh
           swift test --package-path macos-console
 
@@ -125,6 +127,8 @@ jobs:
           npm ci --prefix linux-console
           npm audit --prefix linux-console --omit=dev
           node tests/provider-profiles-smoke.mjs
+          node tests/wake-bridge-smoke.mjs
+          node tests/wake-send-smoke.mjs
           bash tests/linux-desktop-installer-smoke.sh
           npm test --prefix linux-console
 

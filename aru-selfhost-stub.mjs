@@ -67,7 +67,8 @@ import {
   createConversationTurnRelay,
   SUPPORTED_CONVERSATION_TURN_PROTOCOLS,
 } from "./conversation-turn-relay.mjs";
-import { createAPNsPushHost } from "./apns-push.mjs";
+import { createAPNsCredentialStore, createAPNsPushHost, sendAPNsNotification } from "./apns-push.mjs";
+import { createWakeBridge } from "./wake-bridge.mjs";
 
 class HttpError extends Error {
   constructor(status, code, message, { issues = [], recovery = null } = {}) {
@@ -170,6 +171,7 @@ const nodeControl = createNodeControl({
   HttpError,
   log,
 });
+const apnsCredentialStore = createAPNsCredentialStore();
 const remotePush = createAPNsPushHost({
   state,
   saveState,
@@ -177,6 +179,17 @@ const remotePush = createAPNsPushHost({
   sendJSON,
   HttpError,
   serverId: state.serverId,
+  credentialStore: apnsCredentialStore,
+  log,
+});
+const wakeBridge = createWakeBridge({
+  state,
+  saveState,
+  readJSONBody,
+  sendJSON,
+  HttpError,
+  sendPush: sendAPNsNotification,
+  credentialStore: apnsCredentialStore,
   log,
 });
 const backupSettings = createBackupSettings({
@@ -337,6 +350,7 @@ async function route(req, res) {
   if (await backupSettings.route(req, res, path, () => requireDevice(req))) return;
   if (await conversationTurnRelay.route(req, res, path, requireDevice)) return;
   if (await remotePush.route(req, res, path, () => requireDevice(req))) return;
+  if (await wakeBridge.route(req, res, path)) return;
   if (path === "/aru/v1/jobs" && req.method === "POST") {
     return handleWorkspaceJobSubmit(req, res, requireDevice(req));
   }

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.29.4
+
+- Add the encrypted external wake bridge used by collaborator-owned Aru triggers, with endpoint-scoped fetch and submit credentials, idempotent ciphertext admission, bounded retention, and phone-side decryption.
+- Add the v2 reference sender so external services can seal and submit event text without choosing a collaborator, conversation, or system role.
+- Include the bridge in macOS, Linux desktop, and VPS Host Core payloads and verify both the server route and sender contract in CI.
+
 ## 0.29.3
 
 - Advertise the exact provider protocols accepted by durable conversation-turn relay so phones can decide whether Host can own a turn before submitting it.

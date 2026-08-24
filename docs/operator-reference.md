@@ -168,6 +168,9 @@ deterministic dev flows.
 | `GET/POST /aru/v1/hosted-collaborators/:id/surfaces/:surfaceId/events` | Bearer | read or append typed phone interaction events |
 | `POST .../surfaces/:surfaceId/rollback`, `/archive`, `/restore` | Bearer | restore an earlier source as a new version or change visibility |
 | `GET/PUT/DELETE /aru/v1/push-devices/current` | Bearer | inspect, register, or remove the requesting paired phone's APNs route |
+| `PUT/DELETE /aru/v1/wake-bridge/endpoints/current` | Endpoint fetch token | register or revoke one phone-created encrypted wake endpoint |
+| `POST /aru/v1/wake-bridge/endpoints/:endpointId/events` | Endpoint submit token | idempotently admit one sealed event and emit an APNs wake hint |
+| `GET /aru/v1/wake-bridge/endpoints/:endpointId/events`, `POST .../:eventId/ack` | Endpoint fetch token | fetch bounded ciphertext inventory or acknowledge phone-side SQLite admission |
 
 The fixed MCP catalog exposes node identity read/rename, backup inventory,
 revision-safe backup retention read/update, device inspection, durable job
@@ -266,6 +269,15 @@ the ordinary driver/tool loop with a stable delivery id. Settlement stores one
 bounded delivery receipt and sends APNs only after completion. When the phone
 returns, it imports that id once and decides whether the unchanged base can append
 or the independently advanced conversation must keep both histories as branches.
+
+`wake-bridge.mjs` owns a separate encrypted external-event mailbox. Registration
+stores endpoint-scoped token hashes, an encryption-key fingerprint, APNs routing
+metadata, and no collaborator or conversation target. Submission accepts only a
+sealed idempotent envelope; `wake-send.mjs` is the reference v2 sender. APNs is a
+wake hint, while the phone decrypts the event, commits it to local SQLite, then
+acknowledges the Host row. A Host without APNs provider credentials can retain no
+usable registered route; operators must configure the existing APNs credential
+boundary before external wake can complete.
 
 The same initiative owner publishes four current-root tools to hosted
 conversations: `aru_collaborator_initiative_read`, `create`, `update`, and
