@@ -69,6 +69,7 @@ grep -Fq 'cgroup_manager = "cgroupfs"' "$root/etc/aru-selfhost/containers.conf"
 grep -Fq 'CONTAINERS_CONF=/etc/aru-selfhost/containers.conf' "$root/etc/systemd/system/aru-selfhost.service"
 grep -Fq '/usr/libexec/podman:/usr/libexec/catatonit' "$root/etc/systemd/system/aru-selfhost.service"
 grep -Fq 'ARU_BASE_URL=http://100.64.0.10:8787' "$root/etc/aru-selfhost/node.env"
+grep -Fq 'ARU_WAKE_RELAY_URL=https://wake.aelion.cn' "$root/etc/aru-selfhost/node.env"
 grep -Fq 'ARU_LISTEN_HOST=0.0.0.0' "$root/etc/aru-selfhost/node.env"
 grep -Fq 'ARU_TRANSPORT_KIND=tailscale' "$root/etc/aru-selfhost/node.env"
 grep -Fq 'ARU_INSTALL_PROFILE=full' "$root/etc/aru-selfhost/install.env"
@@ -124,7 +125,7 @@ test -s "$artifacts/aru-selfhost-linux.tar.gz"
 test -s "$artifacts/aru-selfhost-linux.tar.gz.sha256"
 archive_entries="$artifacts/linux-archive-entries.txt"
 tar -tzf "$artifacts/aru-selfhost-linux.tar.gz" > "$archive_entries"
-for file in install.sh aru-selfhost-stub.mjs collaborator-host.mjs mobile-collaborator-replicas.mjs collaborator-surface-bundles.mjs collaborator-surfaces.mjs collaborator-conversations.mjs codex-app-server-driver.mjs collaborator-cognition.mjs direct-api-driver.mjs provider-profiles.mjs provider-secret-store.mjs backup-settings.mjs conversation-turn-relay.mjs node-control.mjs node-workspaces.mjs plugin-supervisor.mjs plugin-workshop.mjs source-plugin-runtime.mjs source-plugin-runner.mjs; do
+for file in install.sh aru-selfhost-stub.mjs collaborator-host.mjs mobile-collaborator-replicas.mjs collaborator-surface-bundles.mjs collaborator-surfaces.mjs collaborator-conversations.mjs codex-app-server-driver.mjs collaborator-cognition.mjs direct-api-driver.mjs provider-profiles.mjs provider-secret-store.mjs backup-settings.mjs conversation-turn-relay.mjs wake-bridge.mjs node-control.mjs node-workspaces.mjs plugin-supervisor.mjs plugin-workshop.mjs source-plugin-runtime.mjs source-plugin-runner.mjs; do
   grep -Fqx "$file" "$archive_entries"
 done
 
@@ -165,6 +166,7 @@ bash "$SELFHOST_DIR/install.sh" \
 test -x "$root/opt/aru-selfhost/current/server.mjs"
 test -f "$root/opt/aru-selfhost/current/plugin-supervisor.mjs"
 grep -Fq 'ARU_BASE_URL=https://aru.example.com' "$root/etc/aru-selfhost/node.env"
+grep -Fq 'ARU_WAKE_RELAY_URL=https://wake.aelion.cn' "$root/etc/aru-selfhost/node.env"
 grep -Fq 'ARU_LISTEN_HOST=127.0.0.1' "$root/etc/aru-selfhost/node.env"
 grep -Fq 'aru.example.com {' "$root/etc/caddy/conf.d/aru-selfhost.caddy"
 grep -Fqx 'import /etc/caddy/conf.d/*.caddy' "$root/etc/caddy/Caddyfile"

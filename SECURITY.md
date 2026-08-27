@@ -15,7 +15,8 @@ Please use GitHub's private vulnerability reporting for this repository. Do not 
 - Secrets configured for model providers stay in the Host secret store and are not returned by inventory APIs.
 - APNs provider signing material stays in macOS Keychain or Linux Secret Service; paired clients receive only readiness and delivery receipts, never the key.
 - APNs device tokens remain Host-private. Status responses expose only token fingerprints, and a revoked paired device is no longer eligible for delivery.
-- Every external wake trigger owns separate fetch, submit, and encryption secrets. Host stores only token hashes, the encryption-key fingerprint, and ciphertext; the encryption key and phone-side collaborator/conversation target never enter Host state.
+- Every external wake trigger owns separate fetch, submit, and encryption secrets. Host stores token hashes, an encryption-key fingerprint, ciphertext, an anonymous route id, and a route-scoped wake token; it never receives the APNs provider key, device token, route-owner token, encryption key, or phone-side collaborator/conversation target.
+- The official minimal wake relay stores the APNs address behind a separate owner token and accepts only an opaque idempotency request from Host. It receives no Host address, collaborator, conversation, event body, ciphertext, or encryption key.
 - macOS credentials use Keychain; Linux desktop credentials use Secret Service, with no plaintext fallback.
 - Backup plaintext and passphrases never enter the model tool surface.
 - Workspace containers do not receive the device credential.

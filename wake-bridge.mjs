@@ -1,10 +1,10 @@
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 
-const REGISTRATION_SCHEMA = "aru.wake-bridge.registration.v1";
-const STATUS_SCHEMA = "aru.wake-bridge.registration-status.v1";
+const REGISTRATION_SCHEMA = "aru.wake-bridge.registration.v2";
+const STATUS_SCHEMA = "aru.wake-bridge.registration-status.v2";
 const ENVELOPE_SCHEMA = "aru.wake-bridge.sealed-event.v1";
 const INVENTORY_SCHEMA = "aru.wake-bridge.event-inventory.v1";
-const ROUTE_SCHEMA = "aru.wake-bridge.event-route.v1";
+const RELAY_REQUEST_SCHEMA = "aru.wake-relay.request.v1";
 
 export function createWakeBridge({
   state,
@@ -12,20 +12,22 @@ export function createWakeBridge({
   readJSONBody,
   sendJSON,
   HttpError,
-  sendPush,
-  credentialStore,
-  topic = "cn.aelion.aru",
+  relayBaseURL,
+  fetchImpl = fetch,
   now = Date.now,
   log = () => {},
 }) {
   state.wakeBridgeEndpoints ??= [];
   state.wakeBridgeEvents ??= [];
+  migrateDirectAPNsEndpoints();
 
   async function route(req, res, path) {
     if (path === "/aru/v1/wake-bridge/endpoints/current" && req.method === "PUT") {
       const body = await readJSONBody(req, 64 * 1024);
       const endpoint = register(body, bearer(req));
       sendJSON(res, 200, publicStatus(endpoint));
+      const pending = oldestPendingEvent(endpoint.endpointId);
+      if (pending) void notify(endpoint, pending);
       return true;
     }
     if (path === "/aru/v1/wake-bridge/endpoints/current" && req.method === "DELETE") {
@@ -54,7 +56,7 @@ export function createWakeBridge({
       authorize(bearer(req), endpoint.submitTokenHash);
       const { event: envelope, inserted } = admit(endpoint, await readJSONBody(req, 256 * 1024));
       sendJSON(res, 202, { schema: ENVELOPE_SCHEMA, eventId: envelope.eventId, accepted: true });
-      if (inserted) void notify(endpoint, envelope);
+      if (inserted || endpoint.lastFailure) void notify(endpoint, envelope);
       return true;
     }
     if (req.method === "GET") {
@@ -84,14 +86,15 @@ export function createWakeBridge({
     if (existing) authorize(authorization, existing.fetchTokenHash);
     const fetchToken = secret(body.fetchToken, "fetchToken");
     const submitToken = secret(body.submitToken, "submitToken");
+    const relayRouteId = routeId(body.relayRouteId);
+    const relayWakeToken = secret(body.relayWakeToken, "relayWakeToken");
     const value = {
       endpointId,
       fetchTokenHash: digest(fetchToken),
       submitTokenHash: digest(submitToken),
       encryptionKeyFingerprint: fingerprint(body.encryptionKeyFingerprint),
-      deviceToken: deviceToken(body.deviceToken),
-      environment: ["sandbox", "production"].includes(body.environment) ? body.environment : "",
-      topic: body.topic === topic ? topic : "",
+      relayRouteId,
+      relayWakeToken,
       createdAt: existing?.createdAt ?? now(),
       updatedAt: now(),
       disabledAt: null,
@@ -99,9 +102,6 @@ export function createWakeBridge({
       lastDeliveredAt: existing?.lastDeliveredAt ?? null,
       lastFailure: null,
     };
-    if (!value.environment || !value.topic) {
-      throw new HttpError(400, "wake.registration_invalid", "APNs environment or topic is invalid");
-    }
     state.wakeBridgeEndpoints = state.wakeBridgeEndpoints.filter((item) => item.endpointId !== endpointId);
     state.wakeBridgeEndpoints.push(value);
     saveState();
@@ -149,25 +149,83 @@ export function createWakeBridge({
   async function notify(endpoint, event) {
     endpoint.lastAttemptAt = now();
     try {
-      const credentials = credentialStore.read();
-      if (!credentials) throw new Error("APNs provider credentials are unavailable");
-      await sendPush({
-        credentials,
-        registration: endpoint,
-        payload: {
-          title: "Aru",
-          body: "有一条外部消息在等你",
-          threadId: `aru.wake.${endpoint.endpointId}`,
-          route: { schema: ROUTE_SCHEMA, endpointId: endpoint.endpointId, eventId: event.eventId },
+      if (!endpoint.relayRouteId || !endpoint.relayWakeToken) {
+        throw new Error("anonymous wake relay route is not registered");
+      }
+      const requestId = createHmac("sha256", endpoint.relayWakeToken)
+        .update(`${endpoint.endpointId}:${event.eventId}`)
+        .digest("base64url");
+      const response = await fetchImpl(
+        `${relayBaseURL}/aru/v1/wake-relay/routes/${encodeURIComponent(endpoint.relayRouteId)}/requests`,
+        {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${endpoint.relayWakeToken}`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ schema: RELAY_REQUEST_SCHEMA, requestId }),
+          redirect: "error",
+          signal: AbortSignal.timeout(10_000),
         },
-      });
+      );
+      if (!response.ok) throw new Error(`anonymous wake relay returned HTTP ${response.status}`);
       endpoint.lastDeliveredAt = now();
       endpoint.lastFailure = null;
     } catch (error) {
       endpoint.lastFailure = String(error?.message ?? error).slice(0, 240);
-      log(`wake bridge push failed for ${endpoint.endpointId}: ${endpoint.lastFailure}`);
+      log(`wake relay request failed for ${endpoint.endpointId}: ${endpoint.lastFailure}`);
     }
     saveState();
+  }
+
+  function migrateDirectAPNsEndpoints() {
+    let changed = false;
+    for (const endpoint of state.wakeBridgeEndpoints) {
+      for (const key of ["deviceToken", "environment", "topic"]) {
+        if (Object.hasOwn(endpoint, key)) {
+          delete endpoint[key];
+          changed = true;
+        }
+      }
+      if (!Object.hasOwn(endpoint, "relayRouteId")) {
+        endpoint.relayRouteId = "";
+        changed = true;
+      }
+      if (!Object.hasOwn(endpoint, "relayWakeToken")) {
+        endpoint.relayWakeToken = "";
+        changed = true;
+      }
+    }
+    if (changed) saveState();
+  }
+
+  function relayAvailable(endpoint) {
+    return Boolean(relayBaseURL && endpoint.relayRouteId && endpoint.relayWakeToken);
+  }
+
+  function oldestPendingEvent(endpointId) {
+    return state.wakeBridgeEvents
+      .filter((event) => event.endpointId === endpointId && !event.acknowledgedAt)
+      .sort((lhs, rhs) => lhs.createdAt - rhs.createdAt || lhs.eventId.localeCompare(rhs.eventId))[0] ?? null;
+  }
+
+  function publicStatus(endpoint) {
+    return {
+      schema: STATUS_SCHEMA,
+      endpointId: endpoint.endpointId,
+      encryptionKeyFingerprint: endpoint.encryptionKeyFingerprint,
+      relayConfigured: relayAvailable(endpoint),
+      updatedAt: endpoint.updatedAt,
+      lastAttemptAt: endpoint.lastAttemptAt,
+      lastDeliveredAt: endpoint.lastDeliveredAt,
+      lastFailure: endpoint.lastFailure,
+    };
+  }
+
+  function routeId(value) {
+    const result = String(value ?? "").trim().toLowerCase();
+    if (!/^[a-f0-9-]{36}$/.test(result)) throw invalid("relayRouteId is invalid");
+    return result;
   }
 
   function endpointById(endpointId) {
@@ -190,23 +248,6 @@ export function createWakeBridge({
     if (!value || actual.length !== expected.length || !timingSafeEqual(actual, expected)) {
       throw new HttpError(401, "wake.endpoint_unauthorized", "wake endpoint authorization failed");
     }
-  }
-
-  function publicStatus(endpoint) {
-    return {
-      schema: STATUS_SCHEMA,
-      endpointId: endpoint.endpointId,
-      encryptionKeyFingerprint: endpoint.encryptionKeyFingerprint,
-      providerConfigured: providerAvailable(),
-      updatedAt: endpoint.updatedAt,
-      lastAttemptAt: endpoint.lastAttemptAt,
-      lastDeliveredAt: endpoint.lastDeliveredAt,
-      lastFailure: endpoint.lastFailure,
-    };
-  }
-
-  function providerAvailable() {
-    try { return Boolean(credentialStore.read()); } catch { return false; }
   }
 
   function pruneEvents() {
@@ -234,11 +275,6 @@ function secret(value, name) {
 function bounded(value, name, maximum) {
   const result = String(value ?? "").trim();
   if (!result || Buffer.byteLength(result) > maximum) throw invalid(`${name} is invalid`);
-  return result;
-}
-function deviceToken(value) {
-  const result = String(value ?? "").toLowerCase();
-  if (!/^[a-f0-9]{32,256}$/.test(result)) throw invalid("device token is invalid");
   return result;
 }
 function fingerprint(value) {

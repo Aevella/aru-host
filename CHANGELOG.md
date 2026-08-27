@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.29.5
+
+- Move External Wake Bridge APNs authority out of user-operated Hosts: each Host now receives only an anonymous route id and route-scoped wake token, while the official minimal relay alone keeps the APNs provider key and device token.
+- Make Host-to-relay wake requests content-free and idempotent through an opaque HMAC request identity; encrypted event bodies remain only in the user Host mailbox until the phone fetches and decrypts them.
+- Migrate unreleased direct-APNs bridge registrations once, advertise the v2 registration contract in the Host manifest, and keep relay failures retryable without replaying or duplicating the encrypted event.
+
 ## 0.29.4
 
 - Add the encrypted external wake bridge used by collaborator-owned Aru triggers, with endpoint-scoped fetch and submit credentials, idempotent ciphertext admission, bounded retention, and phone-side decryption.

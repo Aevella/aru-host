@@ -35,6 +35,7 @@ args=(
   --port "$ARU_PORT"
   --data-dir "$ARU_DATA_DIR"
   --base-url "$ARU_BASE_URL"
+  --wake-relay-url "${ARU_WAKE_RELAY_URL:-https://wake.aelion.cn}"
   --transport-kind "$ARU_TRANSPORT_KIND"
   --display-name "$ARU_DISPLAY_NAME"
   --node-kind "$ARU_NODE_KIND"

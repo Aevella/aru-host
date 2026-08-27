@@ -1,6 +1,6 @@
 {
   "name": "aru-host",
-  "version": "0.29.4",
+  "version": "0.29.5",
   "private": true,
   "type": "module",
   "license": "Apache-2.0",
@@ -47,7 +47,9 @@
       "buildResources": ".build-icons"
     },
     "linux": {
-      "target": ["deb"],
+      "target": [
+        "deb"
+      ],
       "category": "Utility",
       "executableName": "aru-host",
       "syncDesktopName": true,

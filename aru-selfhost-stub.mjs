@@ -67,7 +67,7 @@ import {
   createConversationTurnRelay,
   SUPPORTED_CONVERSATION_TURN_PROTOCOLS,
 } from "./conversation-turn-relay.mjs";
-import { createAPNsCredentialStore, createAPNsPushHost, sendAPNsNotification } from "./apns-push.mjs";
+import { createAPNsCredentialStore, createAPNsPushHost } from "./apns-push.mjs";
 import { createWakeBridge } from "./wake-bridge.mjs";
 
 class HttpError extends Error {
@@ -90,6 +90,7 @@ const config = {
     args["managed-workspace-root"] ?? join(configuredDataDir, "workspace"),
   ),
   baseUrl: (args["base-url"] ?? `http://127.0.0.1:${Number(args["port"] ?? 8787)}`).replace(/\/+$/, ""),
+  wakeRelayBaseURL: (args["wake-relay-url"] ?? "https://wake.aelion.cn").replace(/\/+$/, ""),
   transportKind: args["transport-kind"] ?? "lan",
   displayName: args["display-name"] ?? "Aru Stub Server",
   nodeKind: args["node-kind"] ?? "local-device",
@@ -188,8 +189,7 @@ const wakeBridge = createWakeBridge({
   readJSONBody,
   sendJSON,
   HttpError,
-  sendPush: sendAPNsNotification,
-  credentialStore: apnsCredentialStore,
+  relayBaseURL: config.wakeRelayBaseURL,
   log,
 });
 const backupSettings = createBackupSettings({
@@ -515,6 +515,14 @@ function manifest() {
       },
       "remote-notifications": {
         ...remotePush.manifestCapability(),
+      },
+      "external-wake-bridge": {
+        enabled: true,
+        endpoint: "/aru/v1/wake-bridge/endpoints/current",
+        registration: "aru.wake-bridge.registration.v2",
+        wakeRelay: config.wakeRelayBaseURL,
+        wakeAuthority: "official-opaque-route-v1",
+        contentRetention: "host-ciphertext-only",
       },
       "node-workspaces": {
         ...nodeWorkspaceHost.manifestCapability(),
