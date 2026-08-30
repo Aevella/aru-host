@@ -362,7 +362,7 @@ fetch_source_payload() {
     local entries expected_entries
     entries="$(tar -tzf "$SOURCE_TMP/bundle.tar.gz" | LC_ALL=C sort)"
     expected_entries="$(printf '%s\n' \
-      aru-selfhost-stub.mjs backup-settings.mjs conversation-turn-relay.mjs collaborator-host.mjs mobile-collaborator-replicas.mjs collaborator-cognition.mjs collaborator-surface-bundles.mjs collaborator-surfaces.mjs collaborator-conversations.mjs collaborator-conversation-attachments.mjs collaborator-initiative.mjs collaborator-projects.mjs apns-push.mjs wake-bridge.mjs codex-app-server-driver.mjs direct-api-driver.mjs provider-profiles.mjs provider-secret-store.mjs node-control.mjs node-workspaces.mjs plugin-supervisor.mjs plugin-workshop.mjs source-plugin-runtime.mjs source-plugin-runner.mjs \
+      aru-selfhost-stub.mjs backup-settings.mjs conversation-turn-relay.mjs collaborator-host.mjs mobile-collaborator-replicas.mjs collaborator-cognition.mjs collaborator-surface-bundles.mjs collaborator-surfaces.mjs collaborator-conversations.mjs collaborator-initiative.mjs collaborator-projects.mjs apns-push.mjs wake-bridge.mjs codex-app-server-driver.mjs direct-api-driver.mjs provider-profiles.mjs provider-secret-store.mjs node-control.mjs node-workspaces.mjs plugin-supervisor.mjs plugin-workshop.mjs source-plugin-runtime.mjs source-plugin-runner.mjs \
       aru-selfhost.service aru-selfhostctl install.sh run-node.sh \
       | LC_ALL=C sort)"
     [[ "$entries" == "$expected_entries" ]] || die "release bundle contains an unexpected file set"
@@ -373,14 +373,14 @@ fetch_source_payload() {
   fi
   local raw="$REPO_RAW_DEFAULT/$SOURCE_REF"
   log "downloading node payload from Aevella/aru-host@$SOURCE_REF"
-  for file in aru-selfhost-stub.mjs backup-settings.mjs conversation-turn-relay.mjs collaborator-host.mjs mobile-collaborator-replicas.mjs collaborator-cognition.mjs collaborator-surface-bundles.mjs collaborator-surfaces.mjs collaborator-conversations.mjs collaborator-conversation-attachments.mjs collaborator-initiative.mjs collaborator-projects.mjs apns-push.mjs wake-bridge.mjs codex-app-server-driver.mjs direct-api-driver.mjs provider-profiles.mjs provider-secret-store.mjs node-control.mjs node-workspaces.mjs plugin-supervisor.mjs plugin-workshop.mjs source-plugin-runtime.mjs source-plugin-runner.mjs run-node.sh aru-selfhost.service aru-selfhostctl install.sh; do
+  for file in aru-selfhost-stub.mjs backup-settings.mjs conversation-turn-relay.mjs collaborator-host.mjs mobile-collaborator-replicas.mjs collaborator-cognition.mjs collaborator-surface-bundles.mjs collaborator-surfaces.mjs collaborator-conversations.mjs collaborator-initiative.mjs collaborator-projects.mjs apns-push.mjs wake-bridge.mjs codex-app-server-driver.mjs direct-api-driver.mjs provider-profiles.mjs provider-secret-store.mjs node-control.mjs node-workspaces.mjs plugin-supervisor.mjs plugin-workshop.mjs source-plugin-runtime.mjs source-plugin-runner.mjs run-node.sh aru-selfhost.service aru-selfhostctl install.sh; do
     download "$raw/$file" -o "$SOURCE_TMP/$file"
   done
   SOURCE_DIR="$SOURCE_TMP"
 }
 
 fetch_source_payload
-for file in aru-selfhost-stub.mjs backup-settings.mjs conversation-turn-relay.mjs collaborator-host.mjs mobile-collaborator-replicas.mjs collaborator-cognition.mjs collaborator-surface-bundles.mjs collaborator-surfaces.mjs collaborator-conversations.mjs collaborator-conversation-attachments.mjs collaborator-initiative.mjs collaborator-projects.mjs apns-push.mjs wake-bridge.mjs codex-app-server-driver.mjs direct-api-driver.mjs provider-profiles.mjs provider-secret-store.mjs node-control.mjs node-workspaces.mjs plugin-supervisor.mjs plugin-workshop.mjs source-plugin-runtime.mjs source-plugin-runner.mjs run-node.sh aru-selfhost.service aru-selfhostctl install.sh; do
+for file in aru-selfhost-stub.mjs backup-settings.mjs conversation-turn-relay.mjs collaborator-host.mjs mobile-collaborator-replicas.mjs collaborator-cognition.mjs collaborator-surface-bundles.mjs collaborator-surfaces.mjs collaborator-conversations.mjs collaborator-initiative.mjs collaborator-projects.mjs apns-push.mjs wake-bridge.mjs codex-app-server-driver.mjs direct-api-driver.mjs provider-profiles.mjs provider-secret-store.mjs node-control.mjs node-workspaces.mjs plugin-supervisor.mjs plugin-workshop.mjs source-plugin-runtime.mjs source-plugin-runner.mjs run-node.sh aru-selfhost.service aru-selfhostctl install.sh; do
   [[ -f "$SOURCE_DIR/$file" ]] || die "payload is missing $file"
 done
 
@@ -404,7 +404,6 @@ install -m 0644 "$SOURCE_DIR/collaborator-cognition.mjs" "$release_dir/collabora
 install -m 0644 "$SOURCE_DIR/collaborator-surface-bundles.mjs" "$release_dir/collaborator-surface-bundles.mjs"
 install -m 0644 "$SOURCE_DIR/collaborator-surfaces.mjs" "$release_dir/collaborator-surfaces.mjs"
 install -m 0644 "$SOURCE_DIR/collaborator-conversations.mjs" "$release_dir/collaborator-conversations.mjs"
-install -m 0644 "$SOURCE_DIR/collaborator-conversation-attachments.mjs" "$release_dir/collaborator-conversation-attachments.mjs"
 install -m 0644 "$SOURCE_DIR/collaborator-initiative.mjs" "$release_dir/collaborator-initiative.mjs"
 install -m 0644 "$SOURCE_DIR/collaborator-projects.mjs" "$release_dir/collaborator-projects.mjs"
 install -m 0644 "$SOURCE_DIR/apns-push.mjs" "$release_dir/apns-push.mjs"

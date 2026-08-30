@@ -19,7 +19,6 @@ files=(
   collaborator-surfaces.mjs
   collaborator-surface-bundles.mjs
   collaborator-conversations.mjs
-  collaborator-conversation-attachments.mjs
   collaborator-initiative.mjs
   collaborator-projects.mjs
   apns-push.mjs
