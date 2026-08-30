@@ -319,7 +319,7 @@ fetch_source_payload() {
     actual="$(sha256_file "$SOURCE_TMP/bundle.tar.gz")"
     [[ "$expected" == "$actual" ]] || die "release bundle SHA-256 mismatch"
     entries="$(tar -tzf "$SOURCE_TMP/bundle.tar.gz" | LC_ALL=C sort)"
-    expected_entries="$(printf '%s\n' aru-selfhost-stub.mjs backup-settings.mjs conversation-turn-relay.mjs collaborator-host.mjs mobile-collaborator-replicas.mjs collaborator-cognition.mjs collaborator-surfaces.mjs collaborator-surface-bundles.mjs collaborator-conversations.mjs collaborator-initiative.mjs collaborator-projects.mjs apns-push.mjs wake-bridge.mjs codex-app-server-driver.mjs direct-api-driver.mjs provider-profiles.mjs provider-secret-store.mjs node-control.mjs node-workspaces.mjs plugin-supervisor.mjs plugin-workshop.mjs \
+    expected_entries="$(printf '%s\n' aru-selfhost-stub.mjs backup-settings.mjs conversation-turn-relay.mjs collaborator-host.mjs mobile-collaborator-replicas.mjs collaborator-cognition.mjs collaborator-surfaces.mjs collaborator-surface-bundles.mjs collaborator-conversations.mjs collaborator-conversation-attachments.mjs collaborator-initiative.mjs collaborator-projects.mjs apns-push.mjs wake-bridge.mjs codex-app-server-driver.mjs direct-api-driver.mjs provider-profiles.mjs provider-secret-store.mjs node-control.mjs node-workspaces.mjs plugin-supervisor.mjs plugin-workshop.mjs \
       source-plugin-runtime.mjs source-plugin-runner.mjs \
       run-node.sh install-macos.sh aru-selfhostctl-macos | LC_ALL=C sort)"
     expected_entries_with_release="$(printf '%s\n' "$expected_entries" release.json | LC_ALL=C sort)"
@@ -332,7 +332,7 @@ fetch_source_payload() {
   fi
   local raw="$REPO_RAW_DEFAULT/$SOURCE_REF" file
   log "downloading macOS node payload from Aevella/aru-host@$SOURCE_REF"
-  for file in aru-selfhost-stub.mjs backup-settings.mjs conversation-turn-relay.mjs collaborator-host.mjs mobile-collaborator-replicas.mjs collaborator-cognition.mjs collaborator-surfaces.mjs collaborator-surface-bundles.mjs collaborator-conversations.mjs collaborator-initiative.mjs collaborator-projects.mjs apns-push.mjs wake-bridge.mjs codex-app-server-driver.mjs direct-api-driver.mjs provider-profiles.mjs provider-secret-store.mjs node-control.mjs node-workspaces.mjs plugin-supervisor.mjs plugin-workshop.mjs source-plugin-runtime.mjs source-plugin-runner.mjs run-node.sh install-macos.sh aru-selfhostctl-macos; do
+  for file in aru-selfhost-stub.mjs backup-settings.mjs conversation-turn-relay.mjs collaborator-host.mjs mobile-collaborator-replicas.mjs collaborator-cognition.mjs collaborator-surfaces.mjs collaborator-surface-bundles.mjs collaborator-conversations.mjs collaborator-conversation-attachments.mjs collaborator-initiative.mjs collaborator-projects.mjs apns-push.mjs wake-bridge.mjs codex-app-server-driver.mjs direct-api-driver.mjs provider-profiles.mjs provider-secret-store.mjs node-control.mjs node-workspaces.mjs plugin-supervisor.mjs plugin-workshop.mjs source-plugin-runtime.mjs source-plugin-runner.mjs run-node.sh install-macos.sh aru-selfhostctl-macos; do
     download "$raw/$file" -o "$SOURCE_TMP/$file"
   done
   SOURCE_DIR="$SOURCE_TMP"
@@ -350,7 +350,7 @@ if [[ -z "$RELEASE_VERSION" && -f "$SOURCE_DIR/release.json" ]]; then
   [[ "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.]+)?$ ]] \
     || die "payload release version must be a semantic version"
 fi
-for file in aru-selfhost-stub.mjs backup-settings.mjs conversation-turn-relay.mjs collaborator-host.mjs mobile-collaborator-replicas.mjs collaborator-cognition.mjs collaborator-surfaces.mjs collaborator-surface-bundles.mjs collaborator-conversations.mjs collaborator-initiative.mjs collaborator-projects.mjs apns-push.mjs wake-bridge.mjs codex-app-server-driver.mjs direct-api-driver.mjs provider-profiles.mjs provider-secret-store.mjs node-control.mjs node-workspaces.mjs plugin-supervisor.mjs plugin-workshop.mjs source-plugin-runtime.mjs source-plugin-runner.mjs run-node.sh install-macos.sh aru-selfhostctl-macos; do
+for file in aru-selfhost-stub.mjs backup-settings.mjs conversation-turn-relay.mjs collaborator-host.mjs mobile-collaborator-replicas.mjs collaborator-cognition.mjs collaborator-surfaces.mjs collaborator-surface-bundles.mjs collaborator-conversations.mjs collaborator-conversation-attachments.mjs collaborator-initiative.mjs collaborator-projects.mjs apns-push.mjs wake-bridge.mjs codex-app-server-driver.mjs direct-api-driver.mjs provider-profiles.mjs provider-secret-store.mjs node-control.mjs node-workspaces.mjs plugin-supervisor.mjs plugin-workshop.mjs source-plugin-runtime.mjs source-plugin-runner.mjs run-node.sh install-macos.sh aru-selfhostctl-macos; do
   [[ -f "$SOURCE_DIR/$file" ]] || die "payload is missing $file"
 done
 
@@ -378,6 +378,7 @@ install -m 0644 "$SOURCE_DIR/collaborator-cognition.mjs" "$RELEASES_DIR/$release
 install -m 0644 "$SOURCE_DIR/collaborator-surfaces.mjs" "$RELEASES_DIR/$release_id/collaborator-surfaces.mjs"
 install -m 0644 "$SOURCE_DIR/collaborator-surface-bundles.mjs" "$RELEASES_DIR/$release_id/collaborator-surface-bundles.mjs"
 install -m 0644 "$SOURCE_DIR/collaborator-conversations.mjs" "$RELEASES_DIR/$release_id/collaborator-conversations.mjs"
+install -m 0644 "$SOURCE_DIR/collaborator-conversation-attachments.mjs" "$RELEASES_DIR/$release_id/collaborator-conversation-attachments.mjs"
 install -m 0644 "$SOURCE_DIR/collaborator-initiative.mjs" "$RELEASES_DIR/$release_id/collaborator-initiative.mjs"
 install -m 0644 "$SOURCE_DIR/collaborator-projects.mjs" "$RELEASES_DIR/$release_id/collaborator-projects.mjs"
 install -m 0644 "$SOURCE_DIR/apns-push.mjs" "$RELEASES_DIR/$release_id/apns-push.mjs"
