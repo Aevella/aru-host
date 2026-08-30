@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.30.2
+
+- Retain a no-runtime compatibility payload for the short-lived 0.30.0 fixed-file-list VPS installer, while keeping the real attachment owner in the conversation payload understood by 0.29 installers.
+
 ## 0.30.1
 
 - Keep the conversation attachment owner inside the existing conversation payload so a VPS running the 0.29 installer can upgrade directly without omitting a newly introduced runtime module.
