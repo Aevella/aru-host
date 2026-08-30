@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OUTPUT="${1:-$PWD/aru-selfhost-macos.tar.gz}"
-VERSION="${2:-${ARU_HOST_VERSION:-0.30.0-dev}}"
+VERSION="${2:-${ARU_HOST_VERSION:-0.30.1-dev}}"
 [[ "$OUTPUT" == /* ]] || OUTPUT="$PWD/$OUTPUT"
 
 mkdir -p "$(dirname "$OUTPUT")"

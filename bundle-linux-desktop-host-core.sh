@@ -11,7 +11,6 @@ files=(
   aru-selfhost-stub.mjs backup-settings.mjs conversation-turn-relay.mjs
   collaborator-host.mjs mobile-collaborator-replicas.mjs collaborator-cognition.mjs collaborator-surfaces.mjs
   collaborator-surface-bundles.mjs collaborator-conversations.mjs
-  collaborator-conversation-attachments.mjs
   collaborator-initiative.mjs collaborator-projects.mjs apns-push.mjs wake-bridge.mjs
   codex-app-server-driver.mjs direct-api-driver.mjs provider-profiles.mjs
   provider-secret-store.mjs node-control.mjs node-workspaces.mjs

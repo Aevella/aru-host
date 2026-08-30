@@ -43,7 +43,6 @@ test -f "$root/opt/aru-selfhost/current/mobile-collaborator-replicas.mjs"
 test -f "$root/opt/aru-selfhost/current/collaborator-surface-bundles.mjs"
 test -f "$root/opt/aru-selfhost/current/collaborator-surfaces.mjs"
 test -f "$root/opt/aru-selfhost/current/collaborator-conversations.mjs"
-test -f "$root/opt/aru-selfhost/current/collaborator-conversation-attachments.mjs"
 test -f "$root/opt/aru-selfhost/current/collaborator-initiative.mjs"
 test -f "$root/opt/aru-selfhost/current/collaborator-projects.mjs"
 test -f "$root/opt/aru-selfhost/current/apns-push.mjs"
@@ -126,7 +125,7 @@ test -s "$artifacts/aru-selfhost-linux.tar.gz"
 test -s "$artifacts/aru-selfhost-linux.tar.gz.sha256"
 archive_entries="$artifacts/linux-archive-entries.txt"
 tar -tzf "$artifacts/aru-selfhost-linux.tar.gz" > "$archive_entries"
-for file in install.sh aru-selfhost-stub.mjs collaborator-host.mjs mobile-collaborator-replicas.mjs collaborator-surface-bundles.mjs collaborator-surfaces.mjs collaborator-conversations.mjs collaborator-conversation-attachments.mjs codex-app-server-driver.mjs collaborator-cognition.mjs direct-api-driver.mjs provider-profiles.mjs provider-secret-store.mjs backup-settings.mjs conversation-turn-relay.mjs wake-bridge.mjs node-control.mjs node-workspaces.mjs plugin-supervisor.mjs plugin-workshop.mjs source-plugin-runtime.mjs source-plugin-runner.mjs; do
+for file in install.sh aru-selfhost-stub.mjs collaborator-host.mjs mobile-collaborator-replicas.mjs collaborator-surface-bundles.mjs collaborator-surfaces.mjs collaborator-conversations.mjs codex-app-server-driver.mjs collaborator-cognition.mjs direct-api-driver.mjs provider-profiles.mjs provider-secret-store.mjs backup-settings.mjs conversation-turn-relay.mjs wake-bridge.mjs node-control.mjs node-workspaces.mjs plugin-supervisor.mjs plugin-workshop.mjs source-plugin-runtime.mjs source-plugin-runner.mjs; do
   grep -Fqx "$file" "$archive_entries"
 done
 

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.30.1
+
+- Keep the conversation attachment owner inside the existing conversation payload so a VPS running the 0.29 installer can upgrade directly without omitting a newly introduced runtime module.
+
 ## 0.30.0
 
 - Add authenticated, conversation-scoped attachment upload and download for computer collaborators, with durable byte storage, integrity checks, bounded message binding, and old-client text summaries.
