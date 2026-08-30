@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.30.0
+
+- Add authenticated, conversation-scoped attachment upload and download for computer collaborators, with durable byte storage, integrity checks, bounded message binding, and old-client text summaries.
+- Let Codex receive managed image and audio inputs plus immutable workspace file paths; direct API profiles admit only the native attachment types their provider protocol can represent.
+- Let computer collaborators explicitly attach a regular workspace file to their reply, while paired phones can import photos or files, remove pending uploads, send attachment-only messages, preview returned attachments, and share them.
+- Include the attachment owner in every macOS, Linux desktop, and VPS Host Core payload and verify installer/package contents so published bundles cannot omit the runtime module.
+
 ## 0.29.5
 
 - Move External Wake Bridge APNs authority out of user-operated Hosts: each Host now receives only an anonymous route id and route-scoped wake token, while the official minimal relay alone keeps the APNs provider key and device token.

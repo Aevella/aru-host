@@ -140,7 +140,7 @@ const OFFICIAL_DEFAULT_MAXIMUM_RUNTIME_SECONDS = 24 * 60 * 60;
 const CONTAINER_STOP_GRACE_SECONDS = 5;
 const ARTIFACT_METADATA_SCHEMA = "aru.selfhost.artifact-metadata.v1";
 const WORKSPACE_RUNTIMES = ["node", "python", "shell"];
-const SERVER_VERSION = "stub-0.29";
+const SERVER_VERSION = "stub-0.30";
 const ENCRYPTED_PACKAGE_MAGIC = Buffer.from("ARUEPKG2", "ascii");
 const ENCRYPTED_PACKAGE_VERSION = 2;
 const ENCRYPTED_PACKAGE_CONTENT_TYPE = "application/vnd.aru.encrypted-backup";
@@ -503,6 +503,10 @@ function manifest() {
         phase: "computer-authoritative-conversations",
         turnExecution: collaboratorHost.driverInventory().execution.enabled,
         conversationEndpoint: "/aru/v1/hosted-collaborators/{collaboratorId}/conversations",
+        messageInputKinds: ["text", "image", "file", "audio", "video"],
+        attachmentProtocol: "aru.selfhost.collaborator-conversation-attachment.v1",
+        maximumAttachmentBytes: 50 * 1024 * 1024,
+        maximumAttachmentsPerMessage: 8,
         cognitionEndpoint: "/aru/v1/hosted-collaborators/{collaboratorId}/cognition",
         initiativeEndpoint: "/aru/v1/hosted-collaborators/{collaboratorId}/initiative",
         mobileReplicaEndpoint: "/aru/v1/mobile-collaborator-replicas/{sourceCollaboratorId}",

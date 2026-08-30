@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 
 export function createDirectAPIDriver({ profileForId, readSecret, fetchImpl = fetch, log = () => {} }) {
   const activeTurns = new Map();
@@ -8,6 +9,9 @@ export function createDirectAPIDriver({ profileForId, readSecret, fetchImpl = fe
       status() {
         const profile = profileForId(profileId);
         return profile?.hasSecret ? "ready" : "unavailable";
+      },
+      validateAttachments(attachments) {
+        validateDirectAttachments(profileForId(profileId), attachments);
       },
       async startTurn(options) {
         const profile = profileForId(profileId);
@@ -67,14 +71,15 @@ export function createDirectAPIDriver({ profileForId, readSecret, fetchImpl = fe
     historyMessages,
     tools,
     text,
+    attachments = [],
     handler,
     threadId,
     turnId,
     signal,
   }) {
     let protocolMessages = profile.protocol === "anthropic-messages"
-      ? anthropicHistory(historyMessages, text)
-      : openAIHistory(historyMessages, text);
+      ? anthropicHistory(historyMessages, text, attachments)
+      : openAIHistory(historyMessages, text, attachments);
     let completedToolRounds = 0;
     while (!signal.aborted) {
       const request = profile.protocol === "anthropic-messages"
@@ -368,18 +373,61 @@ function parsedEvent(data) {
   catch { throw new Error("模型 API 返回了无法读取的流式事件"); }
 }
 
-function openAIHistory(history, text) {
+function openAIHistory(history, text, attachments = []) {
+  const content = [{ type: "text", text: text || attachmentPrompt(attachments) }];
+  for (const attachment of attachments) {
+    content.push({
+      type: "image_url",
+      image_url: { url: dataURL(attachment) },
+    });
+  }
   return [
     ...(history ?? []).map((message) => ({ role: message.role, content: message.content })),
-    { role: "user", content: text },
+    { role: "user", content },
   ];
 }
 
-function anthropicHistory(history, text) {
-  return openAIHistory(history, text).map((message) => ({
-    role: message.role === "assistant" ? "assistant" : "user",
-    content: message.content,
+function anthropicHistory(history, text, attachments = []) {
+  const messages = (history ?? []).map((message) => ({
+    role: message.role === "assistant" ? "assistant" : "user", content: message.content,
   }));
+  const content = [{ type: "text", text: text || attachmentPrompt(attachments) }];
+  for (const attachment of attachments) {
+    const data = readFileSync(attachment.path).toString("base64");
+    if (attachment.kind === "image") {
+      content.push({ type: "image", source: { type: "base64", media_type: attachment.mimeType, data } });
+    } else if (attachment.mimeType === "application/pdf") {
+      content.push({ type: "document", source: { type: "base64", media_type: attachment.mimeType, data } });
+    } else {
+      content.push({ type: "text", text: `\n--- ${attachment.filename} ---\n${readFileSync(attachment.path, "utf8")}` });
+    }
+  }
+  messages.push({ role: "user", content });
+  return messages;
+}
+
+function validateDirectAttachments(profile, attachments) {
+  if (!profile && attachments.length) throw new Error("这个模型 API 配置已经不存在");
+  for (const attachment of attachments) {
+    if (profile.protocol !== "anthropic-messages" && attachment.kind !== "image") {
+      throw new Error(`这个 OpenAI-compatible 配置只能原生接收图片，不能接收 ${attachment.filename}`);
+    }
+    if (profile.protocol === "anthropic-messages"
+        && attachment.kind !== "image"
+        && attachment.mimeType !== "application/pdf"
+        && !attachment.mimeType.startsWith("text/")
+        && !["application/json", "application/xml"].includes(attachment.mimeType)) {
+      throw new Error(`这个 Anthropic 配置不能接收 ${attachment.filename} 的文件类型`);
+    }
+  }
+}
+
+function attachmentPrompt(attachments) {
+  return attachments.length === 1 ? `请查看附件 ${attachments[0].filename}` : "请查看这些附件";
+}
+
+function dataURL(attachment) {
+  return `data:${attachment.mimeType};base64,${readFileSync(attachment.path).toString("base64")}`;
 }
 
 function parseOpenAI(payload) {

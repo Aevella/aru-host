@@ -2,12 +2,13 @@
 
 Aru Host 是 Aru 的用户自有能力节点。它把电脑或 VPS 变成一台可由 iPhone 配对、查看和使用的 Host，同时让电脑协作者的身份、对话、页面、记忆、工具权限和运行状态留在用户自己的机器上。
 
-当前稳定版是 **0.29.5**，Host 协议版本为 `stub-0.29`。它与当前 Aru TestFlight 版本配套使用，并提供面向普通 Mac 用户的 Apple 签名、公证安装包，以及面向 Debian/Ubuntu 桌面用户的 `x64` / `arm64` 安装包。
+当前稳定版是 **0.30.0**，Host 协议版本为 `stub-0.30`。它与当前 Aru TestFlight 版本配套使用，并提供面向普通 Mac 用户的 Apple 签名、公证安装包，以及面向 Debian/Ubuntu 桌面用户的 `x64` / `arm64` 安装包。
 
 ## 现在能做什么
 
 - iPhone 扫码配对 Mac、家用电脑或 VPS；
 - 在手机与 Mac Console 里继续同一位电脑协作者的同一段对话；
+- 在手机和电脑协作者之间互传图片、文件、音频与视频附件，并在手机上预览或分享电脑返回的文件；
 - 使用 Codex 登录态或用户自己的 OpenAI-compatible / Anthropic API；
 - 管理协作者提示词、记忆、工具权限和连续工具回合上限；
 - 在手机或电脑 Console 管理一次性、重复的主动约定，并让协作者使用只绑定自己的主动工具；
@@ -54,7 +55,7 @@ Console 凭证只进入 Linux Secret Service；GNOME Keyring、KWallet 或其他
 如果桌面没有图形化软件安装器，也可以在下载目录运行：
 
 ```bash
-sudo apt install ./aru-host-linux-0.29.5-x64.deb
+sudo apt install ./aru-host-linux-0.30.0-x64.deb
 ```
 
 源码级当前用户安装器保留给开发和诊断：
