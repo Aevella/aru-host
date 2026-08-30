@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createDirectAPIDriver } from "../direct-api-driver.mjs";
 
 const profile = {
@@ -40,6 +43,11 @@ const driver = createDirectAPIDriver({
   readSecret: () => "secret-test-value",
   fetchImpl,
 }).forProfile(profile.profileId);
+driver.validateAttachments([{ kind: "image", filename: "photo.png" }]);
+assert.throws(
+  () => driver.validateAttachments([{ kind: "file", filename: "notes.pdf" }]),
+  /只能原生接收图片/,
+);
 
 const notifications = [];
 const calls = [];
@@ -277,4 +285,39 @@ assert.equal(anthropicRequests[0].body.max_tokens, 32_768);
 assert.deepEqual(anthropicCalls[0].arguments, { value: "anthropic" });
 assert.equal(anthropicRequests[1].body.messages.at(-1).content[0].type, "tool_result");
 assert.deepEqual(anthropicDeltas, ["安", "好"]);
+anthropicDriver.validateAttachments([
+  { kind: "file", mimeType: "application/pdf", filename: "paper.pdf" },
+]);
+assert.throws(
+  () => anthropicDriver.validateAttachments([
+    { kind: "audio", mimeType: "audio/mpeg", filename: "voice.mp3" },
+  ]),
+  /不能接收/,
+);
+
+const imageRoot = mkdtempSync(join(tmpdir(), "aru-direct-image-"));
+const imagePath = join(imageRoot, "tiny.png");
+writeFileSync(imagePath, Buffer.from("89504e470d0a1a0a", "hex"));
+let imageRequest;
+const imageDriver = createDirectAPIDriver({
+  profileForId: () => profile,
+  readSecret: () => "image-key",
+  fetchImpl: async (_url, init) => {
+    imageRequest = JSON.parse(init.body);
+    return new Response(JSON.stringify({
+      choices: [{ message: { role: "assistant", content: "看到了", tool_calls: [] } }],
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  },
+}).forProfile(profile.profileId);
+await new Promise((resolve, reject) => imageDriver.startTurn({
+  instructions: "See image", historyMessages: [], tools: [], text: "看看",
+  attachments: [{ kind: "image", filename: "tiny.png", mimeType: "image/png", path: imagePath }],
+  handler: {
+    async onToolCall() {},
+    async onNotification(method, params) {
+      if (method === "turn/completed") params.turn.status === "completed" ? resolve() : reject(params.turn.error);
+    },
+  },
+}).catch(reject));
+assert.match(imageRequest.messages.at(-1).content[1].image_url.url, /^data:image\/png;base64,/);
 console.log("ARU_DIRECT_API_DRIVER_SMOKE_OK");

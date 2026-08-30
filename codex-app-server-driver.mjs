@@ -69,6 +69,7 @@ export function createCodexAppServerDriver({ executable, resolveExecutable, log 
     historyContext,
     tools,
     text,
+    attachments = [],
     userMessageId,
     handler,
   }) {
@@ -102,7 +103,7 @@ export function createCodexAppServerDriver({ executable, resolveExecutable, log 
     threadHandlers.set(resolvedThreadId, handler);
     const startedTurn = await request("turn/start", {
       threadId: resolvedThreadId,
-      input: [{ type: "text", text }],
+      input: codexUserInput(text, attachments),
       clientUserMessageId: userMessageId,
     });
     return { threadId: resolvedThreadId, turnId: startedTurn.turn.id };
@@ -212,7 +213,34 @@ export function createCodexAppServerDriver({ executable, resolveExecutable, log 
     return knownExecutable;
   }
 
-  return { status, refreshExecutable, ensureConnected, startTurn, interrupt };
+  return {
+    status, refreshExecutable, ensureConnected, startTurn, interrupt,
+    validateAttachments,
+  };
+}
+
+function validateAttachments(attachments) {
+  for (const attachment of attachments) {
+    if (!["image", "audio", "file", "video"].includes(attachment.kind)) {
+      throw new Error(`Codex 不支持这种附件：${attachment.filename}`);
+    }
+  }
+}
+
+function codexUserInput(text, attachments) {
+  validateAttachments(attachments);
+  const files = attachments.filter((item) => !["image", "audio"].includes(item.kind));
+  const manifest = files.length ? [
+    "The user attached these immutable files in this collaborator workspace:",
+    ...files.map((item) => `- ${item.filename} (${item.mimeType}, ${item.byteCount} bytes): ${item.path}`),
+  ].join("\n") : "";
+  const input = [];
+  if (text || manifest) input.push({ type: "text", text: [text, manifest].filter(Boolean).join("\n\n") });
+  for (const attachment of attachments) {
+    if (attachment.kind === "image") input.push({ type: "localImage", path: attachment.path });
+    if (attachment.kind === "audio") input.push({ type: "localAudio", path: attachment.path });
+  }
+  return input;
 }
 
 function newThreadInstructions(instructions, historyContext) {

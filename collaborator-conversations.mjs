@@ -9,6 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
+import { createCollaboratorConversationAttachmentHost } from "./collaborator-conversation-attachments.mjs";
 
 const CONVERSATION_SCHEMA = "aru.selfhost.collaborator-conversation.v1";
 const INVENTORY_SCHEMA = "aru.selfhost.collaborator-conversation-inventory.v1";
@@ -32,6 +33,7 @@ export function createCollaboratorConversationHost({
   onTurnSettled = () => {},
   now = Date.now,
   defer = setImmediate,
+  attachmentHost = null,
 }) {
   const root = join(dataDir, "collaborator-conversations");
   const workspaceRoot = join(dataDir, "collaborator-workspaces");
@@ -41,6 +43,9 @@ export function createCollaboratorConversationHost({
   const sessionToolGrants = new Map();
   mkdirSync(root, { recursive: true, mode: 0o700 });
   mkdirSync(workspaceRoot, { recursive: true, mode: 0o700 });
+  const attachments = attachmentHost ?? createCollaboratorConversationAttachmentHost({
+    dataDir, readJSONBody, sendJSON, HttpError, now,
+  });
   recoverInterruptedConversations();
 
   async function route(req, res, path, requireDevice) {
@@ -71,6 +76,17 @@ export function createCollaboratorConversationHost({
     const suffix = match[3] || "";
     const device = requireDevice();
     const conversation = loadConversation(collaborator.collaboratorId, conversationId);
+
+    if (suffix.startsWith("/attachments")) {
+      try {
+        if (await attachments.route(req, res, {
+          suffix, collaboratorId: collaborator.collaboratorId, conversationId, device, conversation,
+        })) return true;
+      } catch (error) {
+        if (error instanceof HttpError) throw error;
+        throw new HttpError(400, "attachment.input_invalid", error.message ?? "invalid attachment input");
+      }
+    }
 
     if (!suffix && req.method === "GET") {
       sendJSON(res, 200, publicConversation(conversation, true));
@@ -167,17 +183,27 @@ export function createCollaboratorConversationHost({
     if (conversation.activeTurn && ACTIVE_STATES.has(conversation.activeTurn.state)) {
       throw new HttpError(409, "conversation.turn_active", "this conversation already has an active turn");
     }
-    const text = validatedMessage(body?.text);
+    const text = validatedOptionalMessage(body?.text);
     const clientRequestId = validatedClientRequestId(body?.clientRequestId);
     const existing = conversation.messages.find((message) => message.clientRequestId === clientRequestId);
     if (existing) return publicConversation(conversation, true);
+    const driver = driverForCollaborator(collaborator);
+    const messageAttachments = attachments.prepareMessageAttachments(
+      conversation, body?.attachmentIds, driver,
+    );
+    if (!text && messageAttachments.length === 0) {
+      throw new Error("message requires text or at least one attachment");
+    }
+    const publicContent = text || attachmentSummary(messageAttachments);
 
     const timestamp = now();
     const userMessage = {
       messageId: `hostmsg_${randomUUID()}`,
       clientRequestId,
       role: options.role ?? "user",
-      content: text,
+      content: publicContent,
+      driverText: text,
+      attachments: messageAttachments,
       status: "completed",
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -187,6 +213,7 @@ export function createCollaboratorConversationHost({
       clientRequestId: null,
       role: "assistant",
       content: "",
+      attachments: [],
       status: "streaming",
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -214,7 +241,7 @@ export function createCollaboratorConversationHost({
     };
     conversation.messages.push(userMessage, assistantMessage);
     conversation.activeTurn = turn;
-    if (conversation.title === "新对话") conversation.title = messageTitle(text);
+    if (conversation.title === "新对话") conversation.title = messageTitle(publicContent);
     touch(conversation, device.deviceId);
     appendEvent(conversation, "message.accepted", {
       turnId: turn.turnId,
@@ -222,6 +249,7 @@ export function createCollaboratorConversationHost({
       assistantMessageId: assistantMessage.messageId,
     });
     saveConversation(conversation);
+    attachments.commitMessageBindings(conversation, userMessage);
     defer(() => runTurn(conversation.collaboratorId, conversation.conversationId, collaborator));
     return publicConversation(conversation, true);
   }
@@ -312,6 +340,8 @@ export function createCollaboratorConversationHost({
       activeDrivers.set(conversationKey(collaboratorId, conversationId), driver);
       const workspace = join(workspaceRoot, collaborator.collaboratorId);
       mkdirSync(workspace, { recursive: true, mode: 0o700 });
+      const userMessage = message(conversation, turn.userMessageId);
+      const projectedAttachments = attachments.projectForWorkspace(userMessage.attachments, workspace);
       const tools = availableTools(collaborator);
       const configurationFingerprint = driverConfigurationFingerprint(
         collaborator,
@@ -326,7 +356,8 @@ export function createCollaboratorConversationHost({
         historyContext: conversationHistoryContext(conversation, turn),
         historyMessages: conversationHistoryMessages(conversation, turn),
         tools: tools.map(dynamicTool),
-        text: message(conversation, turn.userMessageId).content,
+        text: userMessage.driverText ?? userMessage.content,
+        attachments: projectedAttachments,
         userMessageId: turn.userMessageId,
         handler: {
           onNotification: (method, params) => handleNotification(conversation, method, params, workspace),
@@ -418,9 +449,27 @@ export function createCollaboratorConversationHost({
     });
     saveConversation(conversation);
     try {
-      const value = await executeTool(tool.name, params.arguments ?? {}, {
-        deviceId: `hosted-collaborator:${collaborator.collaboratorId}`,
-      }, collaborator, { conversationId: conversation.conversationId });
+      let value;
+      if (tool.name === "aru_collaborator_reply_attach") {
+        const turn = conversation.activeTurn;
+        const assistant = message(conversation, turn.assistantMessageId);
+        const attachment = attachments.admitAssistantFile({
+          conversation,
+          messageId: assistant.messageId,
+          workspace: join(workspaceRoot, collaborator.collaboratorId),
+          path: params.arguments?.path,
+          filename: params.arguments?.filename,
+          mimeType: params.arguments?.mimeType,
+        });
+        assistant.attachments ??= [];
+        assistant.attachments.push(attachment);
+        assistant.updatedAt = now();
+        value = { content: [{ type: "text", text: `已把 ${attachment.filename} 附到这条回复。` }] };
+      } else {
+        value = await executeTool(tool.name, params.arguments ?? {}, {
+          deviceId: `hosted-collaborator:${collaborator.collaboratorId}`,
+        }, collaborator, { conversationId: conversation.conversationId });
+      }
       appendEvent(conversation, "tool.completed", {
         turnId: conversation.activeTurn.turnId,
         toolCallId,
@@ -528,9 +577,25 @@ export function createCollaboratorConversationHost({
 
   function availableTools(collaborator) {
     const all = toolCatalog(collaborator);
-    if (collaborator.toolAccess?.mode !== "selected") return all;
+    const replyAttachmentTool = {
+      name: "aru_collaborator_reply_attach",
+      title: "把工作区文件附到回复",
+      description: "Explicitly attach one regular file from the current collaborator workspace to this assistant reply.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "Path inside the current collaborator workspace." },
+          filename: { type: "string" },
+          mimeType: { type: "string" },
+        },
+        required: ["path"],
+        additionalProperties: false,
+      },
+      annotations: { readOnlyHint: false },
+    };
+    if (collaborator.toolAccess?.mode !== "selected") return [...all, replyAttachmentTool];
     const selected = new Set(collaborator.toolAccess.toolNames ?? []);
-    return all.filter((tool) => selected.has(tool.name));
+    return [...all.filter((tool) => selected.has(tool.name)), replyAttachmentTool];
   }
 
   function conversationHistoryContext(conversation, currentTurn) {
@@ -688,7 +753,7 @@ export function createCollaboratorConversationHost({
     if (includeBody) {
       value.messages = conversation.messages
         .filter((item) => item.role !== "system")
-        .map(({ clientRequestId: _, ...item }) => item);
+        .map(({ clientRequestId: _, driverText: __, ...item }) => item);
       value.approvals = conversation.approvals.map(publicApproval);
     }
     return value;
@@ -721,7 +786,11 @@ export function createCollaboratorConversationHost({
     if (active) return active;
     const path = conversationPath(collaboratorId, conversationId);
     if (!existsSync(path)) throw new HttpError(404, "conversation.unknown", "unknown conversation");
-    try { return JSON.parse(readFileSync(path, "utf8")); }
+    try {
+      const conversation = JSON.parse(readFileSync(path, "utf8"));
+      attachments.reconcileConversation(conversation);
+      return conversation;
+    }
     catch { throw new HttpError(500, "conversation.unreadable", "conversation ledger is unreadable"); }
   }
 
@@ -792,6 +861,7 @@ export function createCollaboratorConversationHost({
           (count, item) => count + item.approvals.filter((approval) => approval.state === "pending").length,
           0,
         ),
+        ...attachments.status(),
       };
     },
   };
@@ -959,6 +1029,16 @@ function validatedOptionalTitle(value) {
 function validatedMessage(value) {
   if (typeof value !== "string" || !value.trim()) throw new Error("message text is required");
   return value.trim();
+}
+
+function validatedOptionalMessage(value) {
+  if (value === undefined || value === null || value === "") return "";
+  if (typeof value !== "string") throw new Error("message text is invalid");
+  return value.trim();
+}
+
+function attachmentSummary(attachments) {
+  return attachments.map((attachment) => `📎 ${attachment.filename}`).join("\n");
 }
 
 function validatedClientRequestId(value) {

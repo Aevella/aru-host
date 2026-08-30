@@ -7,6 +7,7 @@ import { createCodexAppServerDriver } from "../codex-app-server-driver.mjs";
 
 class FakeWebSocket {
   static OPEN = 1;
+  static sent = [];
 
   constructor() {
     this.readyState = 0;
@@ -25,10 +26,16 @@ class FakeWebSocket {
 
   send(value) {
     const message = JSON.parse(value);
+    FakeWebSocket.sent.push(message);
     if (message.id === undefined) return;
+    const result = message.method === "thread/start"
+      ? { thread: { id: "thread_attachment" } }
+      : message.method === "turn/start"
+        ? { turn: { id: "turn_attachment" } }
+        : {};
     queueMicrotask(() => {
       this.dispatch("message", {
-        data: JSON.stringify({ id: message.id, result: {} }),
+        data: JSON.stringify({ id: message.id, result }),
       });
     });
   }
@@ -71,6 +78,34 @@ executableAvailable = true;
 await driver.ensureConnected();
 assert.equal(resolutionCount, 2, "a later connection must retry executable discovery");
 assert.equal(driver.status(), "running");
+const imagePath = join(root, "photo.png");
+const audioPath = join(root, "voice.m4a");
+const filePath = join(root, "notes.txt");
+writeFileSync(imagePath, "image");
+writeFileSync(audioPath, "audio");
+writeFileSync(filePath, "notes");
+await driver.startTurn({
+  threadId: null,
+  cwd: root,
+  instructions: "Test",
+  historyContext: "",
+  tools: [],
+  text: "查看附件",
+  userMessageId: "message_attachment",
+  attachments: [
+    { kind: "image", path: imagePath, filename: "photo.png", mimeType: "image/png", byteCount: 5 },
+    { kind: "audio", path: audioPath, filename: "voice.m4a", mimeType: "audio/mp4", byteCount: 5 },
+    { kind: "file", path: filePath, filename: "notes.txt", mimeType: "text/plain", byteCount: 5 },
+  ],
+  handler: {},
+});
+const turnStart = FakeWebSocket.sent.find((message) => message.method === "turn/start");
+assert.deepEqual(turnStart.params.input.slice(1), [
+  { type: "localImage", path: imagePath },
+  { type: "localAudio", path: audioPath },
+]);
+assert.match(turnStart.params.input[0].text, /notes\.txt/);
+assert.match(turnStart.params.input[0].text, new RegExp(filePath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 
 globalThis.WebSocket = originalWebSocket;
 console.log("ARU_CODEX_APP_SERVER_DRIVER_SMOKE_OK");
