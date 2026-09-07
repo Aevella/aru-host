@@ -22,7 +22,7 @@ enum HostCollaboratorAvatarPreset {
     static func resourceURL(for seed: String) -> URL? {
         let number = number(for: seed)
         let suffix = String(format: "%02d", number)
-        return Bundle.module.url(
+        return HostConsoleResources.bundle.url(
             forResource: "avatar-preset-collaborator-\(suffix)",
             withExtension: "png",
             subdirectory: "AvatarPresets.xcassets/AvatarPresetCollaborator\(suffix).imageset"

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.30.3
+
+- Fix missing collaborator avatars in the packaged macOS app by resolving its bundled resources correctly.
+- Verify all 36 preset avatars and localization with the SwiftPM resource fallback unavailable before signing the app.
+- Host protocol remains `stub-0.30`; no iPhone/TestFlight update is required for this desktop fix.
+
 ## 0.30.2
 
 - Retain a no-runtime compatibility payload for the short-lived 0.30.0 fixed-file-list VPS installer, while keeping the real attachment owner in the conversation payload understood by 0.29 installers.

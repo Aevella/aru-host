@@ -106,6 +106,8 @@ chmod 0755 "$OUTPUT_APP/Contents/MacOS/AruHostConsole"
 resource_bundle="$arm_bin/AruHostConsole_AruHostConsole.bundle"
 [[ -d "$resource_bundle" ]] || { echo "Console resource bundle is missing" >&2; exit 1; }
 cp -R "$resource_bundle" "$OUTPUT_APP/Contents/Resources/"
+python3 "$SCRIPT_DIR/verify-packaged-resources.py" \
+  "$OUTPUT_APP/Contents/Resources/AruHostConsole_AruHostConsole.bundle"
 "$SELFHOST_DIR/bundle-host-core.sh" "$OUTPUT_APP/Contents/Resources/HostCore" "$VERSION"
 
 plist="$OUTPUT_APP/Contents/Info.plist"

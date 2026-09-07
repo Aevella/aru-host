@@ -1,17 +1,8 @@
 import Foundation
 
 enum L10n {
-    private static let localizationBundle: Bundle = {
-        if let resourceURL = Bundle.main.resourceURL?
-            .appending(path: "AruHostConsole_AruHostConsole.bundle"),
-           let bundle = Bundle(url: resourceURL) {
-            return bundle
-        }
-        return .module
-    }()
-
     private static func value(_ key: String) -> String {
-        String(localized: String.LocalizationValue(key), bundle: localizationBundle)
+        String(localized: String.LocalizationValue(key), bundle: HostConsoleResources.bundle)
     }
 
     static let appName = value("app.name")
