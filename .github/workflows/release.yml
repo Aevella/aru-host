@@ -9,6 +9,9 @@ permissions:
   contents: write
 
 jobs:
+  windows-preview:
+    uses: ./.github/workflows/windows-desktop.yml
+
   macos-distribution:
     runs-on: macos-26
     env:
@@ -120,17 +123,19 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: linux-console/package-lock.json
+          cache-dependency-path: desktop-console/package-lock.json
 
       - name: Verify Host Core and Console source
         run: |
-          npm ci --prefix linux-console
-          npm audit --prefix linux-console --omit=dev
+          npm ci --prefix desktop-console
+          npm audit --prefix desktop-console --omit=dev
           node tests/provider-profiles-smoke.mjs
           node tests/wake-bridge-smoke.mjs
           node tests/wake-send-smoke.mjs
           bash tests/linux-desktop-installer-smoke.sh
-          npm test --prefix linux-console
+          npm test --prefix desktop-console
+          node tests/container-runtime-real-smoke.mjs
+          node tests/legacy-payload-smoke.mjs
 
       - name: Build and inspect Debian package
         run: |
@@ -158,7 +163,7 @@ jobs:
           if-no-files-found: error
 
   publish-release:
-    needs: [macos-distribution, linux-distribution]
+    needs: [macos-distribution, linux-distribution, windows-preview]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -177,8 +182,9 @@ jobs:
 
       - name: Verify release set and checksums
         run: |
-          test "$(find dist -maxdepth 1 -type f | wc -l)" -eq 9
+          test "$(find dist -maxdepth 1 -type f | wc -l)" -eq 12
           test -f "dist/aru-host-macos-$ARU_HOST_VERSION.dmg"
+          test -f "dist/aru-host-windows-$ARU_HOST_VERSION-x64.exe"
           for arch in x64 arm64; do
             test -f "dist/aru-host-linux-$ARU_HOST_VERSION-$arch.deb"
           done
@@ -193,4 +199,4 @@ jobs:
             dist/* \
             --verify-tag \
             --title "Aru Host $ARU_HOST_VERSION" \
-            --generate-notes
+            --notes-file "docs/releases/$ARU_HOST_VERSION.md"

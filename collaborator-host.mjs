@@ -1,3 +1,4 @@
+import { createMobileCollaboratorIdentityHost } from "./mobile-collaborator-replicas.mjs";
 import { randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { homedir } from "node:os";
@@ -96,6 +97,10 @@ export function createCollaboratorHost({
 }) {
   state.agentDriverProbes ??= [];
   state.hostedCollaborators ??= [];
+  const mobileIdentities = createMobileCollaboratorIdentityHost({
+    state, saveState, readJSONBody, sendJSON, HttpError, now,
+  });
+  const artifactOwnerForId = (id) => mobileIdentities.ownerForId(id) ?? collaboratorForId(id);
   const surfaces = createCollaboratorSurfaceHost({
     dataDir,
     readJSONBody,
@@ -260,6 +265,7 @@ export function createCollaboratorHost({
     const projection = collaboratorProjection();
     return {
       schema: HOSTED_COLLABORATOR_INVENTORY_SCHEMA,
+      mobileIdentities: mobileIdentities.inventory(),
       collaborators: state.hostedCollaborators.map((collaborator) => publicCollaborator(collaborator, projection)),
     };
   }
@@ -295,6 +301,7 @@ export function createCollaboratorHost({
   }
 
   async function route(req, res, path, requireDevice, requireLocalHostConsole) {
+    if (await mobileIdentities.route(req, res, path, requireDevice)) return true;
     if (await providerProfiles.route(req, res, path, requireDevice, requireLocalHostConsole)) {
       return true;
     }
@@ -331,10 +338,10 @@ export function createCollaboratorHost({
     if (await cognition.route(req, res, path, requireDevice, collaboratorForId)) {
       return true;
     }
-    if (await surfaces.route(req, res, path, requireDevice, collaboratorForId)) {
+    if (await surfaces.route(req, res, path, requireDevice, artifactOwnerForId)) {
       return true;
     }
-    if (await projects.route(req, res, path, requireDevice, collaboratorForId)) {
+    if (await projects.route(req, res, path, requireDevice, artifactOwnerForId)) {
       return true;
     }
     const match = path.match(/^\/aru\/v1\/hosted-collaborators\/([^/]+)$/);
@@ -558,10 +565,10 @@ export function createCollaboratorHost({
     surfaceTools: surfaces.tools,
     projectTools: projects.tools,
     callSurfaceTool(name, args, device) {
-      return surfaces.callTool(name, args, device, collaboratorForId);
+      return surfaces.callTool(name, args, device, artifactOwnerForId);
     },
     callProjectTool(name, args, device) {
-      return projects.callTool(name, args, device, collaboratorForId);
+      return projects.callTool(name, args, device, artifactOwnerForId);
     },
     conversationStatus: conversations.status,
     start() {

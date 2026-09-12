@@ -1,0 +1,82 @@
+name: windows-desktop
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+jobs:
+  windows-smoke:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Host Core secret-store proofs
+        shell: bash
+        run: |
+          node tests/windows-secret-store-smoke.mjs
+          node tests/provider-profiles-smoke.mjs
+          node --test tests/container-runtime-setup.test.mjs tests/container-status-http.test.mjs
+
+      - name: Console unit tests
+        shell: bash
+        working-directory: desktop-console
+        run: |
+          npm ci
+          npm test
+          npm run test:preload
+
+      - name: Installer lifecycle smoke (real Scheduled Task + DPAPI)
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tests/windows-installer-smoke.ps1
+
+      - name: Verify phone identities without model drivers
+        run: node tests/mobile-collaborator-identity-smoke.mjs
+
+      - name: Build unsigned NSIS package
+        shell: bash
+        working-directory: desktop-console
+        run: |
+          version="$(node -p 'require("./package.json").version')"
+          bash ../package-windows-desktop.sh --version "$version" --arch x64 --output-dir ../dist
+
+      - name: Verify package contents
+        shell: bash
+        run: |
+          version="$(node -p 'require("./desktop-console/package.json").version')"
+          bash tests/windows-desktop-package-smoke.sh desktop-console "$version" x64
+
+      - name: Install and boot from the built package payload
+        shell: powershell
+        run: |
+          $version = node -p 'require("./desktop-console/package.json").version'
+          $hostCore = "desktop-console\dist\win-unpacked\resources\HostCore"
+          powershell -NoProfile -ExecutionPolicy Bypass -File "$hostCore\install-windows.ps1" `
+            -Instance pkg -Port 8899 -DisplayName "Package Smoke" -SourceDir $hostCore
+          $manifest = Invoke-RestMethod -UseBasicParsing -Uri "http://127.0.0.1:8899/.well-known/aru.json"
+          if ($manifest.nodeKind -ne "home-windows") { throw "unexpected node kind" }
+          powershell -NoProfile -ExecutionPolicy Bypass -File "$hostCore\install-windows.ps1" `
+            -Instance pkg -Uninstall -PurgeData
+
+      - name: Verify preview signing disclosure
+        shell: powershell
+        run: |
+          $version = node -p 'require("./desktop-console/package.json").version'
+          $status = (Get-AuthenticodeSignature "dist/aru-host-windows-$version-x64.exe").Status
+          if ($status -ne 'NotSigned') { throw "Expected unsigned preview artifact, received $status" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64-distribution
+          path: |
+            dist/aru-host-windows-*.exe
+            dist/aru-host-windows-*.exe.sha256
+            dist/aru-host-windows-*.json
+          if-no-files-found: error

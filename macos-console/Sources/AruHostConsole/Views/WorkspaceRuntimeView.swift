@@ -16,6 +16,7 @@ struct WorkspaceRuntimeView: View {
                 }
 
                 runtimeSummary
+                if runtime.managesLocalHost { ContainerRuntimeSetupPanel(runtime: runtime) }
                 policyPanel
 
                 if runtime.jobs.isEmpty {

@@ -18,6 +18,9 @@ jobs:
           node-version: 22
       - name: Host and installer smoke tests
         run: |
+          node --test tests/container-runtime-setup.test.mjs tests/container-status-http.test.mjs
+          node tests/mobile-collaborator-identity-smoke.mjs
+          node tests/windows-secret-store-smoke.mjs
           bash tests/http-smoke.sh
           bash tests/installer-smoke.sh
           node tests/apns-push-smoke.mjs
@@ -34,6 +37,10 @@ jobs:
           node tests/provider-profiles-smoke.mjs
           node tests/conversation-turn-relay.test.mjs
           bash tests/plugin-supervisor-smoke.sh
+      - name: Verify real container setup and old payload compatibility
+        run: |
+          node tests/container-runtime-real-smoke.mjs
+          node tests/legacy-payload-smoke.mjs
       - name: Build Linux release payload
         run: ./package-release.sh dist/aru-host-linux.tar.gz
 
@@ -56,16 +63,16 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: linux-console/package-lock.json
+          cache-dependency-path: desktop-console/package-lock.json
       - name: Verify current-user installer and Console
         run: |
-          npm ci --prefix linux-console
-          npm audit --prefix linux-console --omit=dev
+          npm ci --prefix desktop-console
+          npm audit --prefix desktop-console --omit=dev
           bash tests/linux-desktop-installer-smoke.sh
-          npm test --prefix linux-console
+          npm test --prefix desktop-console
       - name: Build, inspect, and install x64 desktop package
         run: |
-          version="$(node -p 'require("./linux-console/package.json").version')"
+          version="$(node -p 'require("./desktop-console/package.json").version')"
           ./package-linux-desktop.sh --version "$version" --arch x64 --output-dir dist
           sudo apt-get update
           sudo apt-get install -y "./dist/aru-host-linux-$version-x64.deb"

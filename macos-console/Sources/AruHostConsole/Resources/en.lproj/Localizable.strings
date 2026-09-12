@@ -233,10 +233,10 @@
 "runtime.subtitle" = "Durable job records, disposable isolated workspaces, and the maximum runtime for each job.";
 "no.jobs" = "No job records yet";
 "no.jobs.detail" = "Preparation, execution, and terminal states appear here after a phone or model submits a workspace job.";
-"no.container.runtime.detail" = "This Mac has no usable Docker or Podman runtime. The ledger remains visible, but new isolated jobs are not presented as runnable.";
+"no.container.runtime.detail" = "Optional containers are not configured. The job ledger, project files, page publication and phone pairing remain available.";
 "job.ledger" = "Job Ledger";
-"runtime.ready.description" = "Node, Python, and Shell jobs run in disposable network-disabled containers.";
-"container.runtime.missing.description" = "Host is installed, but this Mac has no usable Docker or Podman, so workspace and job execution are disabled.";
+"runtime.ready.description" = "A container engine is configured for isolated Node, Python and Shell jobs. Execution still depends on a running engine.";
+"container.runtime.missing.description" = "Optional containers are not configured; isolated script jobs and OCI plugins are not enabled. Install and verify below.";
 "default.job.budget" = "Default Maximum Runtime";
 "job.budget.description" = "Host receives this budget with each job and terminates it at the deadline. Use any positive hour count or explicitly choose unlimited.";
 "change" = "Change";
@@ -481,3 +481,13 @@
 "project.published.now" = "Phone surface updated";
 "project.mutation.in.progress" = "This page project is already being updated";
 "project.checkpoints.format" = "%d checkpoints";
+
+"container.setup.title" = "Scripts and container plugins · Optional";
+"container.setup.detail" = "Runs Python, Node.js and Shell workspace jobs and container plugins. Project files, page publication and phone pairing work independently.";
+"container.setup.steps" = "1. Follow the official guide to install Podman Desktop (existing Docker also works). 2. Complete onboarding and start the container VM. 3. Return here to verify and enable.";
+"container.setup.cost" = "Downloads images and verifies all three runtimes and file access; this may take several minutes. Success restarts Host and interrupts running work.";
+"container.setup.install" = "Open official installation guide";
+"container.setup.verify" = "Verify and enable";
+"container.setup.busy" = "Preparing and verifying…";
+"container.setup.success" = "Verified. Host has enabled container jobs.";
+"container.setup.restartpending" = "Containers passed verification, but Host has not reported the enabled capability. Check the service and refresh.";

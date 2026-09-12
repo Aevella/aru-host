@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.31.0
+
+- Add an explicitly unsigned Windows x64 preview with current-user installation, DPAPI credentials, pairing, and lifecycle verification.
+- Separate phone project/page identities from computer model execution.
+- Add optional container onboarding and verified Node/Python/Shell setup to desktop Consoles.
+- Explain container-only status semantics and preserve old fixed-file Host payload compatibility.
+- Keep protocol `stub-0.30`; see [installation and upgrade details](docs/releases/0.31.0.md).
+
 ## 0.30.3
 
 - Fix missing collaborator avatars in the packaged macOS app by resolving its bundled resources correctly.
