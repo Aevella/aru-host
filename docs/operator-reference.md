@@ -274,7 +274,13 @@ or the independently advanced conversation must keep both histories as branches.
 stores endpoint-scoped token hashes, an encryption-key fingerprint, one anonymous
 relay route id and its route-scoped wake token, and no APNs address, collaborator,
 conversation, or plaintext target. Submission accepts only a sealed idempotent
-envelope; `wake-send.mjs` is the reference v2 sender. Host derives one opaque HMAC
+envelope; [`wake-send.mjs`](../wake-send.mjs) is the standalone reference v2 sender.
+It accepts HTTPS and the HTTP LAN/Tailscale destinations exported by a paired
+phone. Use a phone build that admits its paired private route when creating the
+trigger; updating Host alone does not change phone-side address validation.
+The sender keeps event content encrypted and refuses redirected submissions.
+This utility is distributed as source, not inside desktop Host installer payloads.
+Host derives one opaque HMAC
 request identity and sends that identity alone to the official wake relay. The relay
 owns the APNs provider key and device token, while the phone decrypts the event,
 commits it to local SQLite, then acknowledges the Host row. `ARU_WAKE_RELAY_URL`

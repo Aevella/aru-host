@@ -1,5 +1,10 @@
 # Changelog
 
+## Sender utility update · 2026-09-12
+
+- Allow the standalone wake sender to submit encrypted events to paired LAN/Tailscale HTTP endpoints; retain HTTPS and redirect rejection.
+- Verify a real local HTTP submission. Desktop packages remain 0.31.0; phone-side admission requires an updated phone client.
+
 ## 0.31.0
 
 - Add an explicitly unsigned Windows x64 preview with current-user installation, DPAPI credentials, pairing, and lifecycle verification.
