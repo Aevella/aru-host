@@ -281,8 +281,20 @@ function DetectContainerRuntime {
   foreach ($candidate in @("docker", "podman")) {
     $command = Get-Command $candidate -ErrorAction SilentlyContinue
     if (-not $command) { continue }
-    & $command.Source info *> $null
-    if ($LASTEXITCODE -eq 0) { return $candidate }
+    # Windows PowerShell turns stderr from a native command into an ErrorRecord.
+    # A CLI may exist while its daemon is stopped, which is an optional-capability
+    # miss rather than an installation failure.
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+      $ErrorActionPreference = "SilentlyContinue"
+      & $command.Source info *> $null
+      $runtimeAvailable = $LASTEXITCODE -eq 0
+    } catch {
+      $runtimeAvailable = $false
+    } finally {
+      $ErrorActionPreference = $previousErrorActionPreference
+    }
+    if ($runtimeAvailable) { return $candidate }
   }
   return "none"
 }

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.31.1
+
+- Give the signed macOS Console its own checked-in high-resolution Aru Host icon, bundle it explicitly, and declare the productivity-app identity in the application metadata.
+- Include the paired private-network sender admission published after 0.31.0; desktop Host protocol remains `stub-0.30` and Windows remains an unsigned preview.
+- See [installation and upgrade details](docs/releases/0.31.1.md).
+
 ## Sender utility update · 2026-09-12
 
 - Allow the standalone wake sender to submit encrypted events to paired LAN/Tailscale HTTP endpoints; retain HTTPS and redirect rejection.
