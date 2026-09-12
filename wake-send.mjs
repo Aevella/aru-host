@@ -3,10 +3,17 @@ import { createCipheriv, randomBytes, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
+// The phone accepts plain HTTP for a paired LAN or Tailscale Host, so a sender
+// bundle can legitimately carry one. Event bodies stay sealed either way; only
+// the submit token travels in the clear on such a network.
+function isSupportedSubmitURL(value) {
+  return value.startsWith("https://") || value.startsWith("http://");
+}
+
 export function sealWakeEvent(bundle, content, eventId = randomUUID()) {
   if (bundle?.schema !== "aru.wake-bridge.sender-bundle.v2"
       || typeof bundle.triggerId !== "string" || bundle.triggerId.length === 0
-      || typeof bundle.submitURL !== "string" || !bundle.submitURL.startsWith("https://")
+      || typeof bundle.submitURL !== "string" || !isSupportedSubmitURL(bundle.submitURL)
       || typeof bundle.submitToken !== "string" || bundle.submitToken.length === 0) {
     throw new Error("invalid sender bundle");
   }
