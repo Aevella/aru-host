@@ -1,6 +1,44 @@
 import { spawnSync } from "node:child_process";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 const DEFAULT_SERVICE = "cn.aelion.aru.host-provider.v1";
+const WINDOWS_POWERSHELL_FLAGS = ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command"];
+
+// Windows secrets are DPAPI (CurrentUser) ciphertext files: the OS-native
+// protected storage a background Scheduled Task process can read without a
+// Console open, and never a plaintext config fallback. All file IO happens
+// inside PowerShell so the injectable `run` stays the only side-effect outlet.
+export function windowsSecretFilePath(service, account, env = process.env) {
+  const base = env.ARU_WINDOWS_SECRET_ROOT
+    ?? join(env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local"), "AruHost", "secrets");
+  return join(base, service, `${account}.dpapi`);
+}
+
+function windowsQuote(value) {
+  return `'${String(value).replace(/'/g, "''")}'`;
+}
+
+export function windowsDpapiScripts(secretPath) {
+  const quoted = windowsQuote(secretPath);
+  return {
+    probe: "Add-Type -AssemblyName System.Security; "
+      + "[void][Security.Cryptography.ProtectedData]::Protect([byte[]](1),$null,[Security.Cryptography.DataProtectionScope]::CurrentUser)",
+    read: "$ErrorActionPreference='Stop'; Add-Type -AssemblyName System.Security; "
+      + `$p=${quoted}; if(!(Test-Path -LiteralPath $p)){exit 44}; `
+      + "$c=[IO.File]::ReadAllBytes($p); "
+      + "$b=[Security.Cryptography.ProtectedData]::Unprotect($c,$null,[Security.Cryptography.DataProtectionScope]::CurrentUser); "
+      + "[Console]::Out.Write([Text.Encoding]::UTF8.GetString($b))",
+    write: "$ErrorActionPreference='Stop'; Add-Type -AssemblyName System.Security; "
+      + `$p=${quoted}; ` + '$s=[Console]::In.ReadToEnd().TrimEnd("`r","`n"); '
+      + "if($s.Length -eq 0){exit 1}; "
+      + "New-Item -ItemType Directory -Force -Path (Split-Path -LiteralPath $p) | Out-Null; "
+      + "$b=[Text.Encoding]::UTF8.GetBytes($s); "
+      + "$c=[Security.Cryptography.ProtectedData]::Protect($b,$null,[Security.Cryptography.DataProtectionScope]::CurrentUser); "
+      + "[IO.File]::WriteAllBytes($p,$c)",
+    remove: `$p=${windowsQuote(secretPath)}; if(Test-Path -LiteralPath $p){Remove-Item -LiteralPath $p -Force}`,
+  };
+}
 
 export function createProviderSecretStore({
   platform = process.platform,
@@ -21,6 +59,21 @@ export function createProviderSecretStore({
       cachedAvailability = result.error?.code === "ENOENT" || result.status !== 0
         ? { supported: false, storage: "unavailable", failure: "secret-tool-not-found" }
         : { supported: true, storage: "linux-secret-service", failure: null };
+      return cachedAvailability;
+    }
+    if (platform === "win32") {
+      const result = run("powershell.exe", [
+        ...WINDOWS_POWERSHELL_FLAGS, windowsDpapiScripts("").probe,
+      ], {
+        encoding: "utf8",
+        timeout: 10_000,
+        windowsHide: true,
+      });
+      cachedAvailability = result.error?.code === "ENOENT"
+        ? { supported: false, storage: "unavailable", failure: "powershell-not-found" }
+        : result.status !== 0
+          ? { supported: false, storage: "unavailable", failure: "windows-dpapi-unavailable" }
+          : { supported: true, storage: "windows-dpapi", failure: null };
       return cachedAvailability;
     }
     if (platform !== "darwin") {
@@ -56,6 +109,19 @@ export function createProviderSecretStore({
       if (result.status !== 0) throw new Error("无法从 Linux Secret Service 读取模型 API 密钥");
       return String(result.stdout ?? "").replace(/[\r\n]+$/, "");
     }
+    if (platform === "win32") {
+      const result = run("powershell.exe", [
+        ...WINDOWS_POWERSHELL_FLAGS,
+        windowsDpapiScripts(windowsSecretFilePath(service, account(profileId))).read,
+      ], {
+        encoding: "utf8",
+        timeout: 15_000,
+        windowsHide: true,
+      });
+      if (result.status === 44) return null;
+      if (result.status !== 0) throw new Error("无法从 Windows 数据保护存储读取模型 API 密钥");
+      return String(result.stdout ?? "").replace(/[\r\n]+$/, "");
+    }
     const result = run("/usr/bin/security", [
       "find-generic-password",
       "-a", account(profileId),
@@ -86,6 +152,19 @@ export function createProviderSecretStore({
       if (result.status !== 0) throw new Error("无法把模型 API 密钥保存到 Linux Secret Service");
       return;
     }
+    if (platform === "win32") {
+      const result = run("powershell.exe", [
+        ...WINDOWS_POWERSHELL_FLAGS,
+        windowsDpapiScripts(windowsSecretFilePath(service, account(profileId))).write,
+      ], {
+        input: `${value}\n`,
+        encoding: "utf8",
+        timeout: 15_000,
+        windowsHide: true,
+      });
+      if (result.status !== 0) throw new Error("无法把模型 API 密钥保存到 Windows 数据保护存储");
+      return;
+    }
     const result = run("/usr/bin/security", [
       "add-generic-password",
       "-a", account(profileId),
@@ -114,6 +193,18 @@ export function createProviderSecretStore({
       if (result.status !== 0 && result.status !== 1) {
         throw new Error("无法从 Linux Secret Service 删除模型 API 密钥");
       }
+      return;
+    }
+    if (platform === "win32") {
+      const result = run("powershell.exe", [
+        ...WINDOWS_POWERSHELL_FLAGS,
+        windowsDpapiScripts(windowsSecretFilePath(service, account(profileId))).remove,
+      ], {
+        encoding: "utf8",
+        timeout: 15_000,
+        windowsHide: true,
+      });
+      if (result.status !== 0) throw new Error("无法从 Windows 数据保护存储删除模型 API 密钥");
       return;
     }
     const result = run("/usr/bin/security", [

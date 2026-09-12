@@ -59,13 +59,21 @@ export function readInstalledVersion(contents) {
 }
 
 export function readPort(contents) {
-  const match = String(contents ?? "").match(/^ARU_PORT=([0-9]+)$/m);
+  const match = String(contents ?? "").match(/^ARU_PORT=([0-9]+)\r?$/m);
   const port = Number(match?.[1]);
   return Number.isInteger(port) && port > 0 && port <= 65535 ? port : 8787;
 }
 
-export function linuxReleaseAsset(version, architecture = process.arch) {
+const RELEASE_ASSET_EXTENSIONS = { linux: "deb", windows: "exe" };
+
+export function desktopReleaseAsset(platformName, version, architecture = process.arch) {
+  const extension = RELEASE_ASSET_EXTENSIONS[platformName];
+  if (!extension) return null;
   const arch = architecture === "arm64" ? "arm64" : architecture === "x64" ? "x64" : null;
   if (!arch) return null;
-  return `aru-host-linux-${version}-${arch}.deb`;
+  return `aru-host-${platformName}-${version}-${arch}.${extension}`;
+}
+
+export function linuxReleaseAsset(version, architecture = process.arch) {
+  return desktopReleaseAsset("linux", version, architecture);
 }

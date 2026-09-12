@@ -1,11 +1,11 @@
 {
   "name": "aru-host",
-  "version": "0.30.3",
+  "version": "0.31.0",
   "private": true,
   "type": "module",
   "license": "Apache-2.0",
   "desktopName": "cn.aelion.aru.host-console.linux.desktop",
-  "description": "Aru Host desktop Console for Debian and Ubuntu",
+  "description": "Aru Host desktop Console for Debian/Ubuntu and Windows",
   "homepage": "https://github.com/Aevella/aru-host",
   "author": {
     "name": "Aevella",
@@ -14,9 +14,12 @@
   "main": "src/main.mjs",
   "scripts": {
     "test": "node --test tests/*.test.mjs",
+    "test:preload": "electron tests/preload-smoke.mjs",
     "prepare:assets": "node scripts/prepare-assets.mjs",
     "pack:dir": "npm run prepare:assets && electron-builder --dir --linux",
-    "dist:deb": "npm run prepare:assets && electron-builder --linux deb"
+    "dist:deb": "npm run prepare:assets && electron-builder --linux deb",
+    "prepare:assets:windows": "node scripts/prepare-assets.mjs --platform windows",
+    "dist:win": "npm run prepare:assets:windows && electron-builder --win nsis"
   },
   "dependencies": {
     "qrcode": "^1.5.4"
@@ -55,6 +58,20 @@
       "syncDesktopName": true,
       "icon": ".build-icons/icon.png",
       "artifactName": "aru-host-linux-${version}-${arch}.${ext}"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": ".build-icons/icon.png",
+      "artifactName": "aru-host-windows-${version}-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowElevation": false,
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": true
     },
     "deb": {
       "depends": [

@@ -233,10 +233,10 @@
 "runtime.subtitle" = "持久作业账本、一次性隔离工作区与每个作业的最长运行时间。";
 "no.jobs" = "还没有作业记录";
 "no.jobs.detail" = "手机或模型提交工作环境任务后，准备、运行与终态都会落在这里。";
-"no.container.runtime.detail" = "这台 Mac 还没有可用的 Docker 或 Podman，因此作业账本可以查看，但新的隔离任务不会伪装成可运行。";
+"no.container.runtime.detail" = "尚未配置可选容器环境。作业账本仍可查看；项目文件、网页发布和手机连接不受影响。";
 "job.ledger" = "作业账本";
-"runtime.ready.description" = "Node、Python 和 Shell 任务在一次性无网络容器里运行。";
-"container.runtime.missing.description" = "Host 已安装，但这台 Mac 没有可用的 Docker 或 Podman，工作环境和作业执行因此关闭。";
+"runtime.ready.description" = "已配置容器引擎，用于隔离的 Node、Python、Shell 任务。实际执行仍取决于引擎是否运行。";
+"container.runtime.missing.description" = "尚未配置可选容器环境，隔离脚本任务与容器插件未启用。可在下方安装并验证。";
 "default.job.budget" = "默认最长运行时间";
 "job.budget.description" = "随任务一起发给 Host，由 Host 到点终止；可以设置任意正小时数或显式不限。";
 "change" = "更改";
@@ -481,3 +481,13 @@
 "project.published.now" = "手机页面已更新";
 "project.mutation.in.progress" = "这个页面项目正在更新";
 "project.checkpoints.format" = "%d 个检查点";
+
+"container.setup.title" = "脚本与容器插件 · 可选";
+"container.setup.detail" = "用于运行 Python、Node.js、Shell 工作区任务和容器插件。项目文件、网页发布和手机连接不需要它。";
+"container.setup.steps" = "1. 按官方说明安装 Podman Desktop（已有 Docker 也可以）。2. 完成引导并启动容器虚拟机。3. 回到这里检测并启用。";
+"container.setup.cost" = "会下载镜像并验证三种脚本与文件读写，可能需要几分钟。成功后重启 Host，会中断正在运行的工作。";
+"container.setup.install" = "打开官方安装说明";
+"container.setup.verify" = "检测并启用";
+"container.setup.busy" = "正在准备与验证…";
+"container.setup.success" = "验证通过，Host 已启用容器任务。";
+"container.setup.restartpending" = "容器验证通过，但尚未读到 Host 启用状态。请检查服务并刷新。";

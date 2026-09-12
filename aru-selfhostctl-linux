@@ -11,6 +11,7 @@ Usage: aru-selfhost [--instance NAME] <command>
 
   status                 Show user-service state and installed release.
   pairing                Restart and print a fresh ten-minute pairing link.
+  setup-runtime          Verify installed containers, prepare images, and restart Host.
   doctor                 Verify runtime, service, manifest, and capabilities.
   logs                   Follow private stdout/stderr logs.
   upgrade [--ref REF]    Install a new release with persisted choices.
@@ -66,6 +67,13 @@ pairing_command() {
   done
   die "service restarted but no pairing link appeared"
 }
+setup_runtime_command() {
+  load_node_config
+  [[ -f "$CURRENT_LINK/container-runtime-setup.mjs" ]] || die "Update the desktop application or rerun the current installer before optional container setup."
+  "$ARU_NODE_BINARY" "$CURRENT_LINK/container-runtime-setup.mjs" "$NODE_ENV"
+  restart_service
+}
+
 doctor_command() {
   load_node_config
   local failed=false manifest
@@ -118,6 +126,7 @@ command_name="${1:-}"; [[ -n "$command_name" ]] || { usage; exit 1; }; shift
 case "$command_name" in
   status) status_command "$@" ;;
   pairing) pairing_command "$@" ;;
+  setup-runtime) setup_runtime_command "$@" ;;
   doctor) doctor_command "$@" ;;
   logs) touch "$LOG_DIR/stdout.log" "$LOG_DIR/stderr.log"; exec tail -F "$LOG_DIR/stdout.log" "$LOG_DIR/stderr.log" ;;
   upgrade) upgrade_command "$@" ;;

@@ -123,3 +123,8 @@ label.field { display: block; margin-bottom: 15px; }
 .hidden { display: none !important; }
 @media (max-width: 1050px) { .body-shell { grid-template-columns: 190px minmax(0,1fr); } .split { grid-template-columns: 1fr; } .navigation { padding-inline: 10px; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
+
+.container-setup { margin-block: 22px; }
+.container-setup h3 { font-size: 22px; }
+.container-setup p { font-size: 13px; line-height: 1.7; max-width: 72ch; }
+.container-setup button { margin-top: 10px; }

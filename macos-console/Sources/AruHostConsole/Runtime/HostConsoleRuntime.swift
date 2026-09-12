@@ -67,6 +67,8 @@ final class HostConsoleRuntime {
         self.hostCoreInstaller = hostCoreInstaller
     }
 
+    var managesLocalHost: Bool { configuredBaseURL == nil }
+
     private var baseURL: URL { configuredBaseURL ?? LocalHostLocator.baseURL() }
 
     var readyDriverCount: Int {

@@ -494,6 +494,12 @@ function manifest() {
         activation: "confirmed-direct-apply-or-explicit-lifecycle-control",
         workshop: sourcePluginRuntime.available ? "model-author-validate-save-draft-or-apply" : "unavailable",
       },
+      "mobile-collaborator-identity": {
+        enabled: true,
+        endpoint: "/aru/v1/mobile-collaborator-identities/{sourceCollaboratorId}",
+        authority: "phone",
+        turnExecution: false,
+      },
       "collaborator-host": {
         enabled: true,
         endpoint: "/aru/v1/hosted-collaborators",
@@ -655,7 +661,8 @@ const MCP_TOOLS = [
         serverVersion: { type: "string" },
         packageCount: { type: "integer" },
         activeDeviceCount: { type: "integer" },
-        workspaceRuntimeAvailable: { type: "boolean" },
+        workspaceRuntimeAvailable: { type: "boolean", description: "Whether a container runtime is configured for isolated Node/Python/Shell jobs and OCI plugins. Does not gate project files, page publication, pairing, or model drivers; not a live engine health probe." },
+        workspaceRuntimeDescription: { type: "string" },
       },
       required: [
         "serverId", "displayName", "serverVersion", "packageCount",
@@ -1091,6 +1098,9 @@ async function executeMCPTool(name, args, device) {
         packageCount: state.packages.length,
         activeDeviceCount: state.devices.filter((entry) => !entry.revokedAt).length,
         workspaceRuntimeAvailable: config.containerRuntime !== null,
+        workspaceRuntimeDescription: config.containerRuntime !== null
+          ? "Container runtime configured for isolated Node/Python/Shell jobs and OCI plugins. Job execution verifies actual readiness. Project files and page publication are independent."
+          : "Optional containers are not configured. Isolated Node/Python/Shell jobs and OCI plugins need Podman or Docker. Project files, page publication, pairing, and model drivers are independent. Use Host Console > Runtime for installation and verification.",
       };
     } else if (name === "aru_node_settings") {
       structuredContent = nodeControl.publicSettings();

@@ -5,6 +5,9 @@ import {
   sign,
 } from "node:crypto";
 import { connect as connectHTTP2, constants as http2Constants } from "node:http2";
+import { windowsDpapiScripts, windowsSecretFilePath } from "./provider-secret-store.mjs";
+
+const WINDOWS_POWERSHELL_FLAGS = ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command"];
 
 const REGISTRATION_SCHEMA = "aru.selfhost.remote-push-registration.v1";
 const STATUS_SCHEMA = "aru.selfhost.remote-push-status.v1";
@@ -426,6 +429,17 @@ export function createAPNsCredentialStore({
         : { supported: true, storage: "linux-secret-service" };
       return cachedAvailability;
     }
+    if (platform === "win32") {
+      const result = run("powershell.exe", [
+        ...WINDOWS_POWERSHELL_FLAGS, windowsDpapiScripts("").probe,
+      ], {
+        encoding: "utf8", timeout: 10_000, windowsHide: true,
+      });
+      cachedAvailability = result.error?.code === "ENOENT" || result.status !== 0
+        ? { supported: false, storage: "unavailable" }
+        : { supported: true, storage: "windows-dpapi" };
+      return cachedAvailability;
+    }
     cachedAvailability = { supported: false, storage: "unavailable" };
     return cachedAvailability;
   }
@@ -436,9 +450,16 @@ export function createAPNsCredentialStore({
       ? run("/usr/bin/security", ["find-generic-password", "-a", account, "-s", service, "-w"], {
         encoding: "utf8", timeout: 5_000, windowsHide: true,
       })
-      : run("/usr/bin/secret-tool", ["lookup", "service", service, "account", account], {
-        encoding: "utf8", timeout: 5_000, windowsHide: true,
-      });
+      : platform === "win32"
+        ? run("powershell.exe", [
+          ...WINDOWS_POWERSHELL_FLAGS,
+          windowsDpapiScripts(windowsSecretFilePath(service, account)).read,
+        ], {
+          encoding: "utf8", timeout: 15_000, windowsHide: true,
+        })
+        : run("/usr/bin/secret-tool", ["lookup", "service", service, "account", account], {
+          encoding: "utf8", timeout: 5_000, windowsHide: true,
+        });
     if (result.status === 44 || result.status === 1 || /could not be found/i.test(result.stderr ?? "")) {
       return null;
     }

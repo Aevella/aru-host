@@ -5,6 +5,16 @@ enum L10n {
         String(localized: String.LocalizationValue(key), bundle: HostConsoleResources.bundle)
     }
 
+    static let containerSetupTitle = value("container.setup.title")
+    static let containerSetupDetail = value("container.setup.detail")
+    static let containerSetupSteps = value("container.setup.steps")
+    static let containerSetupCost = value("container.setup.cost")
+    static let containerSetupInstall = value("container.setup.install")
+    static let containerSetupVerify = value("container.setup.verify")
+    static let containerSetupBusy = value("container.setup.busy")
+    static let containerSetupSuccess = value("container.setup.success")
+    static let containerSetupRestartPending = value("container.setup.restartpending")
+
     static let appName = value("app.name")
     static let appSubtitle = value("app.subtitle")
     static let refresh = value("refresh")

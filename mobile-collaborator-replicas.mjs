@@ -524,3 +524,53 @@ function requestEpoch(urlString) {
   if (!Number.isSafeInteger(epoch) || epoch <= 0) throw new Error("epoch query is required");
   return epoch;
 }
+
+// Public transport compatibility: pre-0.31 fixed-file installers already fetch
+// this module. Artifact identity remains a separate factory and state owner.
+
+// Host-owned artifact identities. These are not computer cognition roots or
+// execution replicas. Pairing authorizes management of this node; a phone's
+// durable collaborator UUID survives device re-pairing and display-name edits.
+export function createMobileCollaboratorIdentityHost({ state, saveState, readJSONBody, sendJSON, HttpError, now = Date.now }) {
+  state.mobileCollaboratorIdentities ??= [];
+  const schema = "aru.selfhost.mobile-collaborator-identity.v1";
+  function inventory() { return state.mobileCollaboratorIdentities.map((item) => ({ ...item })); }
+  function ownerForId(id) { return state.mobileCollaboratorIdentities.find((item) => item.collaboratorId === id); }
+  async function route(req, res, path, requireDevice) {
+    const match = path.match(/^\/aru\/v1\/mobile-collaborator-identities\/([^/]+)$/);
+    if (!match || req.method !== "PUT") return false;
+    const device = requireDevice();
+    let sourceCollaboratorId;
+    try { sourceCollaboratorId = decodeURIComponent(match[1]); }
+    catch { throw new HttpError(400, "mobile_identity.source_invalid", "invalid collaborator UUID encoding"); }
+    if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(sourceCollaboratorId)) {
+      throw new HttpError(400, "mobile_identity.source_invalid", "a durable phone collaborator UUID is required");
+    }
+    const body = await readJSONBody(req, 64 * 1024);
+    requireDevice(); // A revoked pairing cannot commit after a suspended body read.
+    if (typeof body?.displayName !== "string" || !body.displayName.trim()) {
+      throw new HttpError(400, "mobile_identity.name_invalid", "a display name is required");
+    }
+    // Lookup after the await: simultaneous first requests must converge on one owner.
+    let identity = state.mobileCollaboratorIdentities.find((item) =>
+      item.sourceCollaboratorId.toLowerCase() === sourceCollaboratorId.toLowerCase());
+    const displayName = body.displayName.trim();
+    if (!identity) {
+      identity = { schema, sourceCollaboratorId, collaboratorId: `hostcol_${randomUUID()}`,
+        displayName, authority: "phone", turnExecution: false,
+        createdAt: now(), updatedAt: now(), createdByDeviceId: device.deviceId };
+      state.mobileCollaboratorIdentities.push(identity);
+      try { saveState(); }
+      catch (error) { state.mobileCollaboratorIdentities.pop(); throw error; }
+    } else if (identity.displayName !== displayName) {
+      const previous = { displayName: identity.displayName, updatedAt: identity.updatedAt };
+      identity.displayName = displayName;
+      identity.updatedAt = now();
+      try { saveState(); }
+      catch (error) { Object.assign(identity, previous); throw error; }
+    }
+    sendJSON(res, 200, { ...identity, sourceCollaboratorId });
+    return true;
+  }
+  return { route, inventory, ownerForId };
+}

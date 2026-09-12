@@ -28,6 +28,9 @@ struct HostOverviewView: View {
 
                 hero
                 gettingStartedPanel
+                if runtime.managesLocalHost && runtime.capability("workspace-runtime")?.enabled == false {
+                    ContainerRuntimeSetupPanel(runtime: runtime)
+                }
                 identityPanel
                 accessPanel
                 capabilityPanel
