@@ -77,6 +77,8 @@ if (-not (Test-Path -LiteralPath $logDirectory)) {
 while ($true) {
   $writer = [IO.StreamWriter]::new($LogFile, $true, [Text.UTF8Encoding]::new($false))
   try {
+    $writer.WriteLine("[run-node] starting Host Core at $([DateTime]::UtcNow.ToString('o'))")
+    $writer.Flush()
     & $nodeBinary @arguments 2>&1 | ForEach-Object {
       $writer.WriteLine($_.ToString())
       $writer.Flush()

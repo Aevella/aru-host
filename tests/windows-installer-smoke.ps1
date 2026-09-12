@@ -68,6 +68,12 @@ try {
     # Test-only diagnostics. Never expose even disposable pairing credentials.
     Get-Content -LiteralPath (Join-Path $instanceRoot "logs\host.log") -Tail 60 |
       ForEach-Object { $_ -replace '(pairingToken["\s:=]+)[^&,"\s]+', '$1[redacted]' }
+    Get-ScheduledTask -TaskName $taskName | Format-List TaskName,State
+    Get-ScheduledTaskInfo -TaskName $taskName | Format-List LastRunTime,LastTaskResult,NextRunTime
+    Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*$instanceRoot*" } |
+      Select-Object Name,ProcessId,ParentProcessId,CreationDate | Format-Table
+    Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue |
+      Select-Object LocalAddress,LocalPort,OwningProcess | Format-Table
     throw "Pairing restart failed"
   }
   $pairingAgain = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $control -Instance $Instance -BaseRoot $baseRoot pairing
