@@ -79,6 +79,19 @@ function SwapLink([string]$linkPath, [string]$target, [string]$pointerPath) {
   [IO.File]::WriteAllText($pointerPath, ([IO.Path]::GetFileName($target) + "`n"), [Text.UTF8Encoding]::new($false))
 }
 
+function StopHostTask {
+  # Stop-ScheduledTask requests termination asynchronously. Starting while the
+  # old task is still Running is silently ignored by MultipleInstances=IgnoreNew.
+  Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+  $deadline = [DateTime]::UtcNow.AddSeconds(30)
+  do {
+    $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+    if (-not $task -or $task.State -notin @("Running", "Queued")) { return }
+    Start-Sleep -Milliseconds 100
+  } while ([DateTime]::UtcNow -lt $deadline)
+  Fail "Host task did not stop; no replacement was started"
+}
+
 function StatusCommand {
   Write-Host "instance: $Instance"
   $release = ReadPointer $currentPointer
@@ -102,7 +115,7 @@ function PairingCommand {
     $previousLinks = @(Select-String -LiteralPath $logFile -Pattern "^aru://pair\?" |
       ForEach-Object { $_.Line })
   }
-  Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+  StopHostTask
   Start-ScheduledTask -TaskName $taskName
   for ($attempt = 0; $attempt -lt 60; $attempt++) {
     if (Test-Path -LiteralPath $logFile) {
@@ -193,7 +206,7 @@ function RollbackCommand {
   $currentTarget = Join-Path $releasesDir $current
   $previousTarget = Join-Path $releasesDir $previous
   if (-not (Test-Path -LiteralPath $previousTarget)) { Fail "previous release is missing" }
-  Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+  StopHostTask
   SwapLink (Join-Path $instanceRoot "previous") $currentTarget $previousPointer
   SwapLink $currentLink $previousTarget $currentPointer
   Start-ScheduledTask -TaskName $taskName
@@ -214,7 +227,7 @@ function SetupRuntimeCommand {
   $node = ReadEnvFile $nodeEnv
   & $node["ARU_NODE_BINARY"] (Join-Path $currentLink "container-runtime-setup.mjs") $nodeEnv
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-  Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+  StopHostTask
   Start-ScheduledTask -TaskName $taskName
 }
 

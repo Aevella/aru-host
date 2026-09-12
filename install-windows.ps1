@@ -115,6 +115,13 @@ function StopHostTask {
   $existing = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
   if ($existing) {
     Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+    $deadline = [DateTime]::UtcNow.AddSeconds(30)
+    do {
+      $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+      if (-not $task -or $task.State -notin @("Running", "Queued")) { return }
+      Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $deadline)
+    Fail "Host task did not stop; installed files were left in place"
   }
 }
 

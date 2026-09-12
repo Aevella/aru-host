@@ -64,6 +64,12 @@ try {
   Check "status names the release" (($status -join "`n") -match "release: host-")
   $pairing = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $control -Instance $Instance -BaseRoot $baseRoot pairing
   Check "pairing link issued" (($pairing -join "`n") -match "aru://pair\?")
+  if ($LASTEXITCODE -ne 0) {
+    # Test-only diagnostics. Never expose even disposable pairing credentials.
+    Get-Content -LiteralPath (Join-Path $instanceRoot "logs\host.log") -Tail 60 |
+      ForEach-Object { $_ -replace '(pairingToken["\s:=]+)[^&,"\s]+', '$1[redacted]' }
+    throw "Pairing restart failed"
+  }
   $pairingAgain = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $control -Instance $Instance -BaseRoot $baseRoot pairing
   $firstLink = @($pairing | Where-Object { $_ -match '^aru://pair\?' })
   $nextLink = @($pairingAgain | Where-Object { $_ -match '^aru://pair\?' })
