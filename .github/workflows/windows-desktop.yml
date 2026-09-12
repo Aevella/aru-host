@@ -53,11 +53,18 @@ jobs:
           version="$(node -p 'require("./desktop-console/package.json").version')"
           bash tests/windows-desktop-package-smoke.sh desktop-console "$version" x64
 
-      - name: Install and boot from the built package payload
+      - name: Install NSIS and boot its installed Host payload
         shell: powershell
         run: |
           $version = node -p 'require("./desktop-console/package.json").version'
-          $hostCore = "desktop-console\dist\win-unpacked\resources\HostCore"
+          $installer = (Resolve-Path "dist/aru-host-windows-$version-x64.exe").Path
+          $installed = Start-Process -FilePath $installer -ArgumentList '/S' -Wait -PassThru
+          if ($installed.ExitCode -ne 0) { throw "NSIS installation failed: $($installed.ExitCode)" }
+          $appRoot = Join-Path $env:LOCALAPPDATA 'Programs\aru-host'
+          if (-not (Test-Path (Join-Path $appRoot 'Aru Host.exe'))) { throw 'Installed Console missing' }
+          $hostCore = Join-Path $appRoot 'resources\HostCore'
+          $receipt = Get-Content (Join-Path $hostCore 'release.json') -Raw | ConvertFrom-Json
+          if ($receipt.version -ne $version) { throw 'Installed Host Core version mismatch' }
           powershell -NoProfile -ExecutionPolicy Bypass -File "$hostCore\install-windows.ps1" `
             -Instance pkg -Port 8899 -DisplayName "Package Smoke" -SourceDir $hostCore
           $manifest = Invoke-RestMethod -UseBasicParsing -Uri "http://127.0.0.1:8899/.well-known/aru.json"
