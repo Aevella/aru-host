@@ -86,10 +86,14 @@ function StopHostTask {
   $deadline = [DateTime]::UtcNow.AddSeconds(30)
   do {
     $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-    if (-not $task -or $task.State -notin @("Running", "Queued")) { return }
+    if (-not $task -or $task.State -notin @("Running", "Queued")) { break }
     Start-Sleep -Milliseconds 100
   } while ([DateTime]::UtcNow -lt $deadline)
-  Fail "Host task did not stop; no replacement was started"
+  if ($task -and $task.State -in @("Running", "Queued")) {
+    Fail "Host task did not stop; no replacement was started"
+  }
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $currentLink "run-node.ps1") -ConfigFile $nodeEnv -Stop
+  if ($LASTEXITCODE -ne 0) { Fail "Host native process did not stop" }
 }
 
 function StatusCommand {

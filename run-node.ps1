@@ -3,7 +3,8 @@
 # launchd KeepAlive, because a per-user Scheduled Task has no equivalent knob.
 param(
   [string]$ConfigFile = $env:ARU_SELFHOST_CONFIG_FILE,
-  [string]$LogFile = ""
+  [string]$LogFile = "",
+  [switch]$Stop
 )
 
 $ErrorActionPreference = "Stop"
@@ -40,6 +41,31 @@ function ConfigValue([string]$name, [string]$fallback) {
 }
 
 $nodeBinary = ConfigValue "ARU_NODE_BINARY" "node.exe"
+if ($Stop) {
+  # Some Windows task-service environments terminate only the PowerShell task,
+  # leaving its native child alive with inherited log handles and a bound port.
+  # Match both exact instance arguments, never every node.exe on the computer.
+  $entry = [regex]::Escape($config["ARU_SERVER_ENTRY"])
+  $data = [regex]::Escape($config["ARU_DATA_DIR"])
+  $entryPattern = '(?:^|\s)(?:"' + $entry + '"|' + $entry + ')(?:\s|$)'
+  $dataPattern = '(?:^|\s)--data-dir\s+(?:"' + $data + '"|' + $data + ')(?:\s|$)'
+  $processName = [IO.Path]::GetFileName($nodeBinary)
+  if (-not $processName.EndsWith('.exe')) { $processName += '.exe' }
+  $children = @(Get-CimInstance Win32_Process | Where-Object {
+    $_.Name -ieq $processName -and $_.CommandLine -match $entryPattern -and $_.CommandLine -match $dataPattern
+  })
+  foreach ($child in $children) {
+    # Recheck creation time so a stale PID cannot select a replacement process.
+    $live = Get-CimInstance Win32_Process -Filter "ProcessId=$($child.ProcessId)"
+    if (-not $live -or $live.CreationDate -ne $child.CreationDate) { continue }
+    & taskkill.exe /PID $child.ProcessId /T /F *> $null
+    if ($LASTEXITCODE -ne 0 -and (Get-Process -Id $child.ProcessId -ErrorAction SilentlyContinue)) {
+      throw "Could not stop this Host instance's native process tree"
+    }
+  }
+  exit 0
+}
+
 $arguments = @(
   $config["ARU_SERVER_ENTRY"],
   "--listen-host", $config["ARU_LISTEN_HOST"],
