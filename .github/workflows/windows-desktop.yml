@@ -33,6 +33,10 @@ jobs:
           npm test
           npm run test:preload
 
+      - name: Native process stop preserves unrelated Host
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tests/windows-native-stop-smoke.ps1
+
       - name: Installer lifecycle smoke (real Scheduled Task + DPAPI)
         shell: powershell
         run: powershell -NoProfile -ExecutionPolicy Bypass -File tests/windows-installer-smoke.ps1
@@ -56,7 +60,7 @@ jobs:
       - name: Install NSIS and boot its installed Host payload
         shell: powershell
         run: |
-          $version = node -p 'require("./desktop-console/package.json").version'
+          $version = (Get-Content 'desktop-console/package.json' -Raw | ConvertFrom-Json).version
           $installer = (Resolve-Path "dist/aru-host-windows-$version-x64.exe").Path
           $installed = Start-Process -FilePath $installer -ArgumentList '/S' -Wait -PassThru
           if ($installed.ExitCode -ne 0) { throw "NSIS installation failed: $($installed.ExitCode)" }
@@ -75,7 +79,7 @@ jobs:
       - name: Verify preview signing disclosure
         shell: powershell
         run: |
-          $version = node -p 'require("./desktop-console/package.json").version'
+          $version = (Get-Content 'desktop-console/package.json' -Raw | ConvertFrom-Json).version
           $status = (Get-AuthenticodeSignature "dist/aru-host-windows-$version-x64.exe").Status
           if ($status -ne 'NotSigned') { throw "Expected unsigned preview artifact, received $status" }
 
