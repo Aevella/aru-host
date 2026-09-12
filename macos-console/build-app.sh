@@ -110,6 +110,12 @@ python3 "$SCRIPT_DIR/verify-packaged-resources.py" \
   "$OUTPUT_APP/Contents/Resources/AruHostConsole_AruHostConsole.bundle"
 "$SELFHOST_DIR/bundle-host-core.sh" "$OUTPUT_APP/Contents/Resources/HostCore" "$VERSION"
 
+# The icon is a checked-in build input, not a generated one: make-app-icon.swift
+# rebuilds it from AppIcon-source.png when the artwork or its grade changes.
+icon="$SCRIPT_DIR/AppIcon.icns"
+[[ -f "$icon" ]] || { echo "Console app icon is missing" >&2; exit 1; }
+install -m 0644 "$icon" "$OUTPUT_APP/Contents/Resources/AppIcon.icns"
+
 plist="$OUTPUT_APP/Contents/Info.plist"
 cat > "$plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -119,14 +125,18 @@ cat > "$plist" <<EOF
   <key>CFBundleDevelopmentRegion</key><string>zh-Hans</string>
   <key>CFBundleDisplayName</key><string>Aru Host</string>
   <key>CFBundleExecutable</key><string>AruHostConsole</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
+  <key>CFBundleIconName</key><string>AppIcon</string>
   <key>CFBundleIdentifier</key><string>cn.aelion.aru.host-console</string>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
   <key>CFBundleName</key><string>Aru Host</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>CFBundleVersion</key><string>$BUILD_NUMBER</string>
+  <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
   <key>LSMinimumSystemVersion</key><string>26.0</string>
   <key>NSHighResolutionCapable</key><true/>
+  <key>NSHumanReadableCopyright</key><string>Copyright © 2026 Aru · Apache License 2.0</string>
 </dict>
 </plist>
 EOF
