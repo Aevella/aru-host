@@ -54,7 +54,8 @@ test("engine info succeeds but job failure does not activate runtime", async t =
   assert.equal(await readFile(config, "utf8"), original);
   // Repair and retry uses the same canonical config, without a pending-state latch.
   await configureContainerRuntime(config, { candidates: ["podman"], run: successfulRun });
-  assert.match(await readFile(config, "utf8"), /ARU_CONTAINER_RUNTIME='podman'/);
+  const expectedRuntimeLine = process.platform === "win32" ? "ARU_CONTAINER_RUNTIME=podman" : "ARU_CONTAINER_RUNTIME='podman'";
+  assert.equal((await readFile(config, "utf8")).split("\n")[0], expectedRuntimeLine);
 });
 
 test("zero exit without output receipts cannot claim success", async t => {
