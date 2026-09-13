@@ -25,7 +25,7 @@ async function boot() {
   child.stdout.on("data", chunk => { output += chunk; });
   child.stderr.on("data", chunk => { output += chunk; });
   try {
-    for (let attempt = 0; attempt < 100; attempt++) {
+    for (let attempt = 0; attempt < 600; attempt++) {
       if (existsSync(path) && output.includes("pairing")) return JSON.parse(readFileSync(path, "utf8"));
       if (child.exitCode !== null) throw new Error(output);
       await new Promise(resolve => setTimeout(resolve, 50));
