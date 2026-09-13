@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability / 安全漏洞
+    url: https://github.com/Aevella/aru-host/security/advisories/new
+    about: Report privately. Never open a public issue containing credentials, pairing links, or Host addresses.
+  - name: First-time setup handbook / 使用小手册
+    url: https://github.com/Aevella/aru-host/blob/main/docs/getting-started.zh-Hans.md
+    about: Pairing, creating a computer collaborator, and what to check when the phone cannot find the Host.
+  - name: Operator reference / 运行与部署参考
+    url: https://github.com/Aevella/aru-host/blob/main/docs/operator-reference.md
+    about: Routes, capability bundles, external wake bridge, MCP gateway, reverse proxies.
