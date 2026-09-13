@@ -11,6 +11,8 @@
   <a href="LICENSE"><img alt="Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-blue"></a>
 </p>
 
+<p align="center">English: <a href="README.en.md">README.en.md</a></p>
+
 Aru Host 是 Aru 的用户自有能力节点。它把电脑或 VPS 变成一台可由 iPhone 配对、查看和使用的 Host，同时让电脑协作者的身份、对话、页面、记忆、工具权限和运行状态留在用户自己的机器上。
 
 当前版本是 **0.31.1**，Host 协议版本为 `stub-0.30`。它与当前 Aru TestFlight 版本配套使用，并提供面向普通 Mac 用户的 Apple 签名、公证安装包，面向 Debian/Ubuntu 桌面用户的 `x64` / `arm64` 安装包，以及 **Windows x64 预览版（未签名）**。
