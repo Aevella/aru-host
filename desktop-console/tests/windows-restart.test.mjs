@@ -39,7 +39,7 @@ test("a failed stop propagates without an independent start fallback", async () 
 });
 
 test("setup and manual restart share stop-before-start ordering", async () => {
-  const source = await readFile(new URL("../../aru-selfhostctl-windows.ps1", import.meta.url), "utf8");
+  const source = (await readFile(new URL("../../aru-selfhostctl-windows.ps1", import.meta.url), "utf8")).replace(/\r\n/g, "\n");
   const restart = source.match(/function RestartCommand \{([\s\S]*?)\n\}/)[1];
   assert.match(restart, /RequireInstalled\s+StopHostTask\s+Start-ScheduledTask/);
   const setup = source.match(/function SetupRuntimeCommand \{([\s\S]*?)\n\}/)[1];
