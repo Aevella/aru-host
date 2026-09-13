@@ -356,6 +356,7 @@ ExecStart=/bin/bash "$CURRENT_LINK/run-node.sh"
 WorkingDirectory="$DATA_DIR"
 Restart=always
 RestartSec=3
+RestartPreventExitStatus=78
 UMask=0077
 StandardOutput=append:$LOG_DIR/stdout.log
 StandardError=append:$LOG_DIR/stderr.log

@@ -508,7 +508,7 @@ cat > "$LAUNCH_AGENT" <<EOF
   <key>StandardOutPath</key><string>$(xml_escape "$LOG_DIR/stdout.log")</string>
   <key>StandardErrorPath</key><string>$(xml_escape "$LOG_DIR/stderr.log")</string>
   <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
+  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
   <key>ThrottleInterval</key><integer>3</integer>
   <key>ProcessType</key><string>Background</string>
   <key>Umask</key><integer>63</integer>

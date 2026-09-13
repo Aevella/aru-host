@@ -17,6 +17,7 @@ Environment=ARU_SELFHOST_CONFIG_FILE=/etc/aru-selfhost/node.env
 ExecStart=/opt/aru-selfhost/current/run-node.sh
 Restart=on-failure
 RestartSec=3
+RestartPreventExitStatus=78
 TimeoutStopSec=30
 RuntimeDirectory=aru-selfhost
 RuntimeDirectoryMode=0700

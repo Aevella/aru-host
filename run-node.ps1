@@ -102,16 +102,29 @@ if (-not (Test-Path -LiteralPath $logDirectory)) {
 
 while ($true) {
   $writer = [IO.StreamWriter]::new($LogFile, $true, [Text.UTF8Encoding]::new($false))
+  $priorErrorAction = $ErrorActionPreference
   try {
     $writer.WriteLine("[run-node] starting Host Core at $([DateTime]::UtcNow.ToString('o'))")
     $writer.Flush()
+    # Windows PowerShell wraps native stderr in error records. Capture them
+    # without terminating the supervisor before it can inspect the exit code.
+    $ErrorActionPreference = "Continue"
     & $nodeBinary @arguments 2>&1 | ForEach-Object {
-      $writer.WriteLine($_.ToString())
-      $writer.Flush()
+      try {
+        $writer.WriteLine($_.ToString())
+        $writer.Flush()
+      } catch { throw }
     }
     $exitCode = $LASTEXITCODE
   } finally {
+    $ErrorActionPreference = $priorErrorAction
     $writer.Dispose()
+  }
+  if ($exitCode -eq 78) {
+    [IO.File]::AppendAllText($LogFile, "[run-node] Host state/configuration requires repair; automatic restart stopped. Repair and start Host again.`n")
+    # Complete the Scheduled Task successfully as well, so its failure-retry
+    # policy cannot restart this supervisor and bypass the admission decision.
+    exit 0
   }
   if ($exitCode -eq 0) { break }
   [IO.File]::AppendAllText($LogFile, "[run-node] Host Core exited with $exitCode; restarting in 3 seconds`n")
