@@ -384,6 +384,9 @@ for file in aru-selfhost-stub.mjs backup-settings.mjs conversation-turn-relay.mj
   [[ -f "$SOURCE_DIR/$file" ]] || die "payload is missing $file"
 done
 
+# Check with the incoming reader before switching to it (or rolling back).
+node "$SOURCE_DIR/aru-selfhost-stub.mjs" --data-dir "$(root_path /var/lib/aru-selfhost/data)" --container-runtime none --check-state
+
 release_stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 release_ref="$(printf '%s' "$SOURCE_REF" | tr '/ ' '--' | tr -cd 'A-Za-z0-9._-')"
 release_base="${release_ref:-bundle}-$release_stamp"

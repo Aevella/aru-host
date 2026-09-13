@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.31.3
+
+- Preserve unreadable or structurally invalid Host state and stop startup instead of replacing it with an empty identity.
+- Check state before installation switches releases; failed checks cannot trigger rollback into an older reader.
+- Explain state-read failures in desktop Consoles and retain retry after repair.
+- See [installation and upgrade details](docs/releases/0.31.3.md).
+
 ## 0.31.2
 
 - Accept valid native archive versions in encrypted backups while retaining envelope validation.

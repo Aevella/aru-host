@@ -331,6 +331,10 @@ try {
     $ReleaseVersion = $release.version
   }
 
+  # Admission is read-only and precedes service changes and rollback setup.
+  & $nodeBinary (Join-Path $SourceDir "aru-selfhost-stub.mjs") --data-dir $dataDir --container-runtime none --check-state
+  if ($LASTEXITCODE -ne 0) { Fail "Host state preflight failed; existing data and release were preserved." }
+
   $releaseStamp = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
   if ($ReleaseVersion) { $releaseRef = "host-$ReleaseVersion" } else { $releaseRef = "host-source" }
   $releaseId = "$releaseRef-$releaseStamp"

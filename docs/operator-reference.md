@@ -472,3 +472,9 @@ aru.example.com {
 
 Run with `--base-url https://aru.example.com --transport-kind public-https
 --node-kind vps` so the manifest advertises the HTTPS transport.
+
+## State-read failures (0.31.3+)
+
+Host Core initializes a fresh identity only when `state.json` is absent. Read errors, invalid JSON, and invalid root identity or collection structure stop startup with `host.state_unreadable`, before recovery and startup writes. Installers run the incoming reader's `--check-state` before switching releases; this mode does not create directories or write state.
+
+Preserve the original data directory and check filesystem access. If restoring, stop the Host and use a verified backup of the Host data, retaining the damaged copy for recovery. Retry with the current release after repair. Do not delete the state file to make startup succeed, and do not run an older release against damaged state. Metadata already overwritten by an older version is not reconstructed by this patch.

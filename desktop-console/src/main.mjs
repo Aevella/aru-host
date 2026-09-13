@@ -118,6 +118,7 @@ function registerIPC() {
     margin: 1, width: 360, color: { dark: "#4f4869", light: "#00000000" },
   }));
   ipcMain.handle("host:service", async (_event, action) => {
+    if (action === "start" || action === "restart") await platform.validateState(hostCoreRoot);
     if (action === "start") await platform.startService();
     else if (action === "restart") await platform.restartService();
     else throw new Error("Unsupported service action");
@@ -147,6 +148,7 @@ async function ensureHostInstalled() {
     await platform.runInstaller(hostCoreRoot, release.version);
     return;
   }
+  await platform.validateState(hostCoreRoot);
   await platform.startService();
 }
 

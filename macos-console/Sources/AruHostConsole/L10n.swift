@@ -253,6 +253,7 @@ enum L10n {
     static let hostCorePayloadMissing = value("error.host.core.payload.missing")
     static let hostCoreReleaseInvalid = value("error.host.core.release.invalid")
     static let hostCoreInstallerMissing = value("error.host.core.installer.missing")
+    static let hostStateUnreadable = value("error.host.state.unreadable")
     static let hostCoreInstallFailed = value("error.host.core.install.failed")
     static let thisMac = value("this.mac")
     static let pairingExplanation = value("pairing.explanation")

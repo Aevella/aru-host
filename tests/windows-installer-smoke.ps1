@@ -131,6 +131,27 @@ try {
   Check "phone identity publishes a real page over MCP" (-not [string]::IsNullOrWhiteSpace($publication.project.surfaceId))
   Start-Sleep -Seconds 1
 
+  # Reject a damaged-state upgrade before switching releases or restarting.
+  Stop-ScheduledTask -TaskName $taskName
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $instanceRoot "current\run-node.ps1") -ConfigFile (Join-Path $instanceRoot "config\node.env") -Stop
+  if ($LASTEXITCODE -ne 0) { throw "could not stop fixture Host" }
+  $statePath = Join-Path $instanceRoot "data\state.json"
+  $stateBytes = [IO.File]::ReadAllBytes($statePath)
+  $pointerPath = Join-Path $instanceRoot "current.release"
+  $pointerBefore = [IO.File]::ReadAllText($pointerPath)
+  try {
+    [IO.File]::WriteAllText($statePath, "{broken", [Text.UTF8Encoding]::new($false))
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer `
+      -Instance $Instance -BaseRoot $baseRoot -Port $Port -DisplayName "Windows Smoke" -SourceDir $selfhost *> (Join-Path $baseRoot "rejected.log")
+    Check "damaged state rejects upgrade" ($LASTEXITCODE -ne 0)
+    Check "damage reported explicitly" ([IO.File]::ReadAllText((Join-Path $baseRoot "rejected.log")) -match "host.state_unreadable")
+    Check "damaged bytes preserved" ([IO.File]::ReadAllText($statePath) -eq "{broken")
+    Check "release pointer preserved" ([IO.File]::ReadAllText($pointerPath) -eq $pointerBefore)
+    Check "no old Host restarted" ((Get-ScheduledTask -TaskName $taskName).State -ne "Running")
+  } finally {
+    [IO.File]::WriteAllBytes($statePath, $stateBytes)
+  }
+
   # 3. Upgrade retains previous release; rollback swaps back and stays healthy.
   & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer `
     -Instance $Instance -BaseRoot $baseRoot -Port $Port -DisplayName "Windows Smoke" -SourceDir $selfhost
