@@ -80,6 +80,17 @@ export function createWindowsPlatform({
       ], { timeout: 300_000, maxBuffer: 4 * 1024 * 1024, windowsHide: true });
     },
 
+    async validateState(hostCoreRoot) {
+      const contents = await readTextFile(join(instanceRoot, "config", "node.env"));
+      const value = (key) => contents.match(new RegExp(`^${key}=(.*)$`, "m"))?.[1].trim().replace(/^['"]|['"]$/g, "");
+      const nodeBinary = value("ARU_NODE_BINARY");
+      const dataDir = value("ARU_DATA_DIR");
+      if (!nodeBinary || !dataDir) throw new Error("Host configuration is missing its Node or data path");
+      await execFile(nodeBinary, [join(hostCoreRoot, "aru-selfhost-stub.mjs"),
+        "--data-dir", dataDir, "--container-runtime", "none", "--check-state"],
+      { timeout: 30_000, windowsHide: true });
+    },
+
     async setupContainerRuntime() {
       return runControl(["setup-runtime"], { timeout: 0 });
     },

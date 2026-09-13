@@ -52,6 +52,15 @@ struct BundledHostCoreInstaller: HostCoreInstalling {
             return
         }
 
+        try await Self.run(
+            executable: URL(filePath: "/bin/bash"),
+            arguments: ["-c",
+                #"source "$1"; exec "$ARU_NODE_BINARY" "$2" --data-dir "$ARU_DATA_DIR" --container-runtime none --check-state"#,
+                "aru-state-check",
+                baseRoot.appending(path: "instances/home/config/node.env").path,
+                payloadDirectory.appending(path: "aru-selfhost-stub.mjs").path,
+            ])
+
         // `kickstart` without `-k` starts a stopped helper but leaves an already
         // running Host and its in-flight work untouched.
         _ = try? await Self.run(
@@ -126,6 +135,7 @@ enum HostCoreInstallationError: LocalizedError, Equatable {
         case .installerMissing: return L10n.hostCoreInstallerMissing
         case .commandFailed(let detail):
             guard let detail, !detail.isEmpty else { return L10n.hostCoreInstallFailed }
+            if detail.contains("host.state_unreadable") { return L10n.hostStateUnreadable }
             return "\(L10n.hostCoreInstallFailed)\n\(detail)"
         }
     }

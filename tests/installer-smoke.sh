@@ -38,6 +38,18 @@ bash "$SELFHOST_DIR/install.sh" \
   --python-image "mirror.example/python@sha256:python" \
   --shell-image "mirror.example/alpine@sha256:shell"
 
+# Corrupt existing state must not switch the release or erase the original.
+old_pointer="$(readlink "$root/opt/aru-selfhost/current")"
+mkdir -p "$root/var/lib/aru-selfhost/data"
+printf '{broken' > "$root/var/lib/aru-selfhost/data/state.json"
+if bash "$SELFHOST_DIR/install.sh" --root "$root" --source-dir "$SELFHOST_DIR" --base-url http://100.64.0.10:8787 > "$artifacts/rejected.log" 2>&1; then
+  echo "corrupt state unexpectedly admitted" >&2; exit 1
+fi
+grep -Fq 'host.state_unreadable' "$artifacts/rejected.log"
+test "$(cat "$root/var/lib/aru-selfhost/data/state.json")" = '{broken'
+test "$(readlink "$root/opt/aru-selfhost/current")" = "$old_pointer"
+printf '{"serverId":"repaired-fixture"}' > "$root/var/lib/aru-selfhost/data/state.json"
+
 test -x "$root/usr/local/bin/aru-selfhost"
 test -x "$root/opt/aru-selfhost/current/server.mjs"
 test -f "$root/opt/aru-selfhost/current/plugin-supervisor.mjs"

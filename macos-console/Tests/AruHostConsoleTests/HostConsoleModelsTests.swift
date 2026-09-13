@@ -617,3 +617,9 @@ private final class StableOverviewURLProtocol: URLProtocol, @unchecked Sendable 
 
     override func stopLoading() {}
 }
+
+@Test func stateReadFailureExplainsPreservationInsteadOfInstallationRepair() {
+    let error = HostCoreInstallationError.commandFailed("host.state_unreadable: invalid_json")
+    #expect(error.errorDescription == L10n.hostStateUnreadable)
+    #expect(HostCoreInstallationError.commandFailed("unrelated").errorDescription != L10n.hostStateUnreadable)
+}

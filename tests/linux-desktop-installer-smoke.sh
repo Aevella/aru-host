@@ -28,6 +28,17 @@ grep -Fq 'ARU_NODE_KIND=home-linux' "$instance/config/node.env"
 grep -Fq '"home-linux"' "$instance/current/node-workspaces.mjs"
 grep -Fq "$instance/current/run-node.sh" "$unit"
 
+# A corrupt state must reject upgrades without switching back into an old reader.
+old_pointer="$(readlink "$instance/current")"
+printf '{broken' > "$instance/data/state.json"
+if install_version 0.28.2 > "$instance/rejected.log" 2>&1; then
+  echo "corrupt state unexpectedly admitted" >&2; exit 1
+fi
+grep -Fq 'host.state_unreadable' "$instance/rejected.log"
+test "$(cat "$instance/data/state.json")" = '{broken'
+test "$(readlink "$instance/current")" = "$old_pointer"
+printf '{"serverId":"repaired-fixture"}' > "$instance/data/state.json"
+
 printf 'durable-user-state\n' > "$instance/data/preserved.txt"
 install_version 0.28.2
 second="$(readlink "$instance/current")"

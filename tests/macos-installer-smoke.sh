@@ -49,6 +49,17 @@ install_instance() {
 
 install_instance alpha 18787
 alpha="$root/Library/Application Support/Aru Self-Hosted/instances/alpha"
+# A corrupt state must reject upgrades without switching back into an old reader.
+old_pointer="$(readlink "$alpha/current")"
+printf '{broken' > "$alpha/data/state.json"
+if install_instance alpha 18787 > "$alpha/rejected.log" 2>&1; then
+  echo "corrupt state unexpectedly admitted" >&2; exit 1
+fi
+grep -Fq 'host.state_unreadable' "$alpha/rejected.log"
+test "$(cat "$alpha/data/state.json")" = '{broken'
+test "$(readlink "$alpha/current")" = "$old_pointer"
+printf '{"serverId":"repaired-fixture"}' > "$alpha/data/state.json"
+
 test -x "$alpha/current/server.mjs"
 test -f "$alpha/current/collaborator-host.mjs"
 test -f "$alpha/current/mobile-collaborator-replicas.mjs"

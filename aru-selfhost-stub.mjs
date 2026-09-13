@@ -155,12 +155,14 @@ const MCP_PROTOCOL_VERSION = "2025-11-25";
 const mcpSessions = new Map();
 const activeJobProcesses = new Map();
 
+const statePath = join(config.dataDir, "state.json");
+const state = loadState();
+// Read-only admission used by installers and Consoles before any service or
+// release switch. It must not create files, rotate identity or run recovery.
+if (args["check-state"]) process.exit(0);
 mkdirSync(config.dataDir, { recursive: true });
 mkdirSync(join(config.dataDir, "packages"), { recursive: true });
 mkdirSync(join(config.dataDir, "artifacts"), { recursive: true });
-
-const statePath = join(config.dataDir, "state.json");
-const state = loadState();
 normalizeLegacyHostConsoleDevices();
 const recoveredJobIds = recoverInterruptedJobs();
 const nodeControl = createNodeControl({
@@ -2297,33 +2299,61 @@ function handleDiagnostics(req, res) {
 // State + helpers
 
 function loadState() {
-  if (existsSync(statePath)) {
+  let contents;
+  try {
+    contents = readFileSync(statePath, "utf8");
+  } catch (error) {
+    if (error.code !== "ENOENT") throw stateReadFailure(error.code);
+    // A dangling symlink is an existing state entry, not a new installation.
     try {
-      const loaded = JSON.parse(readFileSync(statePath, "utf8"));
-      loaded.devices ??= [];
-      loaded.packages ??= [];
-      loaded.artifacts ??= [];
-      loaded.jobs ??= [];
-      loaded.plugins ??= [];
-      loaded.pluginDrafts ??= [];
-      for (const plugin of loaded.plugins) {
-        plugin.events ??= [];
-        plugin.lastErrorMessage ??= null;
-      }
-      loaded.agentDriverProbes ??= [];
-      loaded.hostedCollaborators ??= [];
-      loaded.nodeWorkspaces ??= [];
-      loaded.conversationTurns ??= [];
-      loaded.jobPolicy ??= {
-        schema: WORKSPACE_JOB_POLICY_SCHEMA,
-        defaultMaximumRuntimeSeconds: OFFICIAL_DEFAULT_MAXIMUM_RUNTIME_SECONDS,
-        updatedAt: Date.now(),
-      };
-      return loaded;
-    } catch {
-      log("state.json unreadable; starting fresh");
+      lstatSync(statePath);
+    } catch (entryError) {
+      if (entryError.code === "ENOENT") return freshState();
+      throw stateReadFailure(entryError.code);
+    }
+    throw stateReadFailure("missing_symlink_target");
+  }
+  let loaded;
+  try { loaded = JSON.parse(contents); }
+  catch { throw stateReadFailure("invalid_json"); }
+  const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
+  if (!object(loaded) || typeof loaded.serverId !== "string" || !loaded.serverId.trim()) {
+    throw stateReadFailure("invalid_identity");
+  }
+  // Missing optional collections occur in older releases. A present but
+  // malformed collection is not an empty collection and must never be saved.
+  const collections = ["devices", "packages", "artifacts", "jobs", "plugins",
+    "pluginDrafts", "agentDriverProbes", "hostedCollaborators", "nodeWorkspaces",
+    "conversationTurns", "mobileCollaboratorIdentities", "providerProfiles",
+    "remotePushRegistrations", "liveActivityRegistrations", "wakeBridgeEndpoints", "wakeBridgeEvents"];
+  for (const key of collections) {
+    if (loaded[key] !== undefined && (!Array.isArray(loaded[key]) || !loaded[key].every(object))) {
+      throw stateReadFailure("invalid_collection");
     }
   }
+  loaded.devices ??= [];
+  loaded.packages ??= [];
+  loaded.artifacts ??= [];
+  loaded.jobs ??= [];
+  loaded.plugins ??= [];
+  loaded.pluginDrafts ??= [];
+  for (const plugin of loaded.plugins) {
+    plugin.events ??= [];
+    plugin.lastErrorMessage ??= null;
+  }
+  loaded.agentDriverProbes ??= [];
+  loaded.hostedCollaborators ??= [];
+  loaded.nodeWorkspaces ??= [];
+  loaded.conversationTurns ??= [];
+  loaded.jobPolicy ??= {
+    schema: WORKSPACE_JOB_POLICY_SCHEMA,
+    defaultMaximumRuntimeSeconds: OFFICIAL_DEFAULT_MAXIMUM_RUNTIME_SECONDS,
+    updatedAt: Date.now(),
+  };
+  return loaded;
+}
+
+function freshState() {
   return {
     serverId: `stub-${randomBytes(6).toString("hex")}`,
     devices: [],
@@ -2343,6 +2373,10 @@ function loadState() {
       updatedAt: Date.now(),
     },
   };
+}
+
+function stateReadFailure(reason) {
+  return new Error(`host.state_unreadable: Local Host state could not be read (${reason}). Startup stopped; state.json has not been replaced. Preserve the original file and check permissions or restore a verified backup. Do not delete the data directory or reinstall with data removal.`);
 }
 
 function saveState() {

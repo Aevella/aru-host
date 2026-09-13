@@ -51,6 +51,14 @@ export function createLinuxPlatform({
       ], { timeout: 300_000, maxBuffer: 4 * 1024 * 1024 });
     },
 
+    async validateState(hostCoreRoot) {
+      await execFile("/bin/bash", ["-c",
+        'source "$1"; exec "$ARU_NODE_BINARY" "$2" --data-dir "$ARU_DATA_DIR" --container-runtime none --check-state',
+        "aru-state-check", join(instanceRoot, "config", "node.env"),
+        join(hostCoreRoot, "aru-selfhost-stub.mjs"),
+      ], { timeout: 30_000 });
+    },
+
     setupContainerRuntime: () => execFile(controlPath, ["--instance", "home", "setup-runtime"], { maxBuffer: 4 * 1024 * 1024 }),
 
     startService: () => serviceAction("start"),

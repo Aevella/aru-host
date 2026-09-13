@@ -271,6 +271,13 @@ if [[ -z "$RELEASE_VERSION" && -f "$SOURCE_DIR/release.json" ]]; then
     || die "invalid release metadata"
 fi
 
+# Reject unreadable existing state before switching releases or stopping the
+# service: an automatic rollback must not start an older destructive reader.
+check_state() {
+  "$NODE_BINARY" "$SOURCE_DIR/aru-selfhost-stub.mjs" --data-dir "$DATA_DIR" --container-runtime none --check-state
+}
+check_state
+
 release_stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 release_ref="${RELEASE_VERSION:+host-$RELEASE_VERSION}"
 [[ -n "$release_ref" ]] || release_ref="$(printf '%s' "$SOURCE_REF" | tr '/ ' '--' | tr -cd 'A-Za-z0-9._-')"
@@ -371,6 +378,7 @@ start_service() {
 
 if [[ "$SKIP_START" != "true" ]] && ! start_service; then
   stop_service
+  check_state || die "state check failed; previous release was not restarted"
   [[ -f "$ROLLBACK_TMP/node.env" ]] && cp -p "$ROLLBACK_TMP/node.env" "$NODE_ENV"
   [[ -f "$ROLLBACK_TMP/install.env" ]] && cp -p "$ROLLBACK_TMP/install.env" "$INSTALL_ENV"
   [[ -f "$ROLLBACK_TMP/$UNIT_NAME" ]] && cp -p "$ROLLBACK_TMP/$UNIT_NAME" "$UNIT_PATH"

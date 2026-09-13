@@ -491,3 +491,5 @@
 "container.setup.busy" = "Preparing and verifying…";
 "container.setup.success" = "Verified. Host has enabled container jobs.";
 "container.setup.restartpending" = "Containers passed verification, but Host has not reported the enabled capability. Check the service and refresh.";
+
+"error.host.state.unreadable" = "Local Host state could not be read. Startup stopped and the original file was preserved. Check permissions or restore a verified backup, then retry. Do not delete the data directory.";

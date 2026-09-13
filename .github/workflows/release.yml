@@ -28,6 +28,7 @@ jobs:
 
       - name: Verify Host Core and Console
         run: |
+          node tests/state-startup-smoke.mjs
           node tests/wake-bridge-smoke.mjs
           node tests/wake-send-smoke.mjs
           bash tests/macos-installer-smoke.sh

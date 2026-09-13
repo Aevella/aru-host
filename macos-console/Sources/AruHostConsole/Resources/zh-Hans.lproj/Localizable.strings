@@ -491,3 +491,5 @@
 "container.setup.busy" = "正在准备与验证…";
 "container.setup.success" = "验证通过，Host 已启用容器任务。";
 "container.setup.restartpending" = "容器验证通过，但尚未读到 Host 启用状态。请检查服务并刷新。";
+
+"error.host.state.unreadable" = "本地 Host 状态无法读取。已停止启动并保留原文件。请检查文件权限，或从已验证的备份恢复后重试；不要删除数据目录。";
