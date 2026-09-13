@@ -141,9 +141,16 @@ try {
   $pointerBefore = [IO.File]::ReadAllText($pointerPath)
   try {
     [IO.File]::WriteAllText($statePath, "{broken", [Text.UTF8Encoding]::new($false))
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer `
-      -Instance $Instance -BaseRoot $baseRoot -Port $Port -DisplayName "Windows Smoke" -SourceDir $selfhost *> (Join-Path $baseRoot "rejected.log")
-    Check "damaged state rejects upgrade" ($LASTEXITCODE -ne 0)
+    # Windows PowerShell promotes redirected native stderr to an error record.
+    # This invocation is expected to fail; capture its exit before restoring Stop.
+    $priorErrorAction = $ErrorActionPreference
+    try {
+      $ErrorActionPreference = "Continue"
+      & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer `
+        -Instance $Instance -BaseRoot $baseRoot -Port $Port -DisplayName "Windows Smoke" -SourceDir $selfhost *> (Join-Path $baseRoot "rejected.log")
+      $rejectedExit = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $priorErrorAction }
+    Check "damaged state rejects upgrade" ($rejectedExit -ne 0)
     Check "damage reported explicitly" ([IO.File]::ReadAllText((Join-Path $baseRoot "rejected.log")) -match "host.state_unreadable")
     Check "damaged bytes preserved" ([IO.File]::ReadAllText($statePath) -eq "{broken")
     Check "release pointer preserved" ([IO.File]::ReadAllText($pointerPath) -eq $pointerBefore)

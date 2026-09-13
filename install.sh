@@ -384,9 +384,6 @@ for file in aru-selfhost-stub.mjs backup-settings.mjs conversation-turn-relay.mj
   [[ -f "$SOURCE_DIR/$file" ]] || die "payload is missing $file"
 done
 
-# Check with the incoming reader before switching to it (or rolling back).
-node "$SOURCE_DIR/aru-selfhost-stub.mjs" --data-dir "$(root_path /var/lib/aru-selfhost/data)" --container-runtime none --check-state
-
 release_stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 release_ref="$(printf '%s' "$SOURCE_REF" | tr '/ ' '--' | tr -cd 'A-Za-z0-9._-')"
 release_base="${release_ref:-bundle}-$release_stamp"
@@ -426,6 +423,16 @@ install -m 0644 "$SOURCE_DIR/source-plugin-runtime.mjs" "$release_dir/source-plu
 install -m 0644 "$SOURCE_DIR/source-plugin-runner.mjs" "$release_dir/source-plugin-runner.mjs"
 install -m 0755 "$SOURCE_DIR/run-node.sh" "$release_dir/run-node.sh"
 install -m 0755 "$SOURCE_DIR/install.sh" "$release_dir/install.sh"
+# Check as the service identity, not root, so permission failures cannot be
+# missed and then trigger rollback into an older destructive reader.
+check_state() {
+  if [[ -n "$INSTALL_ROOT" ]]; then
+    node "$release_dir/server.mjs" --data-dir "$(root_path /var/lib/aru-selfhost/data)" --container-runtime none --check-state
+  else
+    runuser -u "$SERVICE_USER" -- node "$release_dir/server.mjs" --data-dir /var/lib/aru-selfhost/data --container-runtime none --check-state
+  fi
+}
+check_state
 old_release="$(readlink "$(root_path /opt/aru-selfhost/current)" 2>/dev/null || true)"
 if [[ -n "$old_release" ]]; then
   ln -sfn "$old_release" "$(root_path /opt/aru-selfhost/previous)"
@@ -558,6 +565,7 @@ if [[ "$SKIP_START" != "true" ]]; then
   fi
   sleep 1
   if ! curl -fsS "http://127.0.0.1:$PORT/.well-known/aru.json" >/dev/null; then
+    check_state || die "state check failed; previous release was not restarted"
     if [[ -n "$old_release" ]]; then
       ln -sfn "$old_release" /opt/aru-selfhost/current
       systemctl restart "$SERVICE_NAME" || true
