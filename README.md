@@ -45,8 +45,8 @@ Aru 是 iPhone 上的 AI 协作者应用，本仓库不包含它。Aru Host 是 
    New-NetFirewallRule -DisplayName "Aru Host (home)" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 8787 -Profile Private,Domain
    ```
 
-2. 这条规则只对「专用网络」生效。打开 设置 → 网络和 Internet → 当前 Wi-Fi，把网络配置文件从「公用网络」改成「专用网络」。Windows 默认把新连接的 Wi-Fi 当作公用网络。
-3. 手机和电脑连同一个 Wi-Fi，关掉 VPN。iPhone 第一次访问时会询问「本地网络」权限，需要允许；已经拒绝过的在 设置 → Aru → 本地网络 里打开。
+2. 这条规则对「专用网络」和「域网络」生效。打开 设置 → 网络和 Internet → 当前 Wi-Fi，把网络配置文件从「公用网络」改成「专用网络」。Windows 默认把新连接的 Wi-Fi 当作公用网络。
+3. 使用局域网配对时，手机和电脑连同一个 Wi-Fi；若 VPN 或代理阻断了局域网访问，可临时暂停后重试。使用 Tailscale 配对时保留 Tailscale 连接。iPhone 第一次访问时会询问「本地网络」权限，需要允许；已经拒绝过的在 设置 → Aru → 本地网络 里打开。
 4. 用手机 Safari 直接打开 `http://电脑IP:端口/.well-known/aru.json`。能看到一段 JSON，网络就通了，回 Aru 重新生成二维码配对；打不开，问题仍在上面三步里。
 
 ## 可选：运行脚本和容器插件

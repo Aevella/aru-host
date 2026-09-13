@@ -15,7 +15,7 @@
 
 Aru Host is the user-owned capability node for [Aru](#what-is-aru), an AI collaborator app for iPhone. It turns a Mac, a Windows or Linux desktop, or a Linux VPS into a Host that an iPhone can pair with, browse, and use, while a computer collaborator's identity, conversations, pages, memory, tool permissions, and runtime state stay on the user's own machine.
 
-The current release is **0.31.1** with Host protocol `stub-0.30`. It ships an Apple-signed and notarized macOS package, `x64` / `arm64` packages for Debian/Ubuntu desktops, and an **unsigned Windows x64 preview**. Package contents and upgrade notes are in the [0.31.1 release notes](docs/releases/0.31.1.md) (Chinese).
+The current release is **0.31.2** with Host protocol `stub-0.30`. It ships an Apple-signed and notarized macOS package, `x64` / `arm64` packages for Debian/Ubuntu desktops, and an **unsigned Windows x64 preview**. Package contents and upgrade notes are in the [0.31.2 release notes](docs/releases/0.31.2.md) (Chinese).
 
 ## What is Aru
 
@@ -64,8 +64,8 @@ Closing the Console window does not stop Host Core. Upgrades keep collaborators,
    New-NetFirewallRule -DisplayName "Aru Host (home)" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 8787 -Profile Private,Domain
    ```
 
-2. The rule applies to private networks only. Open Settings → Network & Internet → the current Wi-Fi and switch the network profile from Public to Private; Windows treats new Wi-Fi networks as public by default.
-3. Keep the phone and the computer on the same Wi-Fi with VPNs off, and allow Aru's Local Network permission on the iPhone (Settings → Aru → Local Network).
+2. The rule applies to Private and Domain network profiles. Open Settings → Network & Internet → the current Wi-Fi and switch the network profile from Public to Private; Windows treats new Wi-Fi networks as public by default.
+3. For LAN pairing, keep the phone and computer on the same Wi-Fi. Temporarily pause a VPN or proxy only if it blocks LAN access; keep Tailscale connected when pairing over Tailscale. Allow Aru's Local Network permission on the iPhone (Settings → Aru → Local Network).
 4. Open `http://<computer-ip>:<port>/.well-known/aru.json` in Safari on the phone. If JSON appears, the network path works; regenerate the QR code and pair again. If it does not, the cause is still in the steps above.
 
 Run from source with nothing but Node.js:
