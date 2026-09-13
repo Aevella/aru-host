@@ -5,8 +5,11 @@ const SAFE_PATHS = [
   ["PUT", /^\/aru\/v1\/(node-settings|backups\/settings|jobs\/policy|provider-profiles\/provider_[A-Fa-f0-9-]+)$/],
   ["DELETE", /^\/aru\/v1\/(backups|artifacts)\/[A-Za-z0-9._~-]+$/],
   ["GET", /^\/aru\/v1\/(backups|artifacts)\/[A-Za-z0-9._~-]+$/],
-  ["GET", /^\/aru\/v1\/hosted-collaborators\/[A-Za-z0-9_-]+\/(surfaces|projects|conversations|cognition)$/],
-  ["POST", /^\/aru\/v1\/hosted-collaborators\/[A-Za-z0-9_-]+\/(surfaces|projects|conversations)$/],
+  ["GET", /^\/aru\/v1\/hosted-collaborators\/[A-Za-z0-9_-]+\/(surfaces|projects|conversations|cognition|initiative)$/],
+  ["POST", /^\/aru\/v1\/hosted-collaborators\/[A-Za-z0-9_-]+\/(surfaces|projects|conversations|initiative)$/],
+  // Proactive rules: the studio edits, pauses, resumes, archives and runs them.
+  ["PUT", /^\/aru\/v1\/hosted-collaborators\/[A-Za-z0-9_-]+\/initiative\/rules\/[A-Za-z0-9_-]+$/],
+  ["POST", /^\/aru\/v1\/hosted-collaborators\/[A-Za-z0-9_-]+\/initiative\/rules\/[A-Za-z0-9_-]+\/(?:archive|restore|run)$/],
   ["PUT", /^\/aru\/v1\/hosted-collaborators\/[A-Za-z0-9_-]+(?:\/(?:cognition|conversations\/[A-Za-z0-9_-]+\/(?:messages|approvals\/[A-Za-z0-9_-]+)|surfaces\/[A-Za-z0-9_-]+(?:\/runtime)?))?$/],
   ["POST", /^\/aru\/v1\/hosted-collaborators\/[A-Za-z0-9_-]+\/conversations\/[A-Za-z0-9_-]+\/turns\/[A-Za-z0-9_-]+\/cancel$/],
   ["POST", /^\/aru\/v1\/hosted-collaborators\/[A-Za-z0-9_-]+\/surfaces\/[A-Za-z0-9_-]+\/(?:rollback|archive|restore)$/],

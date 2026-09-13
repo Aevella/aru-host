@@ -27,6 +27,21 @@ test("Host request allowlist admits owned routes and blocks traversal", () => {
   assert.deepEqual(validateHostRequest("POST", "/aru/v1/hosted-collaborators/root_1/projects/project_1/publish"), {
     method: "POST", path: "/aru/v1/hosted-collaborators/root_1/projects/project_1/publish",
   });
+  assert.deepEqual(validateHostRequest("GET", "/aru/v1/hosted-collaborators/hostcol_1/initiative"), {
+    method: "GET", path: "/aru/v1/hosted-collaborators/hostcol_1/initiative",
+  });
+  assert.deepEqual(validateHostRequest("POST", "/aru/v1/hosted-collaborators/hostcol_1/initiative"), {
+    method: "POST", path: "/aru/v1/hosted-collaborators/hostcol_1/initiative",
+  });
+  assert.deepEqual(validateHostRequest("PUT", "/aru/v1/hosted-collaborators/hostcol_1/initiative/rules/rule_1"), {
+    method: "PUT", path: "/aru/v1/hosted-collaborators/hostcol_1/initiative/rules/rule_1",
+  });
+  for (const action of ["archive", "restore", "run"]) {
+    assert.deepEqual(validateHostRequest("POST", `/aru/v1/hosted-collaborators/hostcol_1/initiative/rules/rule_1/${action}`), {
+      method: "POST", path: `/aru/v1/hosted-collaborators/hostcol_1/initiative/rules/rule_1/${action}`,
+    });
+  }
+  assert.throws(() => validateHostRequest("DELETE", "/aru/v1/hosted-collaborators/hostcol_1/initiative/rules/rule_1"));
   assert.throws(() => validateHostRequest("GET", "https://example.com"));
   assert.throws(() => validateHostRequest("GET", "/aru/v1/../state"));
   assert.throws(() => validateHostRequest("POST", "/aru/v1/diagnostics"));

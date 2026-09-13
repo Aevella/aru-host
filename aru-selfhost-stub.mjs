@@ -1492,8 +1492,11 @@ function validateEncryptedPackageHeader(header) {
     throw new HttpError(400, "package.invalid_header", "encrypted package cryptographic header is invalid");
   }
   const inner = header.metadata;
-  if (!inner || typeof inner !== "object" ||
-      inner.archiveFormat !== "polaris-native-archive" || inner.archiveVersion !== 1 ||
+  // The Host stores opaque ciphertext; archive reader compatibility belongs to
+  // the restoring client, not this encrypted-container validator.
+  if (!inner || typeof inner !== "object" || Array.isArray(inner) ||
+      inner.archiveFormat !== "polaris-native-archive" ||
+      !Number.isSafeInteger(inner.archiveVersion) || inner.archiveVersion < 1 ||
       !Number.isSafeInteger(inner.plaintextByteCount) || inner.plaintextByteCount < 1) {
     throw new HttpError(400, "package.invalid_metadata", "encrypted package archive metadata is invalid");
   }
