@@ -1,10 +1,33 @@
-# Aru Host
+<p align="center">
+  <img src="docs/assets/aru-is-here.jpg" width="420" alt="虹彩的波浪里躲着三只毛茸茸的小家伙，画面下方写着 Aru is here.">
+</p>
+
+<h1 align="center">Aru Host</h1>
+
+<p align="center">Aru 住在你的 iPhone 里。Aru Host 让它也住进你自己的电脑。</p>
+
+<p align="center">
+  <a href="https://github.com/Aevella/aru-host/releases/latest"><img alt="最新版本" src="https://img.shields.io/github/v/release/Aevella/aru-host?label=%E6%9C%80%E6%96%B0%E7%89%88%E6%9C%AC"></a>
+  <a href="LICENSE"><img alt="Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-blue"></a>
+</p>
 
 Aru Host 是 Aru 的用户自有能力节点。它把电脑或 VPS 变成一台可由 iPhone 配对、查看和使用的 Host，同时让电脑协作者的身份、对话、页面、记忆、工具权限和运行状态留在用户自己的机器上。
 
 当前版本是 **0.31.1**，Host 协议版本为 `stub-0.30`。它与当前 Aru TestFlight 版本配套使用，并提供面向普通 Mac 用户的 Apple 签名、公证安装包，面向 Debian/Ubuntu 桌面用户的 `x64` / `arm64` 安装包，以及 **Windows x64 预览版（未签名）**。
 
 安装包、更新范围与升级说明见 [0.31.1 发布说明](docs/releases/0.31.1.md)。
+
+## 第一次来？
+
+Aru 是 iPhone 上的 AI 协作者应用，本仓库不包含它。Aru Host 是 Aru 的电脑端：装在自己的 Mac、Windows、Linux 电脑或 VPS 上，用 iPhone 扫码配对后，电脑协作者的身份、对话、页面、记忆、工具权限和运行状态都留在你自己的机器上，手机只是一扇随时能推开的窗。
+
+接入只有三步：
+
+1. 按下面对应平台的说明安装 Aru Host；
+2. 在电脑的 Aru Host 首页点「连接手机」，iPhone 打开 **Aru → 自托管节点 → ＋ → 扫码连接**；
+3. 在 **电脑协作者 → 新建协作者** 请一位协作者入住，从手机或电脑发出第一句话。
+
+完整的图文流程见[中文使用小手册](docs/getting-started.zh-Hans.md)。要把自己的服务或设备接进来，接口与路由在[运行与部署参考](docs/operator-reference.md)。
 
 ## Windows：预览版安装
 
