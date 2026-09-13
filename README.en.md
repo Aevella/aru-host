@@ -56,6 +56,18 @@ Phone-local collaborators and computer collaborators never share a database. The
 
 Closing the Console window does not stop Host Core. Upgrades keep collaborators, conversations, pages, permissions, and settings.
 
+**Windows: the phone reports `network request failed` after scanning.** Check in this order:
+
+1. Click **Allow through firewall** on the Aru Host overview and approve the elevation. If the "firewall has not opened LAN access" pill stays, add the rule from an administrator PowerShell (use the port shown in the QR code):
+
+   ```powershell
+   New-NetFirewallRule -DisplayName "Aru Host (home)" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 8787 -Profile Private,Domain
+   ```
+
+2. The rule applies to private networks only. Open Settings → Network & Internet → the current Wi-Fi and switch the network profile from Public to Private; Windows treats new Wi-Fi networks as public by default.
+3. Keep the phone and the computer on the same Wi-Fi with VPNs off, and allow Aru's Local Network permission on the iPhone (Settings → Aru → Local Network).
+4. Open `http://<computer-ip>:<port>/.well-known/aru.json` in Safari on the phone. If JSON appears, the network path works; regenerate the QR code and pair again. If it does not, the cause is still in the steps above.
+
 Run from source with nothing but Node.js:
 
 ```bash
