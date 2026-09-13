@@ -8,9 +8,20 @@ import { desktopReleaseAsset } from "../runtime.mjs";
 
 const POWERSHELL = "powershell.exe";
 const POWERSHELL_FLAGS = ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass"];
+const FIREWALL_RULE_MISSING = 4;
+const FIREWALL_RULE_CREATE_FAILED = 5;
+export const FIREWALL_FAILURE_PREFIX = "firewall-rule-missing:";
 
 function psQuote(value) {
   return `'${String(value).replace(/'/g, "''")}'`;
+}
+
+// The renderer keys its localized guidance off this prefix; the port lets it
+// print the exact manual rule for the installed instance.
+function firewallFailure(code, port) {
+  const error = new Error(`${FIREWALL_FAILURE_PREFIX}${port}:${code ?? "unknown"}`);
+  error.code = code ?? null;
+  return error;
 }
 
 export function createWindowsPlatform({
@@ -78,10 +89,9 @@ export function createWindowsPlatform({
     },
 
     async restartService() {
-      await runPowerShellCommand(
-        `Stop-ScheduledTask -TaskName ${psQuote(taskName)} -ErrorAction SilentlyContinue; `
-        + `Start-ScheduledTask -TaskName ${psQuote(taskName)}`,
-      );
+      // Share the control tool's task-exit wait and instance-scoped native
+      // process cleanup. Immediate Stop/Start may leave the old Host running.
+      await runControl(["restart", "-BaseRoot", baseRoot]);
     },
 
     async uninstallHost() {
@@ -158,6 +168,9 @@ export function createWindowsPlatform({
 
     // Recovery path for the blocked-LAN state: one explicit UAC consent adds a
     // private-profile inbound rule scoped to the Host's Node binary and port.
+    // The elevated process verifies the rule itself and reports through its
+    // exit code; "done" is only claimed once the rule can be read back, so a
+    // silent failure inside the elevated shell cannot masquerade as success.
     async configureFirewall() {
       let port = 8787;
       let program = null;
@@ -171,14 +184,22 @@ export function createWindowsPlatform({
       } catch {}
       const rule = [
         `New-NetFirewallRule -DisplayName ${psQuote(taskName)}`,
-        "-Direction Inbound -Action Allow -Protocol TCP",
+        "-Direction Inbound -Action Allow -Protocol TCP -ErrorAction Stop",
         `-LocalPort ${port} -Profile Private,Domain`,
         program ? `-Program ${psQuote(program)}` : null,
-        "| Out-Null",
       ].filter(Boolean).join(" ");
-      const elevated = `Start-Process -Verb RunAs -Wait -WindowStyle Hidden powershell.exe -ArgumentList `
-        + `'-NoProfile','-NonInteractive','-Command',${psQuote(rule)}`;
-      await runPowerShellCommand(elevated, { timeout: 120_000 });
+      const verify = `if(Get-NetFirewallRule -DisplayName ${psQuote(taskName)} -ErrorAction SilentlyContinue){exit 0}else{exit ${FIREWALL_RULE_MISSING}}`;
+      const inner = `try { ${rule} | Out-Null } catch { exit ${FIREWALL_RULE_CREATE_FAILED} }; ${verify}`;
+      const elevated = `$p = Start-Process -Verb RunAs -Wait -PassThru -WindowStyle Hidden powershell.exe -ArgumentList `
+        + `'-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-Command',${psQuote(inner)}; exit $p.ExitCode`;
+      try {
+        await runPowerShellCommand(elevated, { timeout: 120_000 });
+      } catch (error) {
+        throw firewallFailure(error?.code, port);
+      }
+      if ((await this.firewallState()) !== "configured") {
+        throw firewallFailure(FIREWALL_RULE_MISSING, port);
+      }
     },
   };
 }

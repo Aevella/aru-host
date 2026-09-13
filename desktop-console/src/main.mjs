@@ -4,6 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import QRCode from "qrcode";
 import { parsePairingLink, readInstalledVersion, readPort, validateHostRequest } from "./runtime.mjs";
+import { waitForContainerRuntime } from "./container-readiness.mjs";
 import { createDesktopPlatform } from "./platform/index.mjs";
 
 const sourceRoot = dirname(fileURLToPath(import.meta.url));
@@ -65,16 +66,8 @@ function registerIPC() {
     if (containerSetupAttempt) return containerSetupAttempt;
     containerSetupAttempt = (async () => {
       await platform.setupContainerRuntime();
-      // The control command returns after restarting the service. Read its live
-      // manifest, not the saved config, before presenting an enabled state.
-      for (let attempt = 0; attempt < 40; attempt++) {
-        try {
-          const manifest = await requestHost("GET", "/.well-known/aru.json", undefined, false);
-          if (manifest.capabilities?.["workspace-runtime"]?.enabled) return manifest;
-        } catch {}
-        await new Promise(resolve => setTimeout(resolve, 500));
-      }
-      throw new Error("Containers passed verification, but Host has not reported the enabled capability. Check Host service status and refresh.");
+      return waitForContainerRuntime(signal =>
+        requestHost("GET", "/.well-known/aru.json", undefined, false, {}, signal));
     })();
     try { return await containerSetupAttempt; }
     finally { containerSetupAttempt = undefined; }
@@ -174,7 +167,7 @@ async function issuePairingLink() {
   return parsePairingLink(await platform.issuePairingOutput());
 }
 
-async function requestHost(method, path, body, authenticated = true, extraHeaders = {}) {
+async function requestHost(method, path, body, authenticated = true, extraHeaders = {}, signal) {
   const request = validateHostRequest(method, path);
   let contents = "";
   try { contents = await readFile(platform.nodeEnvPath, "utf8"); } catch {}
@@ -187,6 +180,7 @@ async function requestHost(method, path, body, authenticated = true, extraHeader
     headers.Authorization = `Bearer ${credential}`;
   }
   const response = await fetch(url, {
+    signal,
     method: request.method,
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),

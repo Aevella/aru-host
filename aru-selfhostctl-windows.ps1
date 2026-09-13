@@ -1,5 +1,5 @@
 # Aru Host for Windows — instance control tool.
-# Same eight-verb contract as aru-selfhostctl-linux / aru-selfhostctl-macos,
+# Instance lifecycle and operations, like aru-selfhostctl-linux / aru-selfhostctl-macos,
 # expressed over the per-user Scheduled Task and junction release slots.
 param(
   [string]$Instance = "home",
@@ -21,6 +21,7 @@ Usage: aru-selfhost [-Instance NAME] <command>
 
   status                 Show Scheduled Task state and installed release.
   pairing                Restart and print a fresh ten-minute pairing link.
+  restart                Stop this Host completely, then start its service.
   setup-runtime          Verify installed containers, prepare images, and restart Host.
   doctor                 Verify runtime, task, manifest, capabilities, firewall.
   logs                   Follow the private Host log.
@@ -226,17 +227,23 @@ function UninstallCommand([string[]]$extra) {
   exit $LASTEXITCODE
 }
 
+function RestartCommand {
+  RequireInstalled
+  StopHostTask
+  Start-ScheduledTask -TaskName $taskName
+}
+
 function SetupRuntimeCommand {
   RequireInstalled
   $node = ReadEnvFile $nodeEnv
   & $node["ARU_NODE_BINARY"] (Join-Path $currentLink "container-runtime-setup.mjs") $nodeEnv
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-  StopHostTask
-  Start-ScheduledTask -TaskName $taskName
+  RestartCommand
 }
 
 switch ($Command) {
   "setup-runtime" { SetupRuntimeCommand }
+  "restart" { RestartCommand }
 
   "status" { StatusCommand }
   "pairing" { PairingCommand }

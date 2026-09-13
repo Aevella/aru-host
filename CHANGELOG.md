@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.31.2
+
+- Accept valid native archive versions in encrypted backups while retaining envelope validation.
+- Unify Windows restarts through instance-scoped stop and cleanup.
+- Bound container readiness requests and distinguish unavailable service from unavailable runtime.
+- Admit desktop initiative routes and propagate Windows firewall creation failures.
+- See [installation and upgrade details](docs/releases/0.31.2.md).
+
 ## 0.31.1
 
 - Give the signed macOS Console its own checked-in high-resolution Aru Host icon, bundle it explicitly, and declare the productivity-app identity in the application metadata.

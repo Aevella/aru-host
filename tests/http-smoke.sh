@@ -463,7 +463,7 @@ const header = {
   kdfIterations: 120000,
   metadata: {
     archiveFormat: "polaris-native-archive",
-    archiveVersion: 1,
+    archiveVersion: 14,
     binaryBytes: 0,
     binaryCount: 0,
     createdAt: 1700,
@@ -513,6 +513,7 @@ curl -fsS "http://127.0.0.1:$port/aru/v1/backups" \
       let b="";process.stdin.on("data",c=>b+=c);process.stdin.on("end",()=>{
         const p=JSON.parse(b).packages?.[0];
         if(p?.metadata?.envelopeVersion!==2)process.exit(1);
+        if(p?.metadata?.archiveVersion!==14)process.exit(4);
         if(p?.metadata?.envelopeAlgorithm!=="AES-256-GCM-CHUNKED")process.exit(2);
         if(p?.metadata?.packageId!=="smoke-package")process.exit(3);
       });'
@@ -520,6 +521,7 @@ curl -fsS "http://127.0.0.1:$port/aru/v1/backups/$remote_backup_id" \
   -H "authorization: Bearer $credential" \
   -o "$data_dir/downloaded-backup.aruencpkg"
 cmp "$backup_package" "$data_dir/downloaded-backup.aruencpkg"
+node "$SELFHOST_DIR/tests/backup-metadata-smoke.mjs" "http://127.0.0.1:$port" "$credential" "$backup_package"
 
 curl -fsS "http://127.0.0.1:$port/aru/v1/backups/settings" \
   -H "authorization: Bearer $credential" \
@@ -588,6 +590,12 @@ retained_old_status="$(curl -sS -o "$data_dir/retained-old.json" -w '%{http_code
   "http://127.0.0.1:$port/aru/v1/backups/$remote_backup_id" \
   -H "authorization: Bearer $credential")"
 test "$retained_old_status" = "404"
+
+# Focused vault contract run; the default still executes the complete suite.
+if [[ "${ARU_HTTP_SMOKE_BACKUP_ONLY:-0}" == "1" ]]; then
+  echo "backup HTTP smoke passed"
+  exit 0
+fi
 
 plugin_supervisor_smoke_before_restart "http://127.0.0.1:$port" "$credential" "$data_dir"
 
@@ -937,7 +945,7 @@ mcp_call_tool "aru_plugin_enable" '{"pluginId":"memory.example"}' \
   | node -e 'let b="";process.stdin.on("data",c=>b+=c);process.stdin.on("end",()=>{const r=JSON.parse(b);if(r.result?.structuredContent?.health!=="running")process.exit(1)})'
 
 plugin_v1_mcp_args="$(plugin_supervisor_request "$PLUGIN_SUPERVISOR_MANIFEST_V1" \
-  | node -e 'let b="";process.stdin.on("data",c=>b+=c);process.stdin.on("end",()=>{const r=JSON.parse(b);delete r.schema;process.stdout.write(JSON.stringify(r))})')"
+  | node -e 'let b="";process.stdin.on("data",c=>b+=c);process.stdin.on("end",()=>{const r=JSON.parse(b);delete r.schema;delete r.installReceiptId;process.stdout.write(JSON.stringify(r))})')"
 mcp_call_tool "aru_plugin_install" "$plugin_v1_mcp_args" \
   | node -e '
       let b="";process.stdin.on("data",c=>b+=c);process.stdin.on("end",()=>{
@@ -945,7 +953,7 @@ mcp_call_tool "aru_plugin_install" "$plugin_v1_mcp_args" \
       });'
 
 plugin_v2_mcp_args="$(plugin_supervisor_request "$PLUGIN_SUPERVISOR_MANIFEST_V2" \
-  | node -e 'let b="";process.stdin.on("data",c=>b+=c);process.stdin.on("end",()=>{const r=JSON.parse(b);delete r.schema;r.pluginId="memory.example";process.stdout.write(JSON.stringify(r))})')"
+  | node -e 'let b="";process.stdin.on("data",c=>b+=c);process.stdin.on("end",()=>{const r=JSON.parse(b);delete r.schema;delete r.installReceiptId;r.pluginId="memory.example";process.stdout.write(JSON.stringify(r))})')"
 mcp_call_tool "aru_plugin_upgrade" "$plugin_v2_mcp_args" \
   | node -e '
       let b="";process.stdin.on("data",c=>b+=c);process.stdin.on("end",()=>{
