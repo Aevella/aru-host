@@ -15,7 +15,7 @@ function check(extra = ["--check-state"]) {
 }
 function rejected(extra) {
   const result = check(extra);
-  assert.notEqual(result.status, 0);
+  assert.equal(result.status, 78);
   assert.match(result.stderr, /host\.state_unreadable/);
   assert.equal(result.error, undefined, "startup must stop, not time out");
 }
@@ -52,6 +52,9 @@ try {
       assert.equal(readFileSync(path, "utf8"), contents);
     }
   }
+  const launchd = check(["--launchd-supervised"]);
+  assert.equal(launchd.status, 0);
+  assert.match(launchd.stderr, /host\.state_unreadable/);
   rmSync(path);
   mkdirSync(path);
   rejected([]);
@@ -73,6 +76,13 @@ try {
   assert.equal(check().status, 0);
   assert.equal(readFileSync(path, "utf8"), legacy, "preflight cannot normalize or rotate pairing");
   const restored = await boot();
+  assert.equal(JSON.parse(readFileSync(`${path}.bak`, "utf8")).serverId, "stable-existing-host");
+  const backup = readFileSync(`${path}.bak`);
+  writeFileSync(path, "{broken-after-backup");
+  rejected([]);
+  assert.deepEqual(readFileSync(`${path}.bak`), backup);
+  // Explicit restoration retains the old host identity and permits retry.
+  writeFileSync(path, backup);
   assert.equal(restored.serverId, "stable-existing-host");
   assert.deepEqual(restored.futureField, { keep: true });
   const restarted = await boot();

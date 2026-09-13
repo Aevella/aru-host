@@ -58,4 +58,8 @@ if [[ -n "${ARU_CONTAINER_RUNTIME:-}" ]]; then
   args+=(--container-runtime "$ARU_CONTAINER_RUNTIME")
 fi
 
+if [[ "$(uname -s)" == Darwin ]]; then
+  args+=(--launchd-supervised)
+fi
+
 exec "${ARU_NODE_BINARY:-/usr/bin/node}" "${args[@]}"

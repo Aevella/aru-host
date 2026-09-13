@@ -36,6 +36,7 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypt
 import {
   chmodSync,
   closeSync,
+  fsyncSync,
   createReadStream,
   createWriteStream,
   existsSync,
@@ -156,7 +157,16 @@ const mcpSessions = new Map();
 const activeJobProcesses = new Map();
 
 const statePath = join(config.dataDir, "state.json");
-const state = loadState();
+let lastPersistedState = null;
+let state;
+try { state = loadState(); }
+catch (error) {
+  if (!error.message.startsWith("host.state_unreadable:")) throw error;
+  console.error(error.message);
+  // launchd only distinguishes successful/failed exits in KeepAlive; its
+  // launcher opts into a clean stop for this permanent startup failure.
+  process.exit(args["launchd-supervised"] ? 0 : 78);
+}
 // Read-only admission used by installers and Consoles before any service or
 // release switch. It must not create files, rotate identity or run recovery.
 if (args["check-state"]) process.exit(0);
@@ -2331,6 +2341,7 @@ function loadState() {
       throw stateReadFailure("invalid_collection");
     }
   }
+  lastPersistedState = contents;
   loaded.devices ??= [];
   loaded.packages ??= [];
   loaded.artifacts ??= [];
@@ -2380,9 +2391,22 @@ function stateReadFailure(reason) {
 }
 
 function saveState() {
-  const temporaryPath = `${statePath}.${process.pid}.tmp`;
-  writeFileSync(temporaryPath, JSON.stringify(state, null, 2), { mode: 0o600 });
-  renameSync(temporaryPath, statePath);
+  const next = JSON.stringify(state, null, 2);
+  // Only a successfully admitted/saved revision can become the recovery copy.
+  // Never rotate the possibly damaged on-disk primary into the backup.
+  if (lastPersistedState !== null) writeStateFile(`${statePath}.bak`, lastPersistedState);
+  writeStateFile(statePath, next);
+  lastPersistedState = next;
+}
+
+function writeStateFile(destination, contents) {
+  const temporaryPath = `${destination}.${process.pid}.tmp`;
+  const descriptor = openSync(temporaryPath, "w", 0o600);
+  try {
+    writeFileSync(descriptor, contents);
+    fsyncSync(descriptor);
+  } finally { closeSync(descriptor); }
+  renameSync(temporaryPath, destination);
 }
 
 function recoverInterruptedJobs() {

@@ -21,6 +21,7 @@ jobs:
       - name: Host Core secret-store proofs
         shell: bash
         run: |
+          node --test tests/state-save.test.mjs
           node tests/state-startup-smoke.mjs
           node tests/windows-secret-store-smoke.mjs
           node tests/provider-profiles-smoke.mjs

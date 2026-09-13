@@ -113,6 +113,12 @@ while ($true) {
   } finally {
     $writer.Dispose()
   }
+  if ($exitCode -eq 78) {
+    [IO.File]::AppendAllText($LogFile, "[run-node] Host state/configuration requires repair; automatic restart stopped. Repair and start Host again.`n")
+    # Complete the Scheduled Task successfully as well, so its failure-retry
+    # policy cannot restart this supervisor and bypass the admission decision.
+    exit 0
+  }
   if ($exitCode -eq 0) { break }
   [IO.File]::AppendAllText($LogFile, "[run-node] Host Core exited with $exitCode; restarting in 3 seconds`n")
   Start-Sleep -Seconds 3

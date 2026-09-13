@@ -478,3 +478,11 @@ Run with `--base-url https://aru.example.com --transport-kind public-https
 Host Core initializes a fresh identity only when `state.json` is absent. Read errors, invalid JSON, and invalid root identity or collection structure stop startup with `host.state_unreadable`, before recovery and startup writes. Installers run the incoming reader's `--check-state` before switching releases; this mode does not create directories or write state.
 
 Preserve the original data directory and check filesystem access. If restoring, stop the Host and use a verified backup of the Host data, retaining the damaged copy for recovery. Retry with the current release after repair. Do not delete the state file to make startup succeed, and do not run an older release against damaged state. Metadata already overwritten by an older version is not reconstructed by this patch.
+
+### Prior-state recovery copy (source update after 0.31.3)
+
+Each successful save retains the preceding admitted/saved state in `state.json.bak`. Both files are written through flushed temporary files and renamed; a backup publication failure prevents committing the next primary. The backup is made from the last successful revision, not by moving an unchecked primary. This is one previous revision, not an archival history or automatic restore. A fresh installation has no prior revision until another save occurs.
+
+When repairing, stop the service, preserve the damaged data directory, and validate the backup with the current reader before explicitly restoring it. The backup can be older than other artifacts and does not replace a full data backup. Startup rejection never overwrites the backup.
+
+Fatal state/configuration exit 78 stops the Windows supervisor (which completes successfully to avoid Scheduled Task failure retries) and is excluded from systemd restart. The macOS launcher requests a clean exit for fatal state admission and its launchd job restarts only unsuccessful exits. Repair followed by an explicit start remains available; transient failures still use the existing restart policy.

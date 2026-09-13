@@ -141,6 +141,12 @@ try {
   $pointerBefore = [IO.File]::ReadAllText($pointerPath)
   try {
     [IO.File]::WriteAllText($statePath, "{broken", [Text.UTF8Encoding]::new($false))
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $instanceRoot "current\run-node.ps1") -ConfigFile (Join-Path $instanceRoot "config\node.env") -LogFile (Join-Path $baseRoot "fatal-state.log")
+    Check "fatal state completes supervisor without task retry" ($LASTEXITCODE -eq 0)
+    $fatalLog = [IO.File]::ReadAllText((Join-Path $baseRoot "fatal-state.log"))
+    Check "fatal state starts only once" (([regex]::Matches($fatalLog, 'starting Host Core')).Count -eq 1)
+    Check "fatal state stops automatic restart" ($fatalLog -match 'automatic restart stopped')
+
     # Windows PowerShell promotes redirected native stderr to an error record.
     # This invocation is expected to fail; capture its exit before restoring Stop.
     $priorErrorAction = $ErrorActionPreference
