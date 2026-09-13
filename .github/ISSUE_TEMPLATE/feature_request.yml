@@ -1,0 +1,33 @@
+name: Feature request / 功能建议
+description: Propose a capability for Aru Host or its integration surface. 中英文均可。
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: Describe the goal from the user's side, not the implementation. 先说想达到什么，而不是怎么实现。
+    validations:
+      required: true
+  - type: textarea
+    id: current
+    attributes:
+      label: What happens today
+      description: Which route you tried (Console, phone, operator reference, wake sender, MCP gateway) and where it stops.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Optional. Routes, settings, or documents you would expect to see.
+  - type: dropdown
+    id: side
+    attributes:
+      label: Which side would change?
+      multiple: true
+      options:
+        - Host Core (routes, jobs, plugins, wake bridge)
+        - Desktop Console (macOS / Windows / Linux)
+        - Aru iOS client (not in this repository)
+        - Documentation

@@ -1,4 +1,17 @@
-# Aru Host
+<p align="center">
+  <img src="docs/assets/aru-is-here.jpg" width="420" alt="虹彩的波浪里躲着三只毛茸茸的小家伙，画面下方写着 Aru is here.">
+</p>
+
+<h1 align="center">Aru Host</h1>
+
+<p align="center">Aru 住在你的 iPhone 里。Aru Host 让它也住进你自己的电脑。</p>
+
+<p align="center">
+  <a href="https://github.com/Aevella/aru-host/releases/latest"><img alt="最新版本" src="https://img.shields.io/github/v/release/Aevella/aru-host?label=%E6%9C%80%E6%96%B0%E7%89%88%E6%9C%AC"></a>
+  <a href="LICENSE"><img alt="Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-blue"></a>
+</p>
+
+<p align="center">English: <a href="README.en.md">README.en.md</a></p>
 
 Aru Host 是 Aru 的用户自有能力节点。它把电脑或 VPS 变成一台可由 iPhone 配对、查看和使用的 Host，同时让电脑协作者的身份、对话、页面、记忆、工具权限和运行状态留在用户自己的机器上。
 
@@ -6,11 +19,35 @@ Aru Host 是 Aru 的用户自有能力节点。它把电脑或 VPS 变成一台�
 
 安装包、更新范围与升级说明见 [0.31.1 发布说明](docs/releases/0.31.1.md)。
 
+## 第一次来？
+
+Aru 是 iPhone 上的 AI 协作者应用，本仓库不包含它。Aru Host 是 Aru 的电脑端：装在自己的 Mac、Windows、Linux 电脑或 VPS 上，用 iPhone 扫码配对后，电脑协作者的身份、对话、页面、记忆、工具权限和运行状态都留在你自己的机器上，手机只是一扇随时能推开的窗。
+
+接入只有三步：
+
+1. 按下面对应平台的说明安装 Aru Host；
+2. 在电脑的 Aru Host 首页点「连接手机」，iPhone 打开 **Aru → 自托管节点 → ＋ → 扫码连接**；
+3. 在 **电脑协作者 → 新建协作者** 请一位协作者入住，从手机或电脑发出第一句话。
+
+完整的图文流程见[中文使用小手册](docs/getting-started.zh-Hans.md)。要把自己的服务或设备接进来，接口与路由在[运行与部署参考](docs/operator-reference.md)。
+
 ## Windows：预览版安装
 
 在 [最新版本页面](https://github.com/Aevella/aru-host/releases/latest) 下载 `aru-host-windows-0.31.1-x64.exe` 和同名 `.sha256` 校验文件，运行安装包。它按当前用户安装 Host；第一次启动会准备 Host Core，保存的凭据由 Windows DPAPI 保护。手机连接若被防火墙阻挡，Console 会提供配置入口。
 
 此版本尚未代码签名，系统可能显示信誉提示。Windows 预览版不等同于 Mac 的签名公证状态；当前不提供 Windows arm64 包。升级直接运行新版安装包，不必先卸载。
+
+**手机扫码后提示 `network request failed`，按这个顺序查：**
+
+1. 在 Aru Host 首页点「放行防火墙」并通过管理员授权。如果之后仍显示「防火墙还没放行局域网访问」，以管理员身份打开 PowerShell 手动添加（端口换成二维码里的数字）：
+
+   ```powershell
+   New-NetFirewallRule -DisplayName "Aru Host (home)" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 8787 -Profile Private,Domain
+   ```
+
+2. 这条规则只对「专用网络」生效。打开 设置 → 网络和 Internet → 当前 Wi-Fi，把网络配置文件从「公用网络」改成「专用网络」。Windows 默认把新连接的 Wi-Fi 当作公用网络。
+3. 手机和电脑连同一个 Wi-Fi，关掉 VPN。iPhone 第一次访问时会询问「本地网络」权限，需要允许；已经拒绝过的在 设置 → Aru → 本地网络 里打开。
+4. 用手机 Safari 直接打开 `http://电脑IP:端口/.well-known/aru.json`。能看到一段 JSON，网络就通了，回 Aru 重新生成二维码配对；打不开，问题仍在上面三步里。
 
 ## 可选：运行脚本和容器插件
 
