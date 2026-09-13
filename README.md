@@ -37,6 +37,18 @@ Aru 是 iPhone 上的 AI 协作者应用，本仓库不包含它。Aru Host 是 
 
 此版本尚未代码签名，系统可能显示信誉提示。Windows 预览版不等同于 Mac 的签名公证状态；当前不提供 Windows arm64 包。升级直接运行新版安装包，不必先卸载。
 
+**手机扫码后提示 `network request failed`，按这个顺序查：**
+
+1. 在 Aru Host 首页点「放行防火墙」并通过管理员授权。如果之后仍显示「防火墙还没放行局域网访问」，以管理员身份打开 PowerShell 手动添加（端口换成二维码里的数字）：
+
+   ```powershell
+   New-NetFirewallRule -DisplayName "Aru Host (home)" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 8787 -Profile Private,Domain
+   ```
+
+2. 这条规则只对「专用网络」生效。打开 设置 → 网络和 Internet → 当前 Wi-Fi，把网络配置文件从「公用网络」改成「专用网络」。Windows 默认把新连接的 Wi-Fi 当作公用网络。
+3. 手机和电脑连同一个 Wi-Fi，关掉 VPN。iPhone 第一次访问时会询问「本地网络」权限，需要允许；已经拒绝过的在 设置 → Aru → 本地网络 里打开。
+4. 用手机 Safari 直接打开 `http://电脑IP:端口/.well-known/aru.json`。能看到一段 JSON，网络就通了，回 Aru 重新生成二维码配对；打不开，问题仍在上面三步里。
+
 ## 可选：运行脚本和容器插件
 
 普通文件、页面发布、配对和手机协作者身份不需要 Docker 或 Podman。只有隔离的 Node/Python/Shell 工作区任务和 OCI 插件需要容器。
