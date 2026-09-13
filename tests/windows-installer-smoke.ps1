@@ -62,6 +62,22 @@ try {
   $control = Join-Path $instanceRoot "current\aru-selfhostctl-windows.ps1"
   $status = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $control -Instance $Instance -BaseRoot $baseRoot status
   Check "status names the release" (($status -join "`n") -match "release: host-")
+  # The Console uses this command. Verify a real process replacement, not just
+  # a successful Scheduled Task API call, while retaining the durable identity.
+  $oldHostProcess = (Get-NetTCPConnection -LocalPort $Port -State Listen | Select-Object -First 1).OwningProcess
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $control -Instance $Instance -BaseRoot $baseRoot restart
+  Check "manual restart exits 0" ($LASTEXITCODE -eq 0)
+  $afterRestart = $null
+  for ($attempt = 0; $attempt -lt 60; $attempt++) {
+    try {
+      $afterRestart = Invoke-RestMethod -UseBasicParsing -Uri "http://127.0.0.1:$Port/.well-known/aru.json" -TimeoutSec 2
+      break
+    } catch { Start-Sleep -Seconds 1 }
+  }
+  Check "manual restart restores the same server identity" ($afterRestart.serverId -eq $manifest.serverId)
+  $newHostProcess = (Get-NetTCPConnection -LocalPort $Port -State Listen | Select-Object -First 1).OwningProcess
+  Check "manual restart replaces the listening process" ($newHostProcess -ne $oldHostProcess)
+  Check "manual restart leaves no old Host process" ($null -eq (Get-Process -Id $oldHostProcess -ErrorAction SilentlyContinue))
   $pairing = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $control -Instance $Instance -BaseRoot $baseRoot pairing
   Check "pairing link issued" (($pairing -join "`n") -match "aru://pair\?")
   if ($LASTEXITCODE -ne 0) {
