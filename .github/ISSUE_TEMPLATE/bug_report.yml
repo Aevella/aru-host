@@ -1,0 +1,71 @@
+name: Bug report / 问题反馈
+description: Something in Aru Host, the Console, or pairing with Aru does not behave as documented. 中英文均可。
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please do not paste credentials, pairing links, private Host addresses, exported conversations, or backup packages. 请不要贴出凭证、配对链接、内网地址、导出的对话或备份包。
+  - type: input
+    id: host-version
+    attributes:
+      label: Aru Host version and Host protocol
+      description: Shown in the Console overview, e.g. `0.31.1 / stub-0.30`.
+      placeholder: 0.31.1 / stub-0.30
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Host platform
+      options:
+        - macOS (signed .dmg)
+        - Windows x64 preview
+        - Debian/Ubuntu desktop (.deb)
+        - Linux VPS (install.sh)
+        - Running from source
+    validations:
+      required: true
+  - type: input
+    id: ios-version
+    attributes:
+      label: Aru iOS version and build
+      description: Aru → Settings → About. Leave empty if the phone is not involved.
+      placeholder: 0.2 (202609122329)
+  - type: dropdown
+    id: transport
+    attributes:
+      label: How the phone reaches the Host
+      options:
+        - Same LAN
+        - Tailscale
+        - Public HTTPS
+        - Not applicable
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. …
+        2. …
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened instead, including any error text shown by the Console, the phone, or `aru-selfhost doctor`.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Logs or diagnostics
+      description: Output of `aru-selfhost logs` / `aru-selfhost doctor`, or the phone's diagnostic report with identifiers redacted.
+      render: text
