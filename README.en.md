@@ -15,7 +15,7 @@
 
 Aru Host is the user-owned capability node for [Aru](#what-is-aru), an AI collaborator app for iPhone. It turns a Mac, a Windows or Linux desktop, or a Linux VPS into a Host that an iPhone can pair with, browse, and use, while a computer collaborator's identity, conversations, pages, memory, tool permissions, and runtime state stay on the user's own machine.
 
-The current release is **0.31.3** with Host protocol `stub-0.30`. It ships an Apple-signed and notarized macOS package, `x64` / `arm64` packages for Debian/Ubuntu desktops, and an **unsigned Windows x64 preview**. Package contents and upgrade notes are in the [0.31.3 release notes](docs/releases/0.31.3.md) (Chinese).
+The current release is **0.31.4** with Host protocol `stub-0.30`. It ships an Apple-signed and notarized macOS package, `x64` / `arm64` packages for Debian/Ubuntu desktops, and an **unsigned Windows x64 preview**. Package contents and upgrade notes are in the [0.31.4 release notes](docs/releases/0.31.4.md) (Chinese).
 
 ## What is Aru
 
