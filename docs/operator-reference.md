@@ -218,7 +218,7 @@ driver in the node's existing private state file. Driver discovery executes
 only fixed `codex --version` and `claude --version` probes with a short timeout;
 the HTTP boundary cannot supply a command or shell fragment, and no agent auth
 material is read or stored. On macOS the fixed probe also checks the Codex app
-bundle and standard user/Homebrew command locations because a LaunchAgent does
+bundle, Claude Desktop-managed CLI versions, and user/package-manager command locations because a LaunchAgent does
 not inherit the user's interactive-shell PATH; those internal candidate paths
 are not returned by the API.
 
@@ -348,14 +348,20 @@ file changes, dynamic or Host tool calls, confirmation waits, completion, and
 failure. These are real driver and Host events, not synthetic progress; paths
 are reduced to collaborator-workspace-relative names before leaving the Host.
 
-The driver inventory reports `execution.enabled=true` only when the fixed Codex
-probe is ready. Each Codex hosted root then reports `turnExecution=true`; an
-absent/logged-out/unhealthy Codex remains an explicit recovery state instead of
-silently queueing forever. Claude Code still has discovery metadata but no turn
-adapter and therefore remains non-executable. A phone-local collaborator and a
-computer-hosted collaborator are separate roots; authority does not move per
-message. Root updates require `expectedRevision`, so two paired clients cannot
-silently overwrite each other.
+The driver inventory enables execution when an installed Codex or Claude Code
+CLI is ready, or a model API profile has credentials. Each hosted root reports
+`turnExecution` for its selected driver. A version probe establishes executable
+availability, not account authentication: the CLI owns login, and expired login
+or service failures become explicit failed turns. Claude Code runs through the
+stream-json adapter and the Host MCP bridge, using the same operating-system
+user's CLI login. Host does not copy Claude Desktop credentials. This execution
+adapter is new in this branch; published 0.31.3 and earlier only discover Claude
+Code. Acceptance and release status are tracked in
+[the integration record](claude-code-integration.md).
+
+A phone-local collaborator and a computer-hosted collaborator are separate roots;
+authority does not move per message. Root updates require `expectedRevision`, so
+two paired clients cannot silently overwrite each other.
 
 Each hosted root also owns `aru.selfhost.collaborator-tool-access.v1`. The
 default is `all`, including tools exposed by plugins installed later; an

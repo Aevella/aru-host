@@ -25,3 +25,9 @@ tool approval, resume, and cancellation remain separate acceptance requirements.
 
 Official protocol: https://code.claude.com/docs/en/headless
 Authentication: https://code.claude.com/docs/en/authentication
+
+An actual CLI 2.1.266 check in an empty temporary workspace reached session
+initialization, then returned an expired OAuth session error. The production
+adapter reported a failed terminal turn and returned to ready. This proves
+startup and authentication-error propagation, not successful account access.
+The test workspace was removed. Account-owner login is still required.
