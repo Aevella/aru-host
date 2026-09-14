@@ -1,10 +1,12 @@
 import { createMobileCollaboratorIdentityHost } from "./mobile-collaborator-replicas.mjs";
 import { randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
+import { readdirSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { createCollaboratorCognitionHost } from "./collaborator-cognition.mjs";
 import { createCollaboratorSurfaceHost } from "./collaborator-surfaces.mjs";
 import { createCodexAppServerDriver } from "./codex-app-server-driver.mjs";
+import { createClaudeCodeDriver, claudeCodeInvocation } from "./claude-code-driver.mjs";
 import { createCollaboratorConversationHost } from "./collaborator-conversations.mjs";
 import { createCollaboratorInitiativeHost } from "./collaborator-initiative.mjs";
 import { createCollaboratorProjectHost } from "./collaborator-projects.mjs";
@@ -58,9 +60,9 @@ const LOCAL_DRIVER_DEFINITIONS = [
         "/opt/homebrew/bin/claude",
         "/usr/local/bin/claude",
       ],
-    adapter: "claude-agent-sdk",
+    adapter: "claude-code-cli",
     transport: "stream-json",
-    integrationGuide: "https://docs.anthropic.com/en/docs/claude-code/sdk",
+    integrationGuide: "https://code.claude.com/docs/en/headless",
   },
 ];
 const API_DRIVER_DEFINITION = {
@@ -127,6 +129,11 @@ export function createCollaboratorHost({
   const codexDriver = createCodexAppServerDriver({
     executable: resolveDriverExecutable(LOCAL_DRIVER_DEFINITIONS[0]),
     resolveExecutable: () => resolveDriverExecutable(LOCAL_DRIVER_DEFINITIONS[0]),
+    log,
+  });
+  const claudeCodeDriver = createClaudeCodeDriver({
+    executable: resolveDriverExecutable(LOCAL_DRIVER_DEFINITIONS[1]),
+    resolveExecutable: () => resolveDriverExecutable(LOCAL_DRIVER_DEFINITIONS[1]),
     log,
   });
   let providerProfiles;
@@ -236,6 +243,7 @@ export function createCollaboratorHost({
   function refreshDrivers() {
     state.agentDriverProbes = LOCAL_DRIVER_DEFINITIONS.map((definition) => probeDriver(definition, now()));
     codexDriver.refreshExecutable();
+    claudeCodeDriver.refreshExecutable();
     saveState();
     return driverInventory();
   }
@@ -500,11 +508,16 @@ export function createCollaboratorHost({
 
   function driverStatus(drivers, providerInventory) {
     const codexReady = drivers.some((driver) => driver.id === "codex" && driver.status === "ready");
+    const claudeCodeReady = drivers.some(
+      (driver) => driver.id === "claude-code" && driver.status === "ready",
+    );
     const apiConfigured = providerInventory.profiles.some((profile) => profile.hasSecret);
-    if (!codexReady && !apiConfigured) {
+    if (!codexReady && !claudeCodeReady && !apiConfigured) {
       return { enabled: false, status: "driver-unavailable" };
     }
-    return { enabled: true, status: codexDriver.status() === "running" ? "running" : "ready" };
+    const localDriverRunning = codexDriver.status() === "running"
+      || claudeCodeDriver.status() === "running";
+    return { enabled: true, status: localDriverRunning ? "running" : "ready" };
   }
 
   function driverInventoryWithoutExecution(providerInventory = providerProfiles.inventory()) {
@@ -538,6 +551,7 @@ export function createCollaboratorHost({
 
   function collaboratorTurnExecution(collaborator, driver, providerProfile) {
     if (collaborator.driverId === "codex") return driver?.status === "ready";
+    if (collaborator.driverId === "claude-code") return driver?.status === "ready";
     if (collaborator.driverId === "api") return providerProfile?.hasSecret === true;
     return false;
   }
@@ -552,6 +566,7 @@ export function createCollaboratorHost({
 
   function driverForCollaborator(collaborator) {
     if (collaborator.driverId === "codex") return codexDriver;
+    if (collaborator.driverId === "claude-code") return claudeCodeDriver;
     if (collaborator.driverId === "api") {
       return directAPIDriver.forProfile(collaborator.providerProfileId);
     }
@@ -582,9 +597,19 @@ export function createCollaboratorHost({
   };
 }
 
+function probeExecutableVersion(definition, executable, options) {
+  const invocation = definition.id === "claude-code"
+    ? claudeCodeInvocation(executable, ["--version"])
+    : { command: executable, args: ["--version"] };
+  if (invocation.command !== executable && !existsSync(invocation.args[0])) {
+    return { status: null, error: { code: "ENOENT" }, stdout: "", stderr: "" };
+  }
+  return spawnSync(invocation.command, invocation.args, options);
+}
+
 function probeDriver(definition, checkedAt) {
-  for (const executable of definition.executableCandidates) {
-    const result = spawnSync(executable, ["--version"], {
+  for (const executable of driverExecutableCandidates(definition)) {
+    const result = probeExecutableVersion(definition, executable, {
       encoding: "utf8",
       env: { ...process.env, NO_COLOR: "1" },
       timeout: 3_000,
@@ -631,8 +656,8 @@ function firstLine(value) {
 }
 
 function resolveDriverExecutable(definition) {
-  for (const executable of definition.executableCandidates) {
-    const result = spawnSync(executable, ["--version"], {
+  for (const executable of driverExecutableCandidates(definition)) {
+    const result = probeExecutableVersion(definition, executable, {
       encoding: "utf8",
       env: { ...process.env, NO_COLOR: "1" },
       timeout: 3_000,
@@ -641,4 +666,72 @@ function resolveDriverExecutable(definition) {
     if (result.status === 0) return executable;
   }
   return null;
+}
+
+function driverExecutableCandidates(definition) {
+  const discovered = definition.id === "claude-code" && process.platform !== "win32"
+    ? [...(process.platform === "darwin" ? claudeDesktopExecutableCandidates() : []),
+      ...nodePackageExecutableCandidates("claude")]
+    : [];
+  return [...new Set([...definition.executableCandidates, ...discovered])];
+}
+
+export function claudeDesktopExecutableCandidates(
+  homeDirectory = homedir(),
+  readDirectory = readdirSync,
+) {
+  const root = `${homeDirectory}/Library/Application Support/Claude/claude-code`;
+  try {
+    return readDirectory(root, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort((left, right) => right.localeCompare(left, undefined, { numeric: true }))
+      .map((version) => `${root}/${version}/claude.app/Contents/MacOS/claude`);
+  } catch {
+    return [];
+  }
+}
+
+// Package-manager installs that a launchd-trimmed PATH cannot see: npm global
+// prefix, nvm/fnm version directories (newest first), and volta shims. Every
+// returned path is a candidate only; the version probe decides whether it exists.
+export function nodePackageExecutableCandidates(
+  binaryName,
+  {
+    homeDirectory = homedir(),
+    env = process.env,
+    readDirectory = readdirSync,
+  } = {},
+) {
+  const versionDirectories = (root) => {
+    try {
+      return readDirectory(root, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => entry.name)
+        .sort((left, right) => right.localeCompare(left, undefined, { numeric: true }));
+    } catch {
+      return [];
+    }
+  };
+  const candidates = [];
+  for (const prefix of [env.NPM_CONFIG_PREFIX, env.npm_config_prefix]) {
+    if (prefix) candidates.push(`${prefix}/bin/${binaryName}`);
+  }
+  candidates.push(`${homeDirectory}/.npm-global/bin/${binaryName}`);
+  const nvmRoot = `${env.NVM_DIR || `${homeDirectory}/.nvm`}/versions/node`;
+  for (const version of versionDirectories(nvmRoot)) {
+    candidates.push(`${nvmRoot}/${version}/bin/${binaryName}`);
+  }
+  const fnmRoots = [...new Set([
+    env.FNM_DIR,
+    `${homeDirectory}/.local/share/fnm`,
+    `${homeDirectory}/Library/Application Support/fnm`,
+  ].filter(Boolean))].map((root) => `${root}/node-versions`);
+  for (const fnmRoot of fnmRoots) {
+    for (const version of versionDirectories(fnmRoot)) {
+      candidates.push(`${fnmRoot}/${version}/installation/bin/${binaryName}`);
+    }
+  }
+  candidates.push(`${env.VOLTA_HOME || `${homeDirectory}/.volta`}/bin/${binaryName}`);
+  return [...new Set(candidates)];
 }

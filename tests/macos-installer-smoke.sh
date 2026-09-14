@@ -25,6 +25,9 @@ node --check "$SELFHOST_DIR/collaborator-initiative.mjs"
 node --check "$SELFHOST_DIR/collaborator-projects.mjs"
 node --check "$SELFHOST_DIR/apns-push.mjs"
 node --check "$SELFHOST_DIR/codex-app-server-driver.mjs"
+node --check "$SELFHOST_DIR/claude-code-driver.mjs"
+node --check "$SELFHOST_DIR/claude-code-host-bridge.mjs"
+node --check "$SELFHOST_DIR/claude-code-mcp-bridge.mjs"
 node --check "$SELFHOST_DIR/collaborator-cognition.mjs"
 node --check "$SELFHOST_DIR/direct-api-driver.mjs"
 node --check "$SELFHOST_DIR/provider-profiles.mjs"
@@ -73,6 +76,9 @@ test -f "$alpha/current/collaborator-initiative.mjs"
 test -f "$alpha/current/collaborator-projects.mjs"
 test -f "$alpha/current/apns-push.mjs"
 test -f "$alpha/current/codex-app-server-driver.mjs"
+test -f "$alpha/current/claude-code-driver.mjs"
+test -f "$alpha/current/claude-code-host-bridge.mjs"
+test -f "$alpha/current/claude-code-mcp-bridge.mjs"
 test -f "$alpha/current/collaborator-cognition.mjs"
 test -f "$alpha/current/direct-api-driver.mjs"
 test -f "$alpha/current/provider-profiles.mjs"
@@ -138,7 +144,7 @@ test -x "$beta/current/server.mjs"
 bash "$SELFHOST_DIR/package-macos-release.sh" "$artifacts/aru-selfhost-macos.tar.gz" 0.28.0-test >/dev/null
 test -s "$artifacts/aru-selfhost-macos.tar.gz"
 test -s "$artifacts/aru-selfhost-macos.tar.gz.sha256"
-for file in aru-selfhost-stub.mjs backup-settings.mjs conversation-turn-relay.mjs collaborator-host.mjs mobile-collaborator-replicas.mjs mobile-collaborator-identities.mjs container-runtime-setup.mjs collaborator-cognition.mjs collaborator-surfaces.mjs collaborator-surface-bundles.mjs collaborator-conversations.mjs collaborator-conversation-attachments.mjs collaborator-initiative.mjs collaborator-projects.mjs apns-push.mjs codex-app-server-driver.mjs direct-api-driver.mjs provider-profiles.mjs provider-secret-store.mjs node-control.mjs node-workspaces.mjs plugin-supervisor.mjs plugin-workshop.mjs source-plugin-runtime.mjs source-plugin-runner.mjs run-node.sh install-macos.sh aru-selfhostctl-macos; do
+for file in aru-selfhost-stub.mjs backup-settings.mjs conversation-turn-relay.mjs collaborator-host.mjs mobile-collaborator-replicas.mjs mobile-collaborator-identities.mjs container-runtime-setup.mjs collaborator-cognition.mjs collaborator-surfaces.mjs collaborator-surface-bundles.mjs collaborator-conversations.mjs collaborator-conversation-attachments.mjs collaborator-initiative.mjs collaborator-projects.mjs apns-push.mjs codex-app-server-driver.mjs claude-code-driver.mjs claude-code-host-bridge.mjs claude-code-mcp-bridge.mjs direct-api-driver.mjs provider-profiles.mjs provider-secret-store.mjs node-control.mjs node-workspaces.mjs plugin-supervisor.mjs plugin-workshop.mjs source-plugin-runtime.mjs source-plugin-runner.mjs run-node.sh install-macos.sh aru-selfhostctl-macos; do
   tar -tzf "$artifacts/aru-selfhost-macos.tar.gz" | grep -Fqx "$file"
 done
 tar -xOf "$artifacts/aru-selfhost-macos.tar.gz" release.json \
