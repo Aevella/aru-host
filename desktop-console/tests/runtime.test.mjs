@@ -21,8 +21,21 @@ test("Host request allowlist admits owned routes and blocks traversal", () => {
   assert.deepEqual(validateHostRequest("POST", "/aru/v1/hosted-collaborators/root_1/surfaces/surface_1/rollback"), {
     method: "POST", path: "/aru/v1/hosted-collaborators/root_1/surfaces/surface_1/rollback",
   });
-  assert.deepEqual(validateHostRequest("PUT", "/aru/v1/hosted-collaborators/root_1/conversations/conversation_1/approvals/approval_1"), {
-    method: "PUT", path: "/aru/v1/hosted-collaborators/root_1/conversations/conversation_1/approvals/approval_1",
+  // Host Core only serves conversation messages and approval decisions as POST;
+  // the 0.31.0 Console sent PUT and every send failed with route.unknown.
+  assert.deepEqual(validateHostRequest("POST", "/aru/v1/hosted-collaborators/root_1/conversations/conversation_1/messages"), {
+    method: "POST", path: "/aru/v1/hosted-collaborators/root_1/conversations/conversation_1/messages",
+  });
+  assert.deepEqual(validateHostRequest("POST", "/aru/v1/hosted-collaborators/root_1/conversations/conversation_1/approvals/approval_1"), {
+    method: "POST", path: "/aru/v1/hosted-collaborators/root_1/conversations/conversation_1/approvals/approval_1",
+  });
+  assert.throws(() => validateHostRequest("PUT", "/aru/v1/hosted-collaborators/root_1/conversations/conversation_1/messages"));
+  assert.throws(() => validateHostRequest("PUT", "/aru/v1/hosted-collaborators/root_1/conversations/conversation_1/approvals/approval_1"));
+  assert.deepEqual(validateHostRequest("PUT", "/aru/v1/hosted-collaborators/root_1/cognition"), {
+    method: "PUT", path: "/aru/v1/hosted-collaborators/root_1/cognition",
+  });
+  assert.deepEqual(validateHostRequest("PUT", "/aru/v1/hosted-collaborators/root_1/surfaces/surface_1/runtime"), {
+    method: "PUT", path: "/aru/v1/hosted-collaborators/root_1/surfaces/surface_1/runtime",
   });
   assert.deepEqual(validateHostRequest("POST", "/aru/v1/hosted-collaborators/root_1/projects/project_1/publish"), {
     method: "POST", path: "/aru/v1/hosted-collaborators/root_1/projects/project_1/publish",

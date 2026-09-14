@@ -320,4 +320,166 @@ await new Promise((resolve, reject) => imageDriver.startTurn({
   },
 }).catch(reject));
 assert.match(imageRequest.messages.at(-1).content[1].image_url.url, /^data:image\/png;base64,/);
+
+// --- Tool-argument robustness ------------------------------------------------
+// A relay may return arguments already as an object, or as an empty string for
+// a no-argument tool. Neither is "unreadable".
+function jsonResponse(payload) {
+  return new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } });
+}
+function sseResponse(events, terminator = "") {
+  const body = events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join("") + terminator;
+  return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
+}
+function runTurn(driver, tools, onToolCall) {
+  const seen = { requests: [], deltas: [], items: [] };
+  const done = new Promise((resolve) => {
+    driver.startTurn({
+      threadId: null, instructions: "Robustness", historyMessages: [], tools, text: "调用工具",
+      handler: {
+        onToolCall,
+        async onNotification(method, params) {
+          if (method === "item/agentMessage/delta") seen.deltas.push(params.delta);
+          if (method === "item/started" || method === "item/completed") seen.items.push(method);
+          if (method === "turn/completed") resolve(params.turn);
+        },
+      },
+    });
+  });
+  return { seen, done };
+}
+const rememberTool = [{ name: "remember", description: "Remember", inputSchema: { type: "object" } }];
+
+const objectArgumentsResponses = [
+  { choices: [{ finish_reason: "tool_calls", message: { role: "assistant", content: null, tool_calls: [
+    { id: "call_object", type: "function", function: { name: "remember", arguments: { value: "object" } } },
+    { id: "call_empty", type: "function", function: { name: "remember", arguments: "" } },
+  ] } }] },
+  { choices: [{ finish_reason: "stop", message: { role: "assistant", content: "两个都执行了", tool_calls: [] } }] },
+];
+const objectRequests = [];
+const objectDriver = createDirectAPIDriver({
+  profileForId: () => profile,
+  readSecret: () => "object-key",
+  fetchImpl: async (_url, init) => { objectRequests.push(JSON.parse(init.body)); return jsonResponse(objectArgumentsResponses.shift()); },
+}).forProfile(profile.profileId);
+const objectCalls = [];
+const objectRun = runTurn(objectDriver, rememberTool, async (call) => { objectCalls.push(call); return { saved: true }; });
+const objectTurn = await objectRun.done;
+assert.equal(objectTurn.status, "completed", objectTurn.error?.message);
+assert.deepEqual(objectCalls.map((call) => call.arguments), [{ value: "object" }, {}]);
+assert.equal(objectRequests[1].messages.at(-3).tool_calls[0].function.arguments, "{\"value\":\"object\"}");
+
+// Unreadable JSON that was NOT cut off: the model receives a tool error and
+// gets to re-issue the call; the turn is not ended and the tool never ran.
+const brokenStreamResponses = [
+  sseResponse([
+    { choices: [{ delta: { role: "assistant", tool_calls: [{ index: 0, id: "call_broken", function: { name: "remember", arguments: "{\"value\":" } }] } }] },
+    { choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: "\"oops\"" } }] } }] },
+    { choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: "{\"value\":\"oops\"}" } }] } }] },
+    { choices: [{ delta: {}, finish_reason: "tool_calls" }] },
+  ], "data: [DONE]\n\n"),
+  sseResponse([
+    { choices: [{ delta: { role: "assistant", tool_calls: [{ index: 0, id: "call_fixed", function: { name: "remember", arguments: "{\"value\":\"fixed\"}" } }] } }] },
+    { choices: [{ delta: {}, finish_reason: "tool_calls" }] },
+  ], "data: [DONE]\n\n"),
+  sseResponse([{ choices: [{ delta: { content: "修好了" }, finish_reason: "stop" }] }], "data: [DONE]\n\n"),
+];
+const brokenRequests = [];
+const brokenDriver = createDirectAPIDriver({
+  profileForId: () => profile,
+  readSecret: () => "broken-key",
+  fetchImpl: async (_url, init) => { brokenRequests.push(JSON.parse(init.body)); return brokenStreamResponses.shift(); },
+}).forProfile(profile.profileId);
+const brokenCalls = [];
+const brokenRun = runTurn(brokenDriver, rememberTool, async (call) => { brokenCalls.push(call); return { saved: true }; });
+const brokenTurn = await brokenRun.done;
+assert.equal(brokenTurn.status, "completed", brokenTurn.error?.message);
+assert.deepEqual(brokenCalls.map((call) => call.callId), ["call_fixed"]);
+const brokenToolMessage = brokenRequests[1].messages.at(-1);
+assert.equal(brokenToolMessage.role, "tool");
+assert.equal(brokenToolMessage.tool_call_id, "call_broken");
+assert.match(JSON.parse(brokenToolMessage.content).error, /不是有效的 JSON.*重新发起工具调用/);
+assert.equal(brokenRequests[1].messages.at(-2).tool_calls[0].function.arguments, "{\"value\":\"oops\"{\"value\":\"oops\"}");
+assert.deepEqual(brokenRun.seen.items, ["item/started", "item/completed", "item/started", "item/completed"]);
+assert.deepEqual(brokenRun.seen.deltas, ["修好了"]);
+
+// Arguments cut off by the reply budget: retrying would cut off again, so the
+// turn fails with the real cause and no tool runs.
+const truncatedAnthropicDriver = createDirectAPIDriver({
+  profileForId: () => anthropicProfile,
+  readSecret: () => "truncated-key",
+  fetchImpl: async () => sseResponse([
+    { type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "tool_cut", name: "remember" } },
+    { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: "{\"value\":\"a very long" } },
+    { type: "message_delta", delta: { stop_reason: "max_tokens" }, usage: { output_tokens: 32768 } },
+    { type: "message_stop" },
+  ]),
+}).forProfile(anthropicProfile.profileId);
+const truncatedAnthropicRun = runTurn(truncatedAnthropicDriver, rememberTool, async () => { throw new Error("must not run"); });
+const truncatedAnthropicTurn = await truncatedAnthropicRun.done;
+assert.equal(truncatedAnthropicTurn.status, "failed");
+assert.match(truncatedAnthropicTurn.error.message, /remember.*截断.*最大输出 token/);
+assert.deepEqual(truncatedAnthropicRun.seen.items, []);
+
+const truncatedOpenAIDriver = createDirectAPIDriver({
+  profileForId: () => profile,
+  readSecret: () => "truncated-key",
+  fetchImpl: async () => sseResponse([
+    { choices: [{ delta: { role: "assistant", tool_calls: [{ index: 0, id: "call_cut", function: { name: "remember", arguments: "{\"value\":\"a very" } }] } }] },
+    { choices: [{ delta: {}, finish_reason: "length" }] },
+  ], "data: [DONE]\n\n"),
+}).forProfile(profile.profileId);
+const truncatedOpenAIRun = runTurn(truncatedOpenAIDriver, rememberTool, async () => { throw new Error("must not run"); });
+const truncatedOpenAITurn = await truncatedOpenAIRun.done;
+assert.equal(truncatedOpenAITurn.status, "failed");
+assert.match(truncatedOpenAITurn.error.message, /截断.*接口方/);
+assert.deepEqual(truncatedOpenAIRun.seen.items, []);
+
+// Anthropic non-stream: input is already an object; a non-object input is an
+// error handed back to the model rather than a silently emptied call.
+const anthropicJSONResponses = [
+  { stop_reason: "tool_use", content: [
+    { type: "tool_use", id: "tool_obj", name: "remember", input: { value: "plain" } },
+    { type: "tool_use", id: "tool_bad", name: "remember", input: ["not", "an", "object"] },
+  ] },
+  { stop_reason: "end_turn", content: [{ type: "text", text: "好" }] },
+];
+const anthropicJSONRequests = [];
+const anthropicJSONDriver = createDirectAPIDriver({
+  profileForId: () => anthropicProfile,
+  readSecret: () => "anthropic-json-key",
+  fetchImpl: async (_url, init) => { anthropicJSONRequests.push(JSON.parse(init.body)); return jsonResponse(anthropicJSONResponses.shift()); },
+}).forProfile(anthropicProfile.profileId);
+const anthropicJSONCalls = [];
+const anthropicJSONRun = runTurn(anthropicJSONDriver, rememberTool, async (call) => { anthropicJSONCalls.push(call.callId); return { saved: true }; });
+const anthropicJSONTurn = await anthropicJSONRun.done;
+assert.equal(anthropicJSONTurn.status, "completed", anthropicJSONTurn.error?.message);
+assert.deepEqual(anthropicJSONCalls, ["tool_obj"]);
+const anthropicResults = anthropicJSONRequests[1].messages.at(-1).content;
+assert.equal(anthropicResults[1].tool_use_id, "tool_bad");
+assert.equal(anthropicResults[1].is_error, true);
+assert.match(JSON.parse(anthropicResults[1].content).error, /JSON object/);
+
+// A model that never produces readable JSON must not spin forever on a
+// profile without a tool-round limit: three consecutive unreadable rounds stop
+// the turn with the parser's reason, and no tool ever runs.
+let stubbornRequestCount = 0;
+const stubbornDriver = createDirectAPIDriver({
+  profileForId: () => profile,
+  readSecret: () => "stubborn-key",
+  fetchImpl: async () => {
+    stubbornRequestCount += 1;
+    return jsonResponse({ choices: [{ finish_reason: "tool_calls", message: { role: "assistant", content: null, tool_calls: [
+      { id: `call_stubborn_${stubbornRequestCount}`, type: "function", function: { name: "remember", arguments: "{value: nope}" } },
+    ] } }] });
+  },
+}).forProfile(profile.profileId);
+const stubbornRun = runTurn(stubbornDriver, rememberTool, async () => { throw new Error("must not run"); });
+const stubbornTurn = await stubbornRun.done;
+assert.equal(stubbornTurn.status, "failed");
+assert.match(stubbornTurn.error.message, /连续 3 轮.*无法读取的工具参数/);
+assert.equal(stubbornRequestCount, 3);
+assert.equal(stubbornRun.seen.items.length, 4);
+
 console.log("ARU_DIRECT_API_DRIVER_SMOKE_OK");

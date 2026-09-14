@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 
+// Consecutive rounds in which the model's tool arguments could not be parsed
+// before the turn stops instead of retrying again.
+const MAX_UNREADABLE_ARGUMENT_ROUNDS = 3;
+
 export function createDirectAPIDriver({ profileForId, readSecret, fetchImpl = fetch, log = () => {} }) {
   const activeTurns = new Map();
 
@@ -81,6 +85,7 @@ export function createDirectAPIDriver({ profileForId, readSecret, fetchImpl = fe
       ? anthropicHistory(historyMessages, text, attachments)
       : openAIHistory(historyMessages, text, attachments);
     let completedToolRounds = 0;
+    let unreadableRounds = 0;
     while (!signal.aborted) {
       const request = profile.protocol === "anthropic-messages"
         ? anthropicRequest(profile, secret, instructions, protocolMessages, tools, undefined, signal, true)
@@ -114,11 +119,37 @@ export function createDirectAPIDriver({ profileForId, readSecret, fetchImpl = fe
           && completedToolRounds >= profile.maxToolRounds) {
         throw new Error(`已达到你设置的连续工具回合上限（${profile.maxToolRounds} 回合）`);
       }
+      const truncatedCall = result.truncated ? result.toolCalls.find((call) => call.argumentsError) : null;
+      if (truncatedCall) {
+        // Retrying would cut off at the same budget; surface the real cause
+        // before any tool in this round starts.
+        throw truncatedToolCallFailure(profile, truncatedCall);
+      }
+      const unreadableCall = result.toolCalls.find((call) => call.argumentsError);
+      unreadableRounds = unreadableCall ? unreadableRounds + 1 : 0;
+      if (unreadableRounds >= MAX_UNREADABLE_ARGUMENT_ROUNDS) {
+        // The model gets feedback and a retry, but a profile without a tool
+        // round limit must not spin forever on a model that never emits JSON.
+        throw new Error(`模型连续 ${unreadableRounds} 轮返回无法读取的工具参数（${unreadableCall.argumentsError}），Aru 已停止这一轮。请换一个更稳定支持工具调用的模型。`);
+      }
       completedToolRounds += 1;
       const toolResults = [];
       for (const call of result.toolCalls) {
         const item = { id: call.id, type: "dynamicToolCall", tool: call.name };
         await handler.onNotification("item/started", { threadId, turnId, item });
+        if (call.argumentsError) {
+          // Unreadable arguments without truncation: hand the failure back to
+          // the model as a tool error so it can re-issue the call, instead of
+          // ending the whole turn.
+          log(`direct API tool ${call.name} skipped: ${call.argumentsError}`);
+          toolResults.push({
+            ...call,
+            value: { error: `${call.argumentsError}。这次调用没有执行，请用合法的 JSON object 重新发起工具调用。` },
+            isError: true,
+          });
+          await handler.onNotification("item/completed", { threadId, turnId, item });
+          continue;
+        }
         try {
           const value = await handler.onToolCall({
             threadId,
@@ -249,10 +280,12 @@ async function modelResponse(response, protocol, onTextDelta) {
 async function streamOpenAI(response, onTextDelta) {
   const toolCalls = new Map();
   let content = "";
+  let truncated = false;
   await consumeSSE(response, async (data) => {
     if (data === "[DONE]") return;
     const payload = parsedEvent(data);
     if (payload.error) throw new Error(payload.error.message ?? "模型 API 流式请求失败");
+    if (payload?.choices?.[0]?.finish_reason === "length") truncated = true;
     const delta = payload?.choices?.[0]?.delta ?? {};
     if (typeof delta.content === "string" && delta.content) {
       content += delta.content;
@@ -267,19 +300,20 @@ async function streamOpenAI(response, onTextDelta) {
       };
       if (fragment.id) current.id += String(fragment.id);
       if (fragment.function?.name) current.name += String(fragment.function.name);
-      if (fragment.function?.arguments) current.argumentsText += String(fragment.function.arguments);
+      if (fragment.function?.arguments) current.argumentsText += argumentsText(fragment.function.arguments);
       toolCalls.set(index, current);
     }
   });
   const normalizedCalls = [...toolCalls.entries()].sort(([left], [right]) => left - right).map(([, call]) => ({
     id: call.id || `call_${randomUUID()}`,
     name: call.name,
-    arguments: parsedArguments(call.argumentsText),
+    ...parsedArguments(call.argumentsText),
     rawArguments: call.argumentsText || "{}",
   }));
   return {
     text: "",
     toolCalls: normalizedCalls,
+    truncated,
     rawMessage: {
       role: "assistant",
       content: content || null,
@@ -294,9 +328,11 @@ async function streamOpenAI(response, onTextDelta) {
 
 async function streamAnthropic(response, onTextDelta) {
   const blocks = new Map();
+  let truncated = false;
   await consumeSSE(response, async (data) => {
     const event = parsedEvent(data);
     if (event.type === "error") throw new Error(event.error?.message ?? "Anthropic 流式请求失败");
+    if (event.type === "message_delta" && event.delta?.stop_reason === "max_tokens") truncated = true;
     if (event.type === "content_block_start") {
       const block = event.content_block ?? {};
       blocks.set(Number(event.index ?? 0), block.type === "tool_use"
@@ -318,21 +354,23 @@ async function streamAnthropic(response, onTextDelta) {
       current.inputText += String(event.delta.partial_json ?? "");
     }
   });
-  const rawContent = [...blocks.entries()].sort(([left], [right]) => left - right).map(([, block]) => {
+  const parsedBlocks = [...blocks.entries()].sort(([left], [right]) => left - right).map(([, block]) => {
     if (block.type === "text") return block;
-    return {
-      type: "tool_use",
-      id: block.id,
-      name: block.name,
-      input: parsedArguments(block.inputText),
-    };
+    return { ...block, ...parsedArguments(block.inputText) };
   });
+  // The replayed assistant turn must stay a valid tool_use block even when the
+  // model's partial JSON was unreadable; the failure travels in toolCalls.
+  const rawContent = parsedBlocks.map((block) => (block.type === "text"
+    ? block
+    : { type: "tool_use", id: block.id, name: block.name, input: block.arguments }));
   return {
     text: "",
-    toolCalls: rawContent.filter((block) => block.type === "tool_use").map((block) => ({
+    truncated,
+    toolCalls: parsedBlocks.filter((block) => block.type === "tool_use").map((block) => ({
       id: String(block.id ?? `call_${randomUUID()}`),
       name: String(block.name ?? ""),
-      arguments: block.input,
+      arguments: block.arguments,
+      argumentsError: block.argumentsError,
     })),
     rawContent,
   };
@@ -436,10 +474,24 @@ function parseOpenAI(payload) {
   const toolCalls = (message.tool_calls ?? []).map((call) => ({
     id: String(call.id ?? `call_${randomUUID()}`),
     name: String(call.function?.name ?? ""),
-    arguments: parsedArguments(call.function?.arguments),
-    rawArguments: String(call.function?.arguments ?? "{}"),
+    ...parsedArguments(call.function?.arguments),
+    rawArguments: argumentsText(call.function?.arguments) || "{}",
   }));
-  return { text: contentText(message.content), toolCalls, rawMessage: message };
+  return {
+    text: contentText(message.content),
+    toolCalls,
+    // Replay the assistant turn with string arguments even when the relay
+    // handed them over as an object; strict endpoints reject object arguments.
+    rawMessage: {
+      ...message,
+      tool_calls: toolCalls.map((call) => ({
+        id: call.id,
+        type: "function",
+        function: { name: call.name, arguments: call.rawArguments },
+      })),
+    },
+    truncated: payload.choices[0].finish_reason === "length",
+  };
 }
 
 function parseAnthropic(payload) {
@@ -449,9 +501,10 @@ function parseAnthropic(payload) {
     toolCalls: payload.content.filter((block) => block.type === "tool_use").map((block) => ({
       id: String(block.id ?? `call_${randomUUID()}`),
       name: String(block.name ?? ""),
-      arguments: block.input && typeof block.input === "object" ? block.input : {},
+      ...parsedArguments(block.input),
     })),
     rawContent: payload.content,
+    truncated: payload.stop_reason === "max_tokens",
   };
 }
 
@@ -506,13 +559,37 @@ function anthropicTool(tool) {
   };
 }
 
+// Tool arguments arrive as a JSON string (OpenAI), an accumulated stream of
+// partial JSON (both protocols), or already as an object (Anthropic non-stream
+// and some OpenAI-compatible relays). Empty text means "no arguments". A parse
+// failure is reported, not thrown, so the turn can decide whether the model
+// should retry or whether the output was cut off by the reply budget.
 function parsedArguments(value) {
+  if (value && typeof value === "object" && !Array.isArray(value)) return { arguments: value, argumentsError: null };
+  const text = String(value ?? "").trim();
+  if (!text) return { arguments: {}, argumentsError: null };
+  let parsed;
   try {
-    const parsed = JSON.parse(String(value ?? "{}"));
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
-  } catch {
-    throw new Error("模型返回了无法读取的工具参数");
+    parsed = JSON.parse(text);
+  } catch (error) {
+    return { arguments: {}, argumentsError: `工具参数不是有效的 JSON（${error.message}）` };
   }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { arguments: {}, argumentsError: "工具参数必须是一个 JSON object" };
+  }
+  return { arguments: parsed, argumentsError: null };
+}
+
+function argumentsText(value) {
+  if (value === undefined || value === null) return "";
+  return typeof value === "object" ? JSON.stringify(value) : String(value);
+}
+
+function truncatedToolCallFailure(profile, call) {
+  const budget = profile.protocol === "anthropic-messages"
+    ? "请提高这个模型 API 配置的最大输出 token"
+    : "这个 OpenAI-compatible 配置没有设置输出上限，截断来自接口方的默认上限，请在接口方提高上限";
+  return new Error(`模型在写工具 ${call.name || "调用"} 的参数时被单次回复预算截断（max_tokens），Aru 没有执行这次调用。${budget}，或换一个模型。`);
 }
 
 function contentText(value) {
