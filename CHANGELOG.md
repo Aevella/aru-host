@@ -4,6 +4,7 @@
 
 - Fix Windows / Linux desktop Console conversation sending and approval decisions: the Console issued `PUT` while Host Core only serves `POST`, so every send since 0.31.0 failed with `route.unknown`. macOS Console was not affected.
 - Stop failing whole direct model-API turns on unreadable tool arguments: accept object-typed and empty arguments from relays, hand malformed JSON back to the model as a tool error so it can re-issue the call, and report `max_tokens` truncation of tool arguments as the actual cause instead of "模型返回了无法读取的工具参数".
+- Reject truncated tool batches before execution even when argument text is empty or valid JSON; reject arrays, null and scalar argument values without coercing them into empty arguments. Normalize Anthropic non-stream tool-use replay to object inputs while returning the original parse failure as a tool error, preserving call identities and other content blocks.
 
 ## 0.31.3
 

@@ -119,10 +119,10 @@ export function createDirectAPIDriver({ profileForId, readSecret, fetchImpl = fe
           && completedToolRounds >= profile.maxToolRounds) {
         throw new Error(`已达到你设置的连续工具回合上限（${profile.maxToolRounds} 回合）`);
       }
-      const truncatedCall = result.truncated ? result.toolCalls.find((call) => call.argumentsError) : null;
+      const truncatedCall = result.truncated ? result.toolCalls[0] : null;
       if (truncatedCall) {
-        // Retrying would cut off at the same budget; surface the real cause
-        // before any tool in this round starts.
+        // A truncated batch is not complete even if its arguments are empty or
+        // happen to be valid JSON. Stop before any side effect in this round.
         throw truncatedToolCallFailure(profile, truncatedCall);
       }
       const unreadableCall = result.toolCalls.find((call) => call.argumentsError);
@@ -300,7 +300,7 @@ async function streamOpenAI(response, onTextDelta) {
       };
       if (fragment.id) current.id += String(fragment.id);
       if (fragment.function?.name) current.name += String(fragment.function.name);
-      if (fragment.function?.arguments) current.argumentsText += argumentsText(fragment.function.arguments);
+      if (fragment.function?.arguments !== undefined) current.argumentsText += argumentsText(fragment.function.arguments);
       toolCalls.set(index, current);
     }
   });
@@ -496,14 +496,21 @@ function parseOpenAI(payload) {
 
 function parseAnthropic(payload) {
   if (!Array.isArray(payload?.content)) throw new Error("Anthropic API 没有返回 content blocks");
+  const toolCalls = payload.content.filter((block) => block.type === "tool_use").map((block) => ({
+    id: String(block.id ?? `call_${randomUUID()}`),
+    name: String(block.name ?? ""),
+    ...parsedArguments(block.input),
+  }));
+  let toolIndex = 0;
+  const rawContent = payload.content.map((block) => {
+    if (block.type !== "tool_use") return block;
+    const call = toolCalls[toolIndex++];
+    return { ...block, id: call.id, name: call.name, input: call.arguments };
+  });
   return {
     text: payload.content.filter((block) => block.type === "text").map((block) => block.text ?? "").join(""),
-    toolCalls: payload.content.filter((block) => block.type === "tool_use").map((block) => ({
-      id: String(block.id ?? `call_${randomUUID()}`),
-      name: String(block.name ?? ""),
-      ...parsedArguments(block.input),
-    })),
-    rawContent: payload.content,
+    toolCalls,
+    rawContent,
     truncated: payload.stop_reason === "max_tokens",
   };
 }
@@ -566,7 +573,10 @@ function anthropicTool(tool) {
 // should retry or whether the output was cut off by the reply budget.
 function parsedArguments(value) {
   if (value && typeof value === "object" && !Array.isArray(value)) return { arguments: value, argumentsError: null };
-  const text = String(value ?? "").trim();
+  if (value !== undefined && typeof value !== "string") {
+    return { arguments: {}, argumentsError: "工具参数必须是一个 JSON object" };
+  }
+  const text = (value ?? "").trim();
   if (!text) return { arguments: {}, argumentsError: null };
   let parsed;
   try {
@@ -581,7 +591,7 @@ function parsedArguments(value) {
 }
 
 function argumentsText(value) {
-  if (value === undefined || value === null) return "";
+  if (value === undefined) return "";
   return typeof value === "object" ? JSON.stringify(value) : String(value);
 }
 

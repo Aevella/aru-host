@@ -482,4 +482,96 @@ assert.match(stubbornTurn.error.message, /连续 3 轮.*无法读取的工具参
 assert.equal(stubbornRequestCount, 3);
 assert.equal(stubbornRun.seen.items.length, 4);
 
+// A truncated round must never execute, even before the first argument byte or
+// after a syntactically complete argument object. Cover stream and JSON paths.
+for (const protocol of ["openai-compatible", "anthropic-messages"]) {
+  for (const streaming of [false, true]) {
+    for (const value of ["", "{}", '{"value":"complete"}']) {
+      let requestCount = 0;
+      let executed = 0;
+      const selectedProfile = protocol === "anthropic-messages" ? anthropicProfile : profile;
+      const blockedDriver = createDirectAPIDriver({
+        profileForId: () => selectedProfile,
+        readSecret: () => "fixture-key",
+        fetchImpl: async () => {
+          requestCount += 1;
+          assert.equal(requestCount, 1, "truncation must not retry");
+          if (protocol === "openai-compatible") {
+            const call = { id: "cut", type: "function", function: { name: "remember", arguments: value } };
+            return streaming ? sseResponse([
+              { choices: [{ delta: { tool_calls: [{ index: 0, ...call }] } }] },
+              { choices: [{ delta: {}, finish_reason: "length" }] },
+            ], "data: [DONE]\n\n") : jsonResponse({ choices: [{
+              finish_reason: "length", message: { role: "assistant", tool_calls: [call] },
+            }] });
+          }
+          const block = { type: "tool_use", id: "cut", name: "remember", input: value ? JSON.parse(value) : {} };
+          return streaming ? sseResponse([
+            { type: "content_block_start", index: 0, content_block: { ...block, input: {} } },
+            { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: value } },
+            { type: "message_delta", delta: { stop_reason: "max_tokens" } },
+            { type: "message_stop" },
+          ]) : jsonResponse({ stop_reason: "max_tokens", content: [block] });
+        },
+      }).forProfile(selectedProfile.profileId);
+      const blocked = await runTurn(blockedDriver, rememberTool, async () => { executed += 1; return {}; }).done;
+      assert.equal(blocked.status, "failed");
+      assert.match(blocked.error.message, /截断/);
+      assert.equal(executed, 0, `${protocol} stream=${streaming} arguments=${value}`);
+      assert.equal(requestCount, 1);
+    }
+  }
+}
+
+// Non-object values cannot become empty arguments via String([]), String(null),
+// or falsey SSE fragment checks. Anthropic replay must itself remain valid.
+for (const protocol of ["openai-compatible", "anthropic-messages"]) {
+  for (const value of [[], ["wrong"], null, false, 0, "[]", "null"]) {
+    const modes = protocol === "openai-compatible" ? [false, true] : [false];
+    for (const streaming of modes) {
+      let requestCount = 0;
+      let executed = 0;
+      const selectedProfile = protocol === "anthropic-messages" ? anthropicProfile : profile;
+      const invalidDriver = createDirectAPIDriver({
+        profileForId: () => selectedProfile,
+        readSecret: () => "fixture-key",
+        fetchImpl: async (_url, init) => {
+          requestCount += 1;
+          if (requestCount === 1) {
+            if (protocol === "anthropic-messages") return jsonResponse({ stop_reason: "tool_use", content: [
+              { type: "text", text: "Preparing" },
+              { type: "tool_use", id: "invalid", name: "remember", input: value },
+            ] });
+            const call = { id: "invalid", type: "function", function: { name: "remember", arguments: value } };
+            return streaming ? sseResponse([
+              { choices: [{ delta: { tool_calls: [{ index: 0, ...call }] } }] },
+              { choices: [{ delta: {}, finish_reason: "tool_calls" }] },
+            ], "data: [DONE]\n\n") : jsonResponse({ choices: [{ message: { role: "assistant", tool_calls: [call] } }] });
+          }
+          assert.equal(requestCount, 2);
+          const body = JSON.parse(init.body);
+          if (protocol === "anthropic-messages") {
+            const assistant = body.messages.at(-2).content;
+            assert.deepEqual(assistant[0], { type: "text", text: "Preparing" });
+            assert.deepEqual(assistant[1], { type: "tool_use", id: "invalid", name: "remember", input: {} });
+            const result = body.messages.at(-1).content[0];
+            assert.equal(result.tool_use_id, "invalid");
+            assert.equal(result.is_error, true);
+            return jsonResponse({ content: [{ type: "text", text: "Retry received" }], stop_reason: "end_turn" });
+          }
+          const result = body.messages.at(-1);
+          assert.equal(result.tool_call_id, "invalid");
+          assert.match(JSON.parse(result.content).error, /JSON/);
+          assert.equal(typeof body.messages.at(-2).tool_calls[0].function.arguments, "string");
+          return jsonResponse({ choices: [{ message: { role: "assistant", content: "Retry received" } }] });
+        },
+      }).forProfile(selectedProfile.profileId);
+      const invalid = await runTurn(invalidDriver, rememberTool, async () => { executed += 1; return {}; }).done;
+      assert.equal(invalid.status, "completed", invalid.error?.message);
+      assert.equal(executed, 0, `${protocol} stream=${streaming} input=${JSON.stringify(value)}`);
+      assert.equal(requestCount, 2);
+    }
+  }
+}
+
 console.log("ARU_DIRECT_API_DRIVER_SMOKE_OK");
