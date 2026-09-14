@@ -119,7 +119,9 @@ export function createDirectAPIDriver({ profileForId, readSecret, fetchImpl = fe
           && completedToolRounds >= profile.maxToolRounds) {
         throw new Error(`已达到你设置的连续工具回合上限（${profile.maxToolRounds} 回合）`);
       }
-      const truncatedCall = result.truncated ? result.toolCalls[0] : null;
+      const truncatedCall = result.truncated
+        ? (result.toolCalls.find((call) => call.argumentsError) ?? result.toolCalls[0])
+        : null;
       if (truncatedCall) {
         // A truncated batch is not complete even if its arguments are empty or
         // happen to be valid JSON. Stop before any side effect in this round.

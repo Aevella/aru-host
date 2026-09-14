@@ -410,8 +410,11 @@ const truncatedAnthropicDriver = createDirectAPIDriver({
   profileForId: () => anthropicProfile,
   readSecret: () => "truncated-key",
   fetchImpl: async () => sseResponse([
-    { type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "tool_cut", name: "remember" } },
-    { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: "{\"value\":\"a very long" } },
+    { type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "tool_complete", name: "read" } },
+    { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: "{}" } },
+    { type: "content_block_stop", index: 0 },
+    { type: "content_block_start", index: 1, content_block: { type: "tool_use", id: "tool_cut", name: "remember" } },
+    { type: "content_block_delta", index: 1, delta: { type: "input_json_delta", partial_json: "{\"value\":\"a very long" } },
     { type: "message_delta", delta: { stop_reason: "max_tokens" }, usage: { output_tokens: 32768 } },
     { type: "message_stop" },
   ]),
