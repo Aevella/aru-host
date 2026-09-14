@@ -63,7 +63,7 @@ const host = createCollaboratorHost({
 
 const claudeOnly = host.driverInventory();
 assert.equal(claudeOnly.drivers.find((driver) => driver.id === "claude-code").status, "ready");
-assert.equal(claudeOnly.execution.enabled, false);
+assert.equal(claudeOnly.execution.enabled, true);
 
 state.providerProfiles.push({
   profileId,

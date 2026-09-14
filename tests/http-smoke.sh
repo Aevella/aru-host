@@ -139,7 +139,7 @@ curl -fsS "http://127.0.0.1:$port/aru/v1/agent-drivers" \
         const p=JSON.parse(b);const drivers=p.drivers??[];
         if(p.schema!=="aru.selfhost.agent-driver-inventory.v1")process.exit(1);
         if(!drivers.some(d=>d.id==="codex"&&d.adapter==="codex-app-server"))process.exit(2);
-        if(!drivers.some(d=>d.id==="claude-code"&&d.adapter==="claude-agent-sdk"))process.exit(3);
+        if(!drivers.some(d=>d.id==="claude-code"&&d.adapter==="claude-code-cli"))process.exit(3);
         if(!drivers.some(d=>d.id==="api"&&d.adapter==="direct-provider-api"))process.exit(7);
         if(typeof p.execution?.enabled!=="boolean"||!["driver-unavailable","ready","starting","running"].includes(p.execution?.status))process.exit(4);
         if(!Number.isInteger(p.execution?.conversationCount)||!Number.isInteger(p.execution?.activeTurnCount)||!Number.isInteger(p.execution?.pendingApprovalCount))process.exit(6);

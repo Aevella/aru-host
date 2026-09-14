@@ -117,6 +117,8 @@
 
 电脑协作者的身份、完整对话、主动约定、页面项目、Git 工作区、页面发布版本、产物检查点、运行状态和确认记录都保存在你的 Aru Host 上。手机保存的是配对凭证和可见投影，不会抢走电脑的权威，也不会把它并进手机本地协作者的数据库。
 
-目前 Codex 与模型 API 都可以真实运行。Claude Code 仍然只会被识别出来，还不能承担电脑协作者的对话；界面会诚实显示这个状态，不会让消息假装排队然后永远不回来。
+新版本 Host 支持 Codex、Claude Code 和模型 API 三种执行方式。使用 Claude Code 时，请在运行 Host 的同一个系统账号下安装 Claude Code CLI，并先执行 `claude auth login` 完成登录；Claude Desktop 已登录不代表独立 CLI 也已登录。随后重启 Host，在新建电脑协作者时选择 Claude Code。若只出现模型 API，先检查该账号下 `claude --version` 和 `claude auth status` 是否正常。驱动已检测到但登录过期时，对话会显示实际错误，不会一直假装排队。
+
+此说明对应即将发布的 Claude Code 接入更新；公开版 0.31.3 及以前只有驱动识别，没有 Claude Code 对话执行。
 
 好啦。现在这个协作者已经住进电脑，Aru 也认得你的手机了。去跟这个新朋友说第一句话吧。✨

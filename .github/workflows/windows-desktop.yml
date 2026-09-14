@@ -24,6 +24,7 @@ jobs:
           node --test tests/state-save.test.mjs
           node tests/state-startup-smoke.mjs
           node tests/windows-secret-store-smoke.mjs
+          node --test tests/claude-code-command.test.mjs
           node tests/provider-profiles-smoke.mjs
           node --test tests/container-runtime-setup.test.mjs tests/container-status-http.test.mjs
 

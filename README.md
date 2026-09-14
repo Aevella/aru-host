@@ -31,6 +31,8 @@ Aru 是 iPhone 上的 AI 协作者应用，本仓库不包含它。Aru Host 是 
 
 完整的图文流程见[中文使用小手册](docs/getting-started.zh-Hans.md)。要把自己的服务或设备接进来，接口与路由在[运行与部署参考](docs/operator-reference.md)。
 
+正在准备的下一版会补齐 Claude Code 执行接入；当前 0.31.3 只能发现 Claude Code，不能用它运行协作者对话。接入与验证状态见 [Claude Code 接入记录](docs/claude-code-integration.md)。
+
 ## Windows：预览版安装
 
 在 [最新版本页面](https://github.com/Aevella/aru-host/releases/latest) 下载 `aru-host-windows-0.31.3-x64.exe` 和同名 `.sha256` 校验文件，运行安装包。它按当前用户安装 Host；第一次启动会准备 Host Core，保存的凭据由 Windows DPAPI 保护。手机连接若被防火墙阻挡，Console 会提供配置入口。
