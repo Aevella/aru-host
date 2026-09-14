@@ -21,6 +21,7 @@ jobs:
           node --test tests/container-runtime-setup.test.mjs tests/container-status-http.test.mjs
           node --test tests/state-save.test.mjs
           node tests/state-startup-smoke.mjs
+          node --test tests/driver-launch.test.mjs
           node tests/mobile-collaborator-identity-smoke.mjs
           node tests/windows-secret-store-smoke.mjs
           bash tests/http-smoke.sh

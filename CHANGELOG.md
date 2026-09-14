@@ -1,5 +1,8 @@
 # Changelog
 
+## Unreleased
+
+- Fix Windows driver detection for npm-installed Codex and Claude Code: Node refuses to spawn the npm `.cmd` shim without a shell (`EINVAL`), which the probe reported as `version-probe-failed` and then stopped searching. The Host now launches the shim's JavaScript entry with its own Node (no cmd.exe, safe with non-ASCII user directories), keeps trying later candidates, and records the underlying error in `failureDetail`.
 ## 0.31.3
 
 - Preserve unreadable or structurally invalid Host state and stop startup instead of replacing it with an empty identity.

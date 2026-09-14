@@ -38,7 +38,13 @@ export function createCodexAppServerDriver({ executable, resolveExecutable, log 
   }
 
   async function connect(command) {
-    process = spawn(command, [
+    // `command` is either a bare executable path or the launch spec resolved
+    // by the Host ({ file, args, shell }), e.g. `node <npm entry>` on Windows.
+    const launch = typeof command === "string"
+      ? { file: command, args: [], shell: false }
+      : command;
+    process = spawn(launch.file, [
+      ...launch.args,
       "app-server",
       "-c",
       "project_doc_max_bytes=0",
@@ -48,6 +54,7 @@ export function createCodexAppServerDriver({ executable, resolveExecutable, log 
       env: { ...globalThis.process.env, NO_COLOR: "1" },
       stdio: ["ignore", "ignore", "pipe"],
       windowsHide: true,
+      shell: launch.shell === true,
     });
     const url = await listeningURL(process);
     socket = await openSocket(url);

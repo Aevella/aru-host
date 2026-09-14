@@ -1,7 +1,9 @@
 import { createMobileCollaboratorIdentityHost } from "./mobile-collaborator-replicas.mjs";
 import { randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
+import path from "node:path";
 import { createCollaboratorCognitionHost } from "./collaborator-cognition.mjs";
 import { createCollaboratorSurfaceHost } from "./collaborator-surfaces.mjs";
 import { createCodexAppServerDriver } from "./codex-app-server-driver.mjs";
@@ -582,14 +584,58 @@ export function createCollaboratorHost({
   };
 }
 
-function probeDriver(definition, checkedAt) {
+// npm installs a CLI on Windows as a `.cmd` shim next to a `node_modules`
+// tree. Node refuses to spawn `.cmd`/`.bat` files without a shell (EINVAL,
+// since the CVE-2024-27980 fix), so the shim is mapped to the JavaScript entry
+// it forwards to and launched with this Host's own Node. That avoids cmd.exe,
+// PATHEXT and console code pages entirely; a non-ASCII user directory is then
+// just an ordinary UTF-16 argument. A shim that cannot be mapped falls back to
+// a quoted shell launch. Everything else is spawned as-is.
+const NPM_SHIM_ENTRY = /"%(?:~)?dp0%?\\([^"\r\n]+?\.[cm]?js)"/i;
+
+export function driverLaunchSpec(executable, {
+  platform = process.platform,
+  nodePath = process.execPath,
+  exists = existsSync,
+  readShim = (path) => readFileSync(path, "utf8"),
+} = {}) {
+  const direct = { file: executable, args: [], shell: false, source: "direct" };
+  if (platform !== "win32" || !/\.(?:cmd|bat)$/i.test(executable)) return direct;
+  if (!exists(executable)) return direct;
+  let shim = "";
+  try { shim = readShim(executable); } catch { shim = ""; }
+  const match = shim.match(NPM_SHIM_ENTRY);
+  if (match) {
+    const entry = path.win32.join(path.win32.dirname(executable), match[1]);
+    if (exists(entry)) return { file: nodePath, args: [entry], shell: false, source: "npm-shim" };
+  }
+  return { file: `"${executable}"`, args: [], shell: true, source: "shell" };
+}
+
+function runDriverExecutable(executable, args) {
+  const launch = driverLaunchSpec(executable);
+  return spawnSync(launch.file, [...launch.args, ...args], {
+    encoding: "utf8",
+    env: { ...process.env, NO_COLOR: "1" },
+    timeout: 3_000,
+    windowsHide: true,
+    shell: launch.shell,
+  });
+}
+
+function probeFailureDetail(result) {
+  if (result.error) return String(result.error.code ?? result.error.message ?? "spawn-error");
+  if (result.signal) return `signal ${result.signal}`;
+  const stderr = firstLine(result.stderr);
+  return stderr ? `exit ${result.status}: ${stderr}` : `exit ${result.status}`;
+}
+
+// Every candidate is tried; a candidate that exists but fails no longer hides
+// the ones after it (the npm shim used to fail first and stop the search).
+export function probeDriver(definition, checkedAt) {
+  let firstFailure = null;
   for (const executable of definition.executableCandidates) {
-    const result = spawnSync(executable, ["--version"], {
-      encoding: "utf8",
-      env: { ...process.env, NO_COLOR: "1" },
-      timeout: 3_000,
-      windowsHide: true,
-    });
+    const result = runDriverExecutable(executable, ["--version"]);
     if (result.error?.code === "ENOENT") continue;
     const version = firstLine(result.stdout) || firstLine(result.stderr);
     if (result.status === 0 && version) {
@@ -599,17 +645,19 @@ function probeDriver(definition, checkedAt) {
         version,
         checkedAt,
         failure: null,
+        failureDetail: null,
       };
     }
-    return {
+    firstFailure ??= {
       id: definition.id,
       status: "unhealthy",
       version: version || null,
       checkedAt,
       failure: result.error?.code === "ETIMEDOUT" ? "version-probe-timed-out" : "version-probe-failed",
+      failureDetail: `${executable}: ${probeFailureDetail(result)}`,
     };
   }
-  return unavailableProbe(definition, checkedAt);
+  return firstFailure ?? unavailableProbe(definition, checkedAt);
 }
 
 function publicDriverDefinition({ executableCandidates: _, ...definition }) {
@@ -623,6 +671,7 @@ function unavailableProbe(definition, checkedAt) {
     version: null,
     checkedAt,
     failure: "command-not-found",
+    failureDetail: null,
   };
 }
 
@@ -630,15 +679,12 @@ function firstLine(value) {
   return String(value ?? "").split(/\r?\n/, 1)[0].trim().slice(0, 160);
 }
 
-function resolveDriverExecutable(definition) {
+// Returns the launch spec the driver must use, not the bare path: on Windows
+// the working launch may be `node <entry.js>` rather than the candidate itself.
+export function resolveDriverExecutable(definition) {
   for (const executable of definition.executableCandidates) {
-    const result = spawnSync(executable, ["--version"], {
-      encoding: "utf8",
-      env: { ...process.env, NO_COLOR: "1" },
-      timeout: 3_000,
-      windowsHide: true,
-    });
-    if (result.status === 0) return executable;
+    const result = runDriverExecutable(executable, ["--version"]);
+    if (result.status === 0) return driverLaunchSpec(executable);
   }
   return null;
 }
