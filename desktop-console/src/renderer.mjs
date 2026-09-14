@@ -504,9 +504,9 @@ async function openConversation(collaborator, conversationId) {
     content.querySelector("[data-stop-turn]")?.addEventListener("click", () => mutate(() => api.request("POST", `${path}/turns/${encodeURIComponent(conversation.activeTurn.turnId)}/cancel`), null, () => openConversation(collaborator, conversationId)));
     content.querySelector("[data-send]").addEventListener("click", async () => {
       const text = document.querySelector("#composer").value.trim(); if (!text) return;
-      await mutate(() => api.request("PUT", `${path}/messages`, { clientRequestId: crypto.randomUUID(), text }), null, () => openConversation(collaborator, conversationId));
+      await mutate(() => api.request("POST", `${path}/messages`, { clientRequestId: crypto.randomUUID(), text }), null, () => openConversation(collaborator, conversationId));
     });
-    content.querySelectorAll("[data-approval]").forEach((button) => button.addEventListener("click", () => mutate(() => api.request("PUT", `${path}/approvals/${encodeURIComponent(button.dataset.approval)}`, { decision: button.dataset.decision }), null, () => openConversation(collaborator, conversationId))));
+    content.querySelectorAll("[data-approval]").forEach((button) => button.addEventListener("click", () => mutate(() => api.request("POST", `${path}/approvals/${encodeURIComponent(button.dataset.approval)}`, { decision: button.dataset.decision }), null, () => openConversation(collaborator, conversationId))));
   } catch (error) { renderSectionFailure(error); }
   finally { setBusy(false); }
 }

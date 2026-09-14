@@ -10,7 +10,9 @@ const SAFE_PATHS = [
   // Proactive rules: the studio edits, pauses, resumes, archives and runs them.
   ["PUT", /^\/aru\/v1\/hosted-collaborators\/[A-Za-z0-9_-]+\/initiative\/rules\/[A-Za-z0-9_-]+$/],
   ["POST", /^\/aru\/v1\/hosted-collaborators\/[A-Za-z0-9_-]+\/initiative\/rules\/[A-Za-z0-9_-]+\/(?:archive|restore|run)$/],
-  ["PUT", /^\/aru\/v1\/hosted-collaborators\/[A-Za-z0-9_-]+(?:\/(?:cognition|conversations\/[A-Za-z0-9_-]+\/(?:messages|approvals\/[A-Za-z0-9_-]+)|surfaces\/[A-Za-z0-9_-]+(?:\/runtime)?))?$/],
+  ["PUT", /^\/aru\/v1\/hosted-collaborators\/[A-Za-z0-9_-]+(?:\/(?:cognition|surfaces\/[A-Za-z0-9_-]+(?:\/runtime)?))?$/],
+  // Conversation writes: Host Core accepts messages and approval decisions only as POST.
+  ["POST", /^\/aru\/v1\/hosted-collaborators\/[A-Za-z0-9_-]+\/conversations\/[A-Za-z0-9_-]+\/(?:messages|approvals\/[A-Za-z0-9_-]+)$/],
   ["POST", /^\/aru\/v1\/hosted-collaborators\/[A-Za-z0-9_-]+\/conversations\/[A-Za-z0-9_-]+\/turns\/[A-Za-z0-9_-]+\/cancel$/],
   ["POST", /^\/aru\/v1\/hosted-collaborators\/[A-Za-z0-9_-]+\/surfaces\/[A-Za-z0-9_-]+\/(?:rollback|archive|restore)$/],
   ["POST", /^\/aru\/v1\/hosted-collaborators\/[A-Za-z0-9_-]+\/projects\/[A-Za-z0-9_-]+\/(?:checkpoint|publish|archive|restore)$/],
