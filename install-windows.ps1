@@ -34,7 +34,7 @@ function Log([string]$message) {
 }
 
 $coreFiles = @(
-  "aru-selfhost-stub.mjs", "backup-settings.mjs", "conversation-turn-relay.mjs",
+  "aru-selfhost-stub.mjs", "backup-settings.mjs", "conversation-turn-relay.mjs", "conversation-turn-relay-protocol.mjs", "conversation-turn-relay-results.mjs",
   "collaborator-host.mjs", "mobile-collaborator-replicas.mjs", "mobile-collaborator-identities.mjs", "container-runtime-setup.mjs", "collaborator-cognition.mjs", "collaborator-surfaces.mjs",
   "collaborator-surface-bundles.mjs", "collaborator-conversations.mjs", "collaborator-conversation-attachments.mjs",
   "collaborator-initiative.mjs", "collaborator-projects.mjs", "apns-push.mjs", "wake-bridge.mjs",

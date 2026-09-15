@@ -12,7 +12,7 @@ VERSION="${2:?release version is required}"
 files=(
   aru-selfhost-stub.mjs
   backup-settings.mjs
-  conversation-turn-relay.mjs
+  conversation-turn-relay.mjs conversation-turn-relay-protocol.mjs conversation-turn-relay-results.mjs
   collaborator-host.mjs
   mobile-collaborator-replicas.mjs mobile-collaborator-identities.mjs container-runtime-setup.mjs
   collaborator-cognition.mjs

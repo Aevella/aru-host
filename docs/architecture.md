@@ -17,3 +17,20 @@ External wake is a separate encrypted mailbox, not Host conversation ownership. 
 A page project binds one Host-managed collaborator workspace to an optional Git checkout, immutable artifact checkpoints, and at most one published phone surface. Phone and Console inspect the same checkout. Saving a checkpoint, publishing a phone release, and pushing Git commits are deliberately separate actions; none creates a second phone-side repository.
 
 Third-party plugins are separate permissioned lifecycle units. The official `full` profile installs the Host substrate and implemented official capability bundles; it does not silently install or grant arbitrary third-party code.
+
+## Phone-owned conversation relay
+
+`conversation-turn-relay.mjs` owns authenticated routes, idempotent admission,
+execution state, cancellation and acknowledgement. It never becomes the owner
+of the phone conversation and never replays an accepted provider request on restart.
+`conversation-turn-relay-protocol.mjs` owns provider request validation and
+redacted HTTP error projection. `conversation-turn-relay-results.mjs` owns raw
+response file append, atomic publication, reads and deletion; it has no second
+turn registry. New modules are included in CLI and desktop installation payloads.
+
+A running GET is a snapshot, not necessarily a complete JSON document or SSE
+event. Clients must retain polling through incomplete frames and recognize SSE
+framing even when an upstream gateway labels it `application/octet-stream`.
+Only after local reconciliation should the phone acknowledge the terminal turn.
+Raw response bytes, including upstream lifecycle metadata, remain preserved;
+this split does not silently filter provider output or change the wire contract.
