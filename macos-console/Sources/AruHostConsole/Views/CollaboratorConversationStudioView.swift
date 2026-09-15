@@ -295,7 +295,7 @@ struct CollaboratorConversationStudioView: View {
     }
 
     private var conversations: [HostCollaboratorConversation] {
-        runtime.collaboratorConversations[collaborator.id] ?? []
+        runtime.conversations.collaboratorConversations[collaborator.id] ?? []
     }
 
     private var selectedProjection: HostCollaboratorConversation? {
@@ -304,11 +304,11 @@ struct CollaboratorConversationStudioView: View {
 
     private var detail: HostCollaboratorConversation? {
         guard let selectedConversationId else { return nil }
-        return runtime.collaboratorConversationDetails[selectedConversationId]
+        return runtime.conversations.collaboratorConversationDetails[selectedConversationId]
     }
 
     private var isMutating: Bool {
-        selectedConversationId.map(runtime.mutatingConversationIds.contains) == true
+        selectedConversationId.map(runtime.conversations.mutatingConversationIds.contains) == true
     }
 
     private var canSend: Bool {
@@ -336,7 +336,7 @@ struct CollaboratorConversationStudioView: View {
         errorMessage = nil
         defer { isCreating = false }
         do {
-            let created = try await runtime.createConversation(collaboratorId: collaborator.id)
+            let created = try await runtime.conversations.createConversation(collaboratorId: collaborator.id)
             selectedConversationId = created.id
         } catch {
             errorMessage = error.localizedDescription
@@ -348,7 +348,7 @@ struct CollaboratorConversationStudioView: View {
         isRefreshing = true
         defer { isRefreshing = false }
         do {
-            try await runtime.refreshConversations(collaboratorId: collaborator.id)
+            try await runtime.conversations.refreshConversations(collaboratorId: collaborator.id)
             if selectNewestWhenNeeded && selectedConversationId == nil {
                 selectedConversationId = conversations.first?.id
             }
@@ -359,7 +359,7 @@ struct CollaboratorConversationStudioView: View {
 
     private func refreshDetail(_ conversationId: String, reportError: Bool) async {
         do {
-            _ = try await runtime.conversationDetail(
+            _ = try await runtime.conversations.conversationDetail(
                 collaboratorId: collaborator.id,
                 conversationId: conversationId)
         } catch where reportError {
@@ -372,7 +372,7 @@ struct CollaboratorConversationStudioView: View {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         errorMessage = nil
         do {
-            _ = try await runtime.sendConversationMessage(
+            _ = try await runtime.conversations.sendConversationMessage(
                 collaboratorId: collaborator.id,
                 conversationId: selectedConversationId,
                 text: text)
@@ -386,7 +386,7 @@ struct CollaboratorConversationStudioView: View {
         guard let selectedConversationId else { return }
         errorMessage = nil
         do {
-            _ = try await runtime.resolveConversationApproval(
+            _ = try await runtime.conversations.resolveConversationApproval(
                 collaboratorId: collaborator.id,
                 conversationId: selectedConversationId,
                 approvalId: approval.id,
@@ -400,7 +400,7 @@ struct CollaboratorConversationStudioView: View {
         guard let selectedConversationId else { return }
         errorMessage = nil
         do {
-            _ = try await runtime.cancelConversationTurn(
+            _ = try await runtime.conversations.cancelConversationTurn(
                 collaboratorId: collaborator.id,
                 conversationId: selectedConversationId,
                 turnId: turn.turnId)

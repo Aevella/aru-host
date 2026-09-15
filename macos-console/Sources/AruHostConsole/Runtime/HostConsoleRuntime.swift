@@ -22,10 +22,7 @@ final class HostConsoleRuntime {
     private(set) var artifacts: [HostArtifact] = []
     private(set) var driverInventory: AgentDriverInventory?
     private(set) var collaborators: [HostedCollaborator] = []
-    private(set) var collaboratorSurfaces: [String: [HostCollaboratorSurface]] = [:]
     var collaboratorProjects: [String: [HostCollaboratorProject]] = [:]
-    private(set) var collaboratorConversations: [String: [HostCollaboratorConversation]] = [:]
-    private(set) var collaboratorConversationDetails: [String: HostCollaboratorConversation] = [:]
     var collaboratorCognitions: [String: HostCollaboratorCognition] = [:]
     var collaboratorInitiatives: [String: HostCollaboratorInitiative] = [:]
     private(set) var sectionErrors: [HostConsoleSection: String] = [:]
@@ -35,9 +32,7 @@ final class HostConsoleRuntime {
     private(set) var isPairing = false
     private(set) var isCreatingCollaborator = false
     private(set) var mutatingCollaboratorIds: Set<String> = []
-    private(set) var mutatingSurfaceIds: Set<String> = []
     var mutatingProjectIds: Set<String> = []
-    private(set) var mutatingConversationIds: Set<String> = []
     var mutatingCognitionIds: Set<String> = []
     var mutatingInitiativeIds: Set<String> = []
     private(set) var isUpdatingJobPolicy = false
@@ -47,6 +42,19 @@ final class HostConsoleRuntime {
     private(set) var mutatingBackupIds: Set<String> = []
     private(set) var isUpdatingBackupSettings = false
     private(set) var lastUpdated: Date?
+
+    @ObservationIgnored lazy var conversations = HostConsoleConversations(
+        load: { [weak self] path, method, body in
+            guard let self else { throw CancellationError() }
+            return try await self.dataRequest(path, method: method, body: body, authenticated: true).0
+        },
+        didUpdate: { [weak self] in self?.lastUpdated = Date() })
+
+    @ObservationIgnored lazy var surfaces = HostConsoleSurfaces(
+        load: { [weak self] path, method, body in
+            guard let self else { throw CancellationError() }
+            return try await self.dataRequest(path, method: method, body: body, authenticated: true).0
+        }, didUpdate: { [weak self] in self?.lastUpdated = Date() })
 
     private let session: URLSession
     private let vault: HostCredentialVault
@@ -315,255 +323,6 @@ final class HostConsoleRuntime {
         }
         sectionErrors[.mcp] = nil
         sectionErrors[.collaborators] = nil
-        lastUpdated = Date()
-    }
-
-    func surfaceDetail(collaboratorId: String,
-                       surfaceId: String) async throws -> HostCollaboratorSurface {
-        try await request(
-            "/aru/v1/hosted-collaborators/\(collaboratorId)/surfaces/\(surfaceId)",
-            authenticated: true)
-    }
-
-    func surfaceBundle(collaboratorId: String,
-                       surfaceId: String,
-                       versionId: String) async throws -> HostCollaboratorSurfaceBundle {
-        try await request(
-            "/aru/v1/hosted-collaborators/\(collaboratorId)/surfaces/\(surfaceId)/versions/\(versionId)/bundle",
-            authenticated: true)
-    }
-
-    @discardableResult
-    func publishSurface(collaborator: HostedCollaborator,
-                        surface: HostCollaboratorSurface?,
-                        title: String,
-                        sourceHTML: String,
-                        note: String,
-                        allowsOutboundNetwork: Bool) async throws -> HostCollaboratorSurface {
-        let mutationId = surface?.surfaceId ?? "new::\(collaborator.id)"
-        guard !mutatingSurfaceIds.contains(mutationId) else {
-            throw HostConsoleHTTPError.server(L10n.surfaceMutationInProgress)
-        }
-        mutatingSurfaceIds.insert(mutationId)
-        defer { mutatingSurfaceIds.remove(mutationId) }
-        let path: String
-        let body: Data
-        let method: String
-        if let surface {
-            path = "/aru/v1/hosted-collaborators/\(collaborator.id)/surfaces/\(surface.surfaceId)"
-            method = "PUT"
-            body = try JSONEncoder().encode(UpdateHostCollaboratorSurfaceBody(
-                expectedRevision: surface.revision,
-                title: title.trimmingCharacters(in: .whitespacesAndNewlines),
-                sourceHTML: sourceHTML,
-                note: note.trimmingCharacters(in: .whitespacesAndNewlines),
-                networkAccess: allowsOutboundNetwork ? "outbound" : "none"))
-        } else {
-            path = "/aru/v1/hosted-collaborators/\(collaborator.id)/surfaces"
-            method = "POST"
-            body = try JSONEncoder().encode(CreateHostCollaboratorSurfaceBody(
-                title: title.trimmingCharacters(in: .whitespacesAndNewlines),
-                sourceHTML: sourceHTML,
-                note: note.trimmingCharacters(in: .whitespacesAndNewlines),
-                networkAccess: allowsOutboundNetwork ? "outbound" : "none"))
-        }
-        let updated: HostCollaboratorSurface = try await request(
-            path, method: method, body: body, authenticated: true)
-        try await refreshSurfaces(collaboratorId: collaborator.id)
-        lastUpdated = Date()
-        return updated
-    }
-
-    @discardableResult
-    func setSurfaceNetworkAccess(_ allowsOutboundNetwork: Bool,
-                                 collaborator: HostedCollaborator,
-                                 surface: HostCollaboratorSurface) async throws -> HostCollaboratorSurface {
-        guard !mutatingSurfaceIds.contains(surface.surfaceId) else {
-            throw HostConsoleHTTPError.server(L10n.surfaceMutationInProgress)
-        }
-        mutatingSurfaceIds.insert(surface.surfaceId)
-        defer { mutatingSurfaceIds.remove(surface.surfaceId) }
-        let body = try JSONEncoder().encode(UpdateHostCollaboratorSurfaceRuntimeBody(
-            expectedRevision: surface.revision,
-            networkAccess: allowsOutboundNetwork ? "outbound" : "none"))
-        let updated: HostCollaboratorSurface = try await request(
-            "/aru/v1/hosted-collaborators/\(collaborator.id)/surfaces/\(surface.surfaceId)/runtime",
-            method: "PUT",
-            body: body,
-            authenticated: true)
-        try await refreshSurfaces(collaboratorId: collaborator.id)
-        lastUpdated = Date()
-        return updated
-    }
-
-    @discardableResult
-    func rollbackSurface(collaborator: HostedCollaborator,
-                         surface: HostCollaboratorSurface,
-                         versionId: String) async throws -> HostCollaboratorSurface {
-        guard !mutatingSurfaceIds.contains(surface.surfaceId) else {
-            throw HostConsoleHTTPError.server(L10n.surfaceMutationInProgress)
-        }
-        mutatingSurfaceIds.insert(surface.surfaceId)
-        defer { mutatingSurfaceIds.remove(surface.surfaceId) }
-        let body = try JSONEncoder().encode(RollbackHostCollaboratorSurfaceBody(
-            expectedRevision: surface.revision,
-            versionId: versionId,
-            note: L10n.surfaceRollbackNote))
-        let updated: HostCollaboratorSurface = try await request(
-            "/aru/v1/hosted-collaborators/\(collaborator.id)/surfaces/\(surface.surfaceId)/rollback",
-            method: "POST",
-            body: body,
-            authenticated: true)
-        try await refreshSurfaces(collaboratorId: collaborator.id)
-        lastUpdated = Date()
-        return updated
-    }
-
-    @discardableResult
-    func setSurfaceArchived(_ archived: Bool,
-                            collaborator: HostedCollaborator,
-                            surface: HostCollaboratorSurface) async throws -> HostCollaboratorSurface {
-        guard !mutatingSurfaceIds.contains(surface.surfaceId) else {
-            throw HostConsoleHTTPError.server(L10n.surfaceMutationInProgress)
-        }
-        mutatingSurfaceIds.insert(surface.surfaceId)
-        defer { mutatingSurfaceIds.remove(surface.surfaceId) }
-        let body = try JSONEncoder().encode(ArchiveHostCollaboratorSurfaceBody(
-            expectedRevision: surface.revision))
-        let action = archived ? "archive" : "restore"
-        let updated: HostCollaboratorSurface = try await request(
-            "/aru/v1/hosted-collaborators/\(collaborator.id)/surfaces/\(surface.surfaceId)/\(action)",
-            method: "POST",
-            body: body,
-            authenticated: true)
-        try await refreshSurfaces(collaboratorId: collaborator.id)
-        lastUpdated = Date()
-        return updated
-    }
-
-    func refreshSurfaces(collaboratorId: String) async throws {
-        let inventory: HostCollaboratorSurfaceInventory = try await request(
-            "/aru/v1/hosted-collaborators/\(collaboratorId)/surfaces",
-            authenticated: true)
-        guard inventory.schema == "aru.selfhost.collaborator-surface-inventory.v1",
-              inventory.collaboratorId == collaboratorId else {
-            throw HostConsoleModelError.invalidCollaboratorSchema
-        }
-        if collaboratorSurfaces[collaboratorId] != inventory.surfaces {
-            collaboratorSurfaces[collaboratorId] = inventory.surfaces
-        }
-        lastUpdated = Date()
-    }
-
-    func refreshConversations(collaboratorId: String) async throws {
-        let inventory: HostCollaboratorConversationInventory = try await request(
-            "/aru/v1/hosted-collaborators/\(collaboratorId)/conversations",
-            authenticated: true)
-        guard inventory.schema == "aru.selfhost.collaborator-conversation-inventory.v1",
-              inventory.collaboratorId == collaboratorId else {
-            throw HostConsoleModelError.invalidCollaboratorSchema
-        }
-        if collaboratorConversations[collaboratorId] != inventory.conversations {
-            collaboratorConversations[collaboratorId] = inventory.conversations
-        }
-        lastUpdated = Date()
-    }
-
-    func createConversation(collaboratorId: String) async throws -> HostCollaboratorConversation {
-        let body = try JSONEncoder().encode(CreateHostCollaboratorConversationBody(title: nil))
-        let created: HostCollaboratorConversation = try await request(
-            "/aru/v1/hosted-collaborators/\(collaboratorId)/conversations",
-            method: "POST",
-            body: body,
-            authenticated: true)
-        try await refreshConversations(collaboratorId: collaboratorId)
-        collaboratorConversationDetails[created.conversationId] = created
-        return created
-    }
-
-    func conversationDetail(
-        collaboratorId: String,
-        conversationId: String
-    ) async throws -> HostCollaboratorConversation {
-        let detail: HostCollaboratorConversation = try await request(
-            "/aru/v1/hosted-collaborators/\(collaboratorId)/conversations/\(conversationId)",
-            authenticated: true)
-        collaboratorConversationDetails[conversationId] = detail
-        mergeConversationProjection(detail)
-        return detail
-    }
-
-    func sendConversationMessage(
-        collaboratorId: String,
-        conversationId: String,
-        text: String
-    ) async throws -> HostCollaboratorConversation {
-        guard !mutatingConversationIds.contains(conversationId) else {
-            throw HostConsoleHTTPError.server(L10n.conversationMutationInProgress)
-        }
-        mutatingConversationIds.insert(conversationId)
-        defer { mutatingConversationIds.remove(conversationId) }
-        let body = try JSONEncoder().encode(SendHostCollaboratorConversationMessageBody(
-            clientRequestId: "console_\(UUID().uuidString)",
-            text: text.trimmingCharacters(in: .whitespacesAndNewlines)))
-        let detail: HostCollaboratorConversation = try await request(
-            "/aru/v1/hosted-collaborators/\(collaboratorId)/conversations/\(conversationId)/messages",
-            method: "POST",
-            body: body,
-            authenticated: true)
-        collaboratorConversationDetails[conversationId] = detail
-        mergeConversationProjection(detail)
-        return detail
-    }
-
-    func resolveConversationApproval(
-        collaboratorId: String,
-        conversationId: String,
-        approvalId: String,
-        decision: String
-    ) async throws -> HostCollaboratorConversation {
-        guard !mutatingConversationIds.contains(conversationId) else { return try await conversationDetail(
-            collaboratorId: collaboratorId, conversationId: conversationId) }
-        mutatingConversationIds.insert(conversationId)
-        defer { mutatingConversationIds.remove(conversationId) }
-        let body = try JSONEncoder().encode(ResolveHostCollaboratorConversationApprovalBody(
-            decision: decision))
-        let detail: HostCollaboratorConversation = try await request(
-            "/aru/v1/hosted-collaborators/\(collaboratorId)/conversations/\(conversationId)/approvals/\(approvalId)",
-            method: "POST",
-            body: body,
-            authenticated: true)
-        collaboratorConversationDetails[conversationId] = detail
-        mergeConversationProjection(detail)
-        return detail
-    }
-
-    func cancelConversationTurn(
-        collaboratorId: String,
-        conversationId: String,
-        turnId: String
-    ) async throws -> HostCollaboratorConversation {
-        guard !mutatingConversationIds.contains(conversationId) else { return try await conversationDetail(
-            collaboratorId: collaboratorId, conversationId: conversationId) }
-        mutatingConversationIds.insert(conversationId)
-        defer { mutatingConversationIds.remove(conversationId) }
-        let detail: HostCollaboratorConversation = try await request(
-            "/aru/v1/hosted-collaborators/\(collaboratorId)/conversations/\(conversationId)/turns/\(turnId)/cancel",
-            method: "POST",
-            authenticated: true)
-        collaboratorConversationDetails[conversationId] = detail
-        mergeConversationProjection(detail)
-        return detail
-    }
-
-    private func mergeConversationProjection(_ detail: HostCollaboratorConversation) {
-        var items = collaboratorConversations[detail.collaboratorId] ?? []
-        if let index = items.firstIndex(where: { $0.id == detail.id }) {
-            items[index] = detail
-        } else {
-            items.append(detail)
-        }
-        collaboratorConversations[detail.collaboratorId] = items.sorted { $0.updatedAt > $1.updatedAt }
         lastUpdated = Date()
     }
 
@@ -967,8 +726,8 @@ final class HostConsoleRuntime {
             assignIfChanged(drivers, to: \HostConsoleRuntime.driverInventory)
             assignIfChanged(roots.collaborators, to: \HostConsoleRuntime.collaborators)
             for collaborator in roots.collaborators {
-                try await refreshSurfaces(collaboratorId: collaborator.id)
-                try await refreshConversations(collaboratorId: collaborator.id)
+                try await surfaces.refreshSurfaces(collaboratorId: collaborator.id)
+                try await conversations.refreshConversations(collaboratorId: collaborator.id)
                 try await refreshCognition(collaboratorId: collaborator.id)
             }
         }
@@ -1125,9 +884,8 @@ final class HostConsoleRuntime {
         artifacts = []
         driverInventory = nil
         collaborators = []
-        collaboratorSurfaces = [:]
-        collaboratorConversations = [:]
-        collaboratorConversationDetails = [:]
+        surfaces.clear()
+        conversations.clear()
         collaboratorCognitions = [:]
         sectionErrors = [:]
         loadingSections = []
@@ -1174,103 +932,5 @@ final class HostConsoleRuntime {
 
     private func encodedPluginID(_ value: String) -> String {
         value.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? value
-    }
-}
-
-enum HostConsoleHTTPError: LocalizedError {
-    case invalidURL
-    case invalidResponse
-    case unauthorized
-    case server(String)
-
-    var errorDescription: String? {
-        switch self {
-        case .invalidURL: L10n.invalidURL
-        case .invalidResponse: L10n.invalidResponse
-        case .unauthorized: L10n.pairingExpired
-        case .server(let message): message
-        }
-    }
-}
-
-enum LocalHostLocator {
-    static func baseURL() -> URL {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        let envURL = home.appending(path: "Library/Application Support/Aru Self-Hosted/instances/home/config/node.env")
-        guard let contents = try? String(contentsOf: envURL, encoding: .utf8),
-              let portLine = contents.split(separator: "\n").first(where: { $0.hasPrefix("ARU_PORT=") }),
-              let port = Int(portLine.dropFirst("ARU_PORT=".count)),
-              let url = URL(string: "http://127.0.0.1:\(port)") else {
-            return URL(string: "http://127.0.0.1:8787")!
-        }
-        return url
-    }
-}
-
-enum LocalPairingIssuer {
-    static func issueLink() throws -> String {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        let executable = home.appending(path: ".local/bin/aru-selfhost")
-        guard FileManager.default.isExecutableFile(atPath: executable.path) else {
-            throw LocalPairingError.controlToolMissing
-        }
-        let process = Process()
-        let output = Pipe()
-        let error = Pipe()
-        process.executableURL = executable
-        process.arguments = ["--instance", "home", "pairing"]
-        process.standardOutput = output
-        process.standardError = error
-        try process.run()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
-            throw LocalPairingError.commandFailed
-        }
-        let data = output.fileHandleForReading.readDataToEndOfFile()
-        guard let text = String(data: data, encoding: .utf8),
-              let link = pairingLink(from: text) else {
-            throw LocalPairingError.invalidPairingLink
-        }
-        return link
-    }
-
-    static func issueToken() throws -> String {
-        guard let components = URLComponents(string: try issueLink()),
-              let token = components.queryItems?.first(where: { $0.name == "pairingToken" })?.value,
-              !token.isEmpty else {
-            throw LocalPairingError.invalidPairingLink
-        }
-        return token
-    }
-
-    static func pairingLink(from output: String) -> String? {
-        for line in output.split(whereSeparator: \.isNewline) {
-            let candidate = String(line).trimmingCharacters(in: .whitespacesAndNewlines)
-            guard candidate.hasPrefix("aru://pair?"),
-                  let components = URLComponents(string: candidate) else { continue }
-            let query = (components.queryItems ?? []).reduce(into: [String: String]()) { values, item in
-                guard values[item.name] == nil, let value = item.value else { return }
-                values[item.name] = value
-            }
-            guard query["canonicalUrl"]?.isEmpty == false,
-                  query["serverId"]?.isEmpty == false,
-                  query["pairingToken"]?.isEmpty == false else { continue }
-            return candidate
-        }
-        return nil
-    }
-}
-
-enum LocalPairingError: LocalizedError {
-    case controlToolMissing
-    case commandFailed
-    case invalidPairingLink
-
-    var errorDescription: String? {
-        switch self {
-        case .controlToolMissing: L10n.controlToolMissing
-        case .commandFailed: L10n.pairingCommandFailed
-        case .invalidPairingLink: L10n.invalidPairingLink
-        }
     }
 }

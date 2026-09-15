@@ -86,3 +86,5 @@ node aru-selfhost-stub.mjs --port 8787
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the checks to run before a pull request. Never commit credentials, real pairing links, private network addresses, exports, or signing material.
 
 Aru Host is released under the [Apache License 2.0](LICENSE).
+
+See [architecture](docs/architecture.md) for source ownership. Modular server and relay sources live in `src/`; their root entrypoints are generated deployment payloads compatible with installed upgraders.

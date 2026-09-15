@@ -8,7 +8,7 @@ VERSION="${2:?version required}"
 [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.]+)?$ ]] || { echo "invalid version" >&2; exit 1; }
 
 files=(
-  aru-selfhost-stub.mjs backup-settings.mjs conversation-turn-relay.mjs conversation-turn-relay-protocol.mjs conversation-turn-relay-results.mjs
+  aru-selfhost-stub.mjs backup-settings.mjs conversation-turn-relay.mjs
   collaborator-host.mjs mobile-collaborator-replicas.mjs mobile-collaborator-identities.mjs container-runtime-setup.mjs collaborator-cognition.mjs collaborator-surfaces.mjs
   collaborator-surface-bundles.mjs collaborator-conversations.mjs
   collaborator-conversation-attachments.mjs

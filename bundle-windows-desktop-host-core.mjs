@@ -18,7 +18,7 @@ if (!/^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.]+)?$/.test(version)) {
 const destination = resolve(destinationInput);
 
 const files = [
-  "aru-selfhost-stub.mjs", "backup-settings.mjs", "conversation-turn-relay.mjs", "conversation-turn-relay-protocol.mjs", "conversation-turn-relay-results.mjs",
+  "aru-selfhost-stub.mjs", "backup-settings.mjs", "conversation-turn-relay.mjs",
   "collaborator-host.mjs", "mobile-collaborator-replicas.mjs", "mobile-collaborator-identities.mjs", "container-runtime-setup.mjs", "collaborator-cognition.mjs", "collaborator-surfaces.mjs",
   "collaborator-surface-bundles.mjs", "collaborator-conversations.mjs", "collaborator-conversation-attachments.mjs",
   "collaborator-initiative.mjs", "collaborator-projects.mjs", "apns-push.mjs", "wake-bridge.mjs",

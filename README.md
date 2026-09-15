@@ -202,3 +202,5 @@ npm test --prefix desktop-console
 ```
 
 本项目使用 [Apache License 2.0](LICENSE)。Aru iOS 客户端不在这个仓库中。
+
+开发源码与责任划分见 [架构说明](docs/architecture.md)；主服务与托管回复的模块化源码位于 `src/`，根目录对应文件为兼容已安装升级器的生成运行文件。
