@@ -19,7 +19,7 @@ const devices = {
   ],
 };
 const collaborator = {
-  collaboratorId: "root_corveil",
+  collaboratorId: "root_example",
   displayName: "Example Collaborator",
   driverId: "codex",
   providerProfileId: null,
