@@ -62,17 +62,17 @@ try {
   assert.notEqual(a.collaboratorId, b.collaboratorId);
   assert.equal(state.hostedCollaborators.length, 0);
   assert.equal(host.collaboratorInventory().mobileIdentities.length, 2);
-  const project = host.callProjectTool("aru_collaborator_project_create", {
+  const project = await host.callProjectTool("aru_collaborator_project_create", {
     collaboratorId: a.collaboratorId, title: "Driver-free page",
   }, device).value;
-  const published = host.callProjectTool("aru_collaborator_project_publish", {
+  const published = await host.callProjectTool("aru_collaborator_project_publish", {
     collaboratorId: a.collaboratorId, projectId: project.projectId,
     expectedRevision: project.revision, networkAccess: "none",
   }, device).value;
   assert.ok(published.project.surfaceId);
   const surfaces = host.callSurfaceTool("aru_collaborator_surface_inventory", { collaboratorId: a.collaboratorId }, device).value;
   assert.equal(surfaces.surfaces.length, 1);
-  assert.equal(host.callProjectTool("aru_collaborator_project_inventory", { collaboratorId: b.collaboratorId }, device).value.projects.length, 0);
+  assert.equal((await host.callProjectTool("aru_collaborator_project_inventory", { collaboratorId: b.collaboratorId }, device).value).projects.length, 0);
   await assert.rejects(call("GET", `/aru/v1/hosted-collaborators/${b.collaboratorId}/projects/${project.projectId}`), { status: 404 });
   // Artifact identities cannot enter computer cognition or execution endpoints.
   await assert.rejects(call("GET", `/aru/v1/hosted-collaborators/${a.collaboratorId}/cognition`), { code: "collaborator.unknown" });
@@ -86,7 +86,7 @@ try {
   const restored = await enroll(sourceA, "Renamed phone collaborator");
   assert.equal(restored.collaboratorId, a.collaboratorId);
   assert.equal(restored.displayName, "Renamed phone collaborator");
-  assert.equal(host.callProjectTool("aru_collaborator_project_inventory", { collaboratorId: restored.collaboratorId }, device).value.projects.length, 1);
+  assert.equal((await host.callProjectTool("aru_collaborator_project_inventory", { collaboratorId: restored.collaboratorId }, device).value).projects.length, 1);
   await assert.rejects(enroll("../escape"));
   assert.equal(state.hostedCollaborators.length, 0);
   assert.equal(host.driverInventory().execution.enabled, false);
