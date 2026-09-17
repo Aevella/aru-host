@@ -59,8 +59,7 @@ export function createProviderProfileHost({
       if (isProfileInUse(profile.profileId)) {
         throw new HttpError(409, "provider_profile.in_use", "先把使用这个 API 配置的电脑协作者换到别的驱动");
       }
-      requireSecretStorage();
-      secretStore.remove(profile.profileId);
+      removeStoredSecret(profile);
       state.providerProfiles = state.providerProfiles.filter((item) => item.profileId !== profile.profileId);
       saveState();
       sendJSON(res, 200, { schema: PROFILE_SCHEMA, profileId: profile.profileId, deleted: true });
@@ -78,7 +77,6 @@ export function createProviderProfileHost({
   }
 
   async function createProfile(body) {
-    requireSecretStorage();
     const requestId = body.requestId;
     if (requestId !== undefined && !/^[A-Fa-f0-9-]{36}$/.test(requestId)) {
       throw new HttpError(400, "provider_profile.request_id_invalid", "invalid request id");
@@ -96,7 +94,10 @@ export function createProviderProfileHost({
       lastCheckedAt: null,
       lastError: null,
     }, body);
-    if (profile.authMode !== "none") secretStore.write(profile.profileId, body.apiKey);
+    if (profile.authMode !== "none") {
+      requireSecretStorage();
+      secretStore.write(profile.profileId, body.apiKey);
+    }
     state.providerProfiles.push(profile);
     saveState();
     return checkProfile(profile);
@@ -116,8 +117,7 @@ export function createProviderProfileHost({
       throw new HttpError(400, "provider_profile.secret_required", "更换接口地址时需要重新填写 API key");
     }
     if (normalized.authMode === "none") {
-      requireSecretStorage();
-      secretStore.remove(profile.profileId);
+      removeStoredSecret(profile);
     } else if (body.apiKey !== undefined && body.apiKey !== "") {
       requireSecretStorage();
       secretStore.write(profile.profileId, body.apiKey);
@@ -270,6 +270,14 @@ export function createProviderProfileHost({
   function hasSecret(profileId) {
     if (!secretStore.availability().supported) return false;
     return Boolean(secretStore.read(profileId));
+  }
+
+  // A keyless profile never wrote a key, so a Host without secret storage can
+  // still save, switch and delete it. A keyed profile's key must be removable.
+  function removeStoredSecret(profile) {
+    if (profile.authMode === "none" && !secretStore.availability().supported) return;
+    requireSecretStorage();
+    secretStore.remove(profile.profileId);
   }
 
   function requireSecretStorage() {

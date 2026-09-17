@@ -2,7 +2,7 @@
 
 ## 0.32.0
 
-- Let paired phones create, edit, test and delete model API profiles and create computer collaborators; keys stay in the OS secret store, creation is replay-safe, keyless (`authMode: none`) profiles run, and moving a keyed profile to another origin from a phone requires re-entering the key.
+- Let paired phones create, edit, test and delete model API profiles and create computer collaborators; keys stay in the OS secret store, creation is replay-safe, keyless (`authMode: none`) profiles run without touching the secret store (also on Hosts that have none), and moving a keyed profile to another origin from a phone requires re-entering the key.
 - Accept official-relay result-notification registrations (route only, no reply text) alongside direct APNs tokens, and mark remote notifications `content-available`. Delivery through the relay also needs an Aru build from TestFlight 0.3 (202609160540) and a relay deployment that accepts Host result routes.
 - Fix Linux Secret Service detection, add idempotent plugin install receipts, and remove Windows uninstall junctions before deleting release targets.
 - Build Host Core from modular `src/` sources into fixed-name payloads that installed 0.31.x upgraders can still install; separate relay protocol checks and raw response storage.

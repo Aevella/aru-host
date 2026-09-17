@@ -282,6 +282,52 @@ await assert.rejects(
     && error.status === 409
     && error.code === "provider_profile.secret_storage_unavailable",
 );
+
+// Keyless profiles stay usable where no secret storage exists; keyed edits
+// still need it.
+const keylessState = {};
+let keylessTests = 0;
+const keylessHost = createProviderProfileHost({
+  state: keylessState,
+  saveState() {},
+  readJSONBody: async (req) => req.body,
+  sendJSON(res, status, body) { res.status = status; res.body = body; },
+  HttpError,
+  secretStore: {
+    availability: () => ({ supported: false, storage: "unavailable", failure: "unsupported" }),
+    read() { throw new Error("must not read"); },
+    write() { throw new Error("must not write"); },
+    remove() { throw new Error("must not remove"); },
+  },
+  testProfile: async () => { keylessTests += 1; },
+  now: () => ++clock,
+});
+async function keylessCall(method, path, body) {
+  const res = {};
+  await keylessHost.route({ method, body }, res, path, () => ({ deviceId: "device_test", deviceRole: null }), () => {});
+  return res;
+}
+const keylessInput = {
+  displayName: "Local model", protocol: "openai-compatible", baseURL: "http://127.0.0.1:11434",
+  path: "v1/chat/completions", model: "local-model", authMode: "none",
+};
+const keyless = await keylessCall("POST", "/aru/v1/provider-profiles", keylessInput);
+assert.equal(keyless.status, 201);
+assert.equal(keyless.body.health, "ready");
+assert.equal(keyless.body.hasSecret, false);
+const keylessRenamed = await keylessCall("PUT", `/aru/v1/provider-profiles/${keyless.body.profileId}`,
+  { ...keylessInput, displayName: "Local model 2", expectedRevision: keyless.body.revision });
+assert.equal(keylessRenamed.body.displayName, "Local model 2");
+assert.equal((await keylessCall("POST", `/aru/v1/provider-profiles/${keyless.body.profileId}/test`)).body.health, "ready");
+await assert.rejects(
+  () => keylessCall("PUT", `/aru/v1/provider-profiles/${keyless.body.profileId}`,
+    { ...keylessInput, authMode: "bearer", apiKey: "key-one", expectedRevision: keylessRenamed.body.revision }),
+  (error) => error instanceof HttpError && error.code === "provider_profile.secret_storage_unavailable",
+);
+assert.equal(keylessState.providerProfiles[0].authMode, "none");
+assert.equal(keylessTests, 3);
+assert.equal((await keylessCall("DELETE", `/aru/v1/provider-profiles/${keyless.body.profileId}`)).body.deleted, true);
+assert.equal(keylessState.providerProfiles.length, 0);
 console.log("ARU_PROVIDER_PROFILES_SMOKE_OK");
 
 async function call(method, path, body = undefined, authority = "console") {

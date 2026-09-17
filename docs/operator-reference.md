@@ -273,7 +273,8 @@ edit, test, and delete profiles. A `requestId` makes creation replay-safe. When 
 paired phone moves a keyed profile to a different origin, it must submit the key
 again (`provider_profile.secret_required`), so an endpoint change cannot forward
 the stored key to an address it was never entered for. `authMode: "none"` profiles
-run without a stored key.
+never read or write the secret store, so they can be saved, tested, run, and deleted
+on a Host without secret storage; keyed profiles still require it.
 
 `mobile-collaborator-replicas.mjs` owns a distinct phone-authoritative execution
 lane. The phone publishes a bounded snapshot with an epoch, selected proactive
