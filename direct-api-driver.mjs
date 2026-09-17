@@ -21,7 +21,7 @@ export function createDirectAPIDriver({ profileForId, readSecret, fetchImpl = fe
         const profile = profileForId(profileId);
         if (!profile) throw new Error("这个模型 API 配置已经不存在");
         const secret = readSecret(profileId);
-        if (!secret) throw new Error("这个模型 API 配置缺少钥匙串密钥");
+        if (!secret && profile.authMode !== "none") throw new Error("这个模型 API 配置缺少钥匙串密钥");
         const threadId = options.threadId ?? `api_thread_${randomUUID()}`;
         const turnId = `api_turn_${randomUUID()}`;
         const controller = new AbortController();
@@ -55,7 +55,7 @@ export function createDirectAPIDriver({ profileForId, readSecret, fetchImpl = fe
     const profile = profileForId(profileId);
     if (!profile) throw new Error("unknown provider profile");
     const secret = readSecret(profileId);
-    if (!secret) throw new Error("API key is missing from the operating-system secret store");
+    if (!secret && profile.authMode !== "none") throw new Error("API key is missing from the operating-system secret store");
     try {
       const request = profile.protocol === "anthropic-messages"
         ? anthropicRequest(profile, secret, "只回复 OK", [], [], 1)

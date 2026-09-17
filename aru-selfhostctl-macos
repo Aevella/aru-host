@@ -109,7 +109,7 @@ doctor_command() {
     failed=true
   fi
   if [[ -x "$ARU_NODE_BINARY" ]]; then
-    echo "node: $($ARU_NODE_BINARY --version)"
+    echo "node: $("$ARU_NODE_BINARY" --version)"
   else
     echo "node: missing"
     failed=true

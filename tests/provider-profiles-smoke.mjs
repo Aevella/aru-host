@@ -67,6 +67,9 @@ assert.equal(JSON.stringify(state).includes("key-one"), false);
 assert.equal(JSON.stringify(created.body).includes("key-one"), false);
 const profileId = created.body.profileId;
 
+await assert.rejects(() => call("POST", "/aru/v1/provider-profiles", {}, "revoked"),
+  (error) => error.code === "credential.revoked");
+
 const inventory = await call("GET", "/aru/v1/provider-profiles");
 assert.equal(inventory.body.profiles.length, 1);
 assert.equal(inventory.body.profiles[0].baseURL, "https://api.example.test/");
@@ -85,21 +88,8 @@ assert.equal(noAuth.body.health, "ready");
 assert.equal(noAuth.body.hasSecret, false);
 assert.equal(secretStore.read(noAuth.body.profileId), null);
 
-await assert.rejects(
-  () => call("PUT", `/aru/v1/provider-profiles/${profileId}`, {
-    expectedRevision: created.body.revision,
-    displayName: "Phone mutation",
-    protocol: "openai-compatible",
-    baseURL: "https://api.example.test",
-    path: "v1/chat/completions",
-    model: "model-one",
-    authMode: "bearer",
-    maxToolRounds: 2,
-  }, "phone"),
-  (error) => error instanceof HttpError && error.code === "credential.host_console_required",
-);
 
-const updated = await call("PUT", `/aru/v1/provider-profiles/${profileId}`, {
+const localRoute = {
   expectedRevision: created.body.revision,
   displayName: "My route",
   protocol: "openai-compatible",
@@ -108,14 +98,28 @@ const updated = await call("PUT", `/aru/v1/provider-profiles/${profileId}`, {
   model: "local-model",
   authMode: "bearer",
   maxToolRounds: 7,
-});
+};
+// A paired phone cannot move a stored key to another origin without
+// re-entering it; the rejected edit leaves the profile and key untouched.
+await assert.rejects(
+  () => call("PUT", `/aru/v1/provider-profiles/${profileId}`, localRoute, "phone"),
+  (error) => error instanceof HttpError && error.code === "provider_profile.secret_required",
+);
+assert.equal(state.providerProfiles[0].baseURL, "https://api.example.test/");
+assert.equal(state.providerProfiles[0].revision, created.body.revision);
+const updated = await call("PUT", `/aru/v1/provider-profiles/${profileId}`,
+  { ...localRoute, apiKey: "key-one" }, "phone");
 assert.equal(updated.body.health, "ready");
 assert.equal(secretStore.read(profileId), "key-one");
+const renamed = await call("PUT", `/aru/v1/provider-profiles/${profileId}`,
+  { ...localRoute, expectedRevision: updated.body.revision, displayName: "Same origin" }, "phone");
+assert.equal(secretStore.read(profileId), "key-one");
+assert.equal(renamed.body.displayName, "Same origin");
 assert.equal(updated.body.maxOutputTokens, null);
 assert.equal(updated.body.maxToolRounds, 7);
 
 const anthropic = await call("PUT", `/aru/v1/provider-profiles/${profileId}`, {
-  expectedRevision: updated.body.revision,
+  expectedRevision: renamed.body.revision,
   displayName: "My Anthropic route",
   protocol: "anthropic-messages",
   baseURL: "https://api.anthropic.com",
@@ -145,7 +149,10 @@ const linuxSecretStore = createProviderSecretStore({
   platform: "linux",
   run: (command, args, options) => {
     linuxSecretCalls.push({ command, args, input: options?.input });
-    if (args[0] === "--version") return { status: 0, stdout: "secret-tool 0.20", stderr: "" };
+    if (args[0] === "--version") return { status: 2, stdout: "", stderr: "usage: secret-tool ..." };
+    if (args[0] === "lookup" && args.includes("availability-probe")) {
+      return { status: 1, stdout: "", stderr: "" };
+    }
     if (args[0] === "lookup") return { status: 0, stdout: "linux-key\n", stderr: "" };
     return { status: 0, stdout: "", stderr: "" };
   },
@@ -159,8 +166,81 @@ assert.equal(linuxSecretStore.read("provider_deadbeef"), "linux-key");
 linuxSecretStore.write("provider_deadbeef", "new-linux-key");
 linuxSecretStore.remove("provider_deadbeef");
 assert.equal(linuxSecretCalls[0].command, "/usr/bin/secret-tool");
-assert.deepEqual(linuxSecretCalls.map((call) => call.args[0]), ["--version", "lookup", "store", "clear"]);
+assert.deepEqual(linuxSecretCalls.map((call) => call.args[0]), ["lookup", "lookup", "store", "clear"]);
 assert.equal(linuxSecretCalls[2].input, "new-linux-key\n");
+assert.ok(linuxSecretCalls.every((call) => !call.args.includes("--version")));
+
+let unavailableProbeCount = 0;
+let unavailableProbeClock = 100;
+const unavailableLinuxSecretStore = createProviderSecretStore({
+  platform: "linux",
+  now: () => unavailableProbeClock,
+  run: () => {
+    unavailableProbeCount += 1;
+    return {
+      status: 1,
+      stdout: "",
+      stderr: "secret-tool: The name org.freedesktop.secrets was not provided by any service files\n",
+    };
+  },
+});
+assert.deepEqual(unavailableLinuxSecretStore.availability(), {
+  supported: false,
+  storage: "unavailable",
+  failure: "linux-secret-service-unavailable",
+});
+assert.equal(unavailableLinuxSecretStore.availability().supported, false);
+assert.equal(unavailableProbeCount, 1, "one inventory projection must not probe once per profile");
+unavailableProbeClock += 5_001;
+assert.equal(unavailableLinuxSecretStore.availability().supported, false);
+assert.equal(unavailableProbeCount, 2, "a recovered Secret Service must not require a Host restart");
+
+const absentLinuxSecretToolStore = createProviderSecretStore({
+  platform: "linux",
+  run: () => ({ status: null, stdout: "", stderr: "", error: { code: "ENOENT" } }),
+});
+assert.deepEqual(absentLinuxSecretToolStore.availability(), {
+  supported: false,
+  storage: "unavailable",
+  failure: "secret-tool-not-found",
+});
+assert.throws(
+  () => absentLinuxSecretToolStore.read("provider_deadbeef"),
+  /没有安装 secret-tool/,
+);
+
+const missingLinuxSecretStore = createProviderSecretStore({
+  platform: "linux",
+  run: (command, args) => {
+    if (args.includes("availability-probe")) return { status: 1, stdout: "", stderr: "" };
+    return { status: 1, stdout: "", stderr: "" };
+  },
+});
+assert.equal(missingLinuxSecretStore.read("provider_deadbeef"), null);
+
+const failingLinuxSecretStore = createProviderSecretStore({
+  platform: "linux",
+  run: (command, args) => {
+    if (args.includes("availability-probe")) return { status: 1, stdout: "", stderr: "" };
+    return { status: 1, stdout: "", stderr: "secret-tool: Cannot autolaunch D-Bus\n" };
+  },
+});
+assert.throws(
+  () => failingLinuxSecretStore.read("provider_deadbeef"),
+  /Linux Secret Service.*(?:不可访问|读取)/,
+);
+
+const failingLinuxSecretRemovalStore = createProviderSecretStore({
+  platform: "linux",
+  run: (command, args) => {
+    if (args.includes("availability-probe")) return { status: 1, stdout: "", stderr: "" };
+    return { status: 1, stdout: "", stderr: "secret-tool: Cannot autolaunch D-Bus\n" };
+  },
+});
+assert.throws(
+  () => failingLinuxSecretRemovalStore.remove("provider_deadbeef"),
+  /Linux Secret Service.*不可访问/,
+);
 
 const unsupportedHost = createProviderProfileHost({
   state: {},
@@ -211,7 +291,10 @@ async function call(method, path, body = undefined, authority = "console") {
     req,
     res,
     path,
-    () => ({ deviceId: "device_test", deviceRole: authority === "console" ? "host-console" : null }),
+    () => {
+      if (authority === "revoked") throw new HttpError(403, "credential.revoked", "revoked");
+      return { deviceId: "device_test", deviceRole: authority === "console" ? "host-console" : null };
+    },
     () => {
       if (authority !== "console") {
         throw new HttpError(403, "credential.host_console_required", "host console required");
@@ -222,3 +305,15 @@ async function call(method, path, body = undefined, authority = "console") {
   assert.equal(matched, true);
   return res;
 }
+
+const replayInput = { displayName: "Phone replay", protocol: "openai-compatible", baseURL: "https://api.example.test/",
+  path: "v1/chat/completions", model: "model-one", authMode: "bearer", apiKey: "key-one",
+  requestId: "44444444-4444-4444-8444-444444444444" };
+const firstProfile = await call("POST", "/aru/v1/provider-profiles", replayInput, "phone");
+const againProfile = await call("POST", "/aru/v1/provider-profiles", replayInput, "phone");
+assert.equal(firstProfile.body.profileId, againProfile.body.profileId);
+const originalProfile = JSON.stringify(state.providerProfiles.find((item) => item.profileId === firstProfile.body.profileId));
+await assert.rejects(() => call("PUT", `/aru/v1/provider-profiles/${firstProfile.body.profileId}`,
+  { ...replayInput, expectedRevision: firstProfile.body.revision, model: "" }, "phone"));
+assert.equal(JSON.stringify(state.providerProfiles.find((item) => item.profileId === firstProfile.body.profileId)), originalProfile);
+console.log("ARU_PROVIDER_PROFILE_REPLAY_SMOKE_OK");

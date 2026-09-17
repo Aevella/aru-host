@@ -259,7 +259,21 @@ restart records an interrupted attempt as failed instead of silently replaying
 it. `apns-push.mjs` is downstream of durable conversation settlement: it sends
 only completed initiative turns whose rule requested phone notification, never
 an in-progress seed or a manually sent message. Each paired device owns its own
-registration, and revocation removes its delivery eligibility.
+registration, and revocation removes its delivery eligibility. A registration is
+either a direct APNs device token, which needs APNs provider credentials on this
+Host, or an anonymous official-relay route id plus route-scoped wake token. Relay
+delivery posts only the message route (no reply text) to `ARU_WAKE_RELAY_URL` and
+records a 202 receipt as relay acceptance; it is not proof that APNs delivered the
+alert or that the phone opened the reply. Relay registration needs an Aru build
+that sends `relayRouteId` and a relay deployment that accepts Host result routes.
+
+`provider-profiles.mjs` stores model API endpoints; keys go to the operating-system
+secret store and are never returned. The Host Console and paired phones may create,
+edit, test, and delete profiles. A `requestId` makes creation replay-safe. When a
+paired phone moves a keyed profile to a different origin, it must submit the key
+again (`provider_profile.secret_required`), so an endpoint change cannot forward
+the stored key to an address it was never entered for. `authMode: "none"` profiles
+run without a stored key.
 
 `mobile-collaborator-replicas.mjs` owns a distinct phone-authoritative execution
 lane. The phone publishes a bounded snapshot with an epoch, selected proactive

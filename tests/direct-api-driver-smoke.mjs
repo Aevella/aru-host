@@ -578,3 +578,18 @@ for (const protocol of ["openai-compatible", "anthropic-messages"]) {
 }
 
 console.log("ARU_DIRECT_API_DRIVER_SMOKE_OK");
+
+let noAuthRequest;
+const noAuthDriver = createDirectAPIDriver({
+  profileForId: () => ({ ...profile, authMode: "none", hasSecret: false }),
+  readSecret: () => null,
+  fetchImpl: async (_, init) => {
+    noAuthRequest = init;
+    return new Response(JSON.stringify({ choices: [{ message: { content: "OK" }, finish_reason: "stop" }] }),
+      { status: 200, headers: { "content-type": "application/json" } });
+  },
+});
+await noAuthDriver.testProfile("provider_test");
+assert.equal(noAuthRequest.headers.authorization, undefined);
+assert.equal(noAuthRequest.headers["x-api-key"], undefined);
+console.log("ARU_DIRECT_API_NO_AUTH_SMOKE_OK");

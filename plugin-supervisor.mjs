@@ -95,6 +95,7 @@ export function createPluginSupervisor({
       installedAt: plugin.installedAt,
       updatedAt: plugin.updatedAt,
       lastErrorCode: plugin.lastErrorCode ?? null,
+      installReceiptId: plugin.installReceiptId ?? null,
       lastErrorMessage: plugin.lastErrorMessage ?? null,
       events: plugin.events ?? [],
     };
@@ -106,7 +107,14 @@ export function createPluginSupervisor({
       throw new HttpError(409, "plugin.workshop_publish_required", "Source plugins must be validated and published through the plugin workshop");
     }
     requirePluginRuntime(request.manifest.packageMode);
-    if (pluginRecord(request.manifest.pluginId)) {
+    const existing = pluginRecord(request.manifest.pluginId);
+    if (existing && request.installReceiptId &&
+        existing.installReceiptId === request.installReceiptId &&
+        JSON.stringify(existing.manifest) === JSON.stringify(request.manifest) &&
+        pluginPermissionsEqual(existing.grantedPermissions, request.grantedPermissions)) {
+      return publicPlugin(existing);
+    }
+    if (existing) {
       throw new HttpError(409, "plugin.already_installed", "Plugin is already installed; use upgrade");
     }
     pullPluginImage(request.manifest.image);
@@ -122,6 +130,7 @@ export function createPluginSupervisor({
       lastErrorCode: null,
       lastErrorMessage: null,
       installedByDeviceId: device.deviceId,
+      installReceiptId: request.installReceiptId,
       events: [],
     };
     appendPluginEvent(plugin, "installed", "succeeded", device, `Installed ${plugin.manifest.version} disabled`);
@@ -314,7 +323,13 @@ export function createPluginSupervisor({
     if (!pluginPermissionsEqual(body.grantedPermissions, manifest.permissions)) {
       throw new HttpError(400, "plugin.permission_receipt_mismatch", "Granted permissions must exactly match the reviewed manifest permissions");
     }
-    return { manifest, grantedPermissions: body.grantedPermissions };
+    const installReceiptId = body.installReceiptId ?? null;
+    if (installReceiptId !== null &&
+        (typeof installReceiptId !== "string" || installReceiptId.length < 1 ||
+         installReceiptId.length > 128 || !/^[A-Za-z0-9._:-]+$/.test(installReceiptId))) {
+      throw new HttpError(400, "plugin.install_receipt_invalid", "Install receipt id is invalid");
+    }
+    return { manifest, grantedPermissions: body.grantedPermissions, installReceiptId };
   }
 
   function pluginPermissionsEqual(left, right) {

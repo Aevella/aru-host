@@ -201,6 +201,7 @@ const remotePush = createAPNsPushHost({
   HttpError,
   serverId: state.serverId,
   credentialStore: apnsCredentialStore,
+  relayBaseURL: config.wakeRelayBaseURL,
   log,
 });
 const wakeBridge = createWakeBridge({

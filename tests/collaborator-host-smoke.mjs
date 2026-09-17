@@ -251,3 +251,14 @@ await assert.rejects(
 );
 
 console.log("ARU_COLLABORATOR_HOST_SMOKE_OK");
+
+const createRequest = {
+  method: "POST", body: { displayName: "Phone-created", driverId: "claude-code",
+    requestId: "33333333-3333-4333-8333-333333333333" },
+};
+const firstCreate = {}, repeatedCreate = {};
+await host.route(createRequest, firstCreate, "/aru/v1/hosted-collaborators", () => ({ deviceId: "phone-create" }), () => {});
+await host.route(createRequest, repeatedCreate, "/aru/v1/hosted-collaborators", () => ({ deviceId: "phone-create" }), () => {});
+assert.equal(firstCreate.body.collaboratorId, repeatedCreate.body.collaboratorId);
+assert.equal(state.hostedCollaborators.filter((item) => item.createRequestId === createRequest.body.requestId).length, 1);
+console.log("ARU_HOST_CREATE_REPLAY_SMOKE_OK");
