@@ -2,11 +2,12 @@
 
 ## 0.32.0
 
-- Let paired phones create, edit, test and delete model API profiles and create computer collaborators; keys stay in the OS secret store, creation is replay-safe, keyless (`authMode: none`) profiles run without touching the secret store (also on Hosts that have none), and moving a keyed profile to another origin from a phone requires re-entering the key.
-- Accept official-relay result-notification registrations (route only, no reply text) alongside direct APNs tokens, and mark remote notifications `content-available`. Delivery through the relay also needs an Aru build from TestFlight 0.3 (202609160540) and a relay deployment that accepts Host result routes.
+- Manage model API profiles from a paired iPhone and create computer collaborators there; keys stay in the OS secret store, creation is replay-safe, and moving a keyed profile to another origin asks for the key again.
+- Run keyless (`authMode: none`) profiles, including on a Host without secret storage.
+- Register result notifications on the official relay route (message route only, no reply text) alongside direct APNs tokens, and mark remote notifications `content-available`. Relay delivery also needs Aru from TestFlight 0.3 (202609160540) and the relay update that accepts Host result routes.
 - Fix Linux Secret Service detection, add idempotent plugin install receipts, and remove Windows uninstall junctions before deleting release targets.
-- Build Host Core from modular `src/` sources into fixed-name payloads that installed 0.31.x upgraders can still install; separate relay protocol checks and raw response storage.
-- Protocol remains `stub-0.30`; no data migration. SQLite Host storage and Claude Code execution are not included. See [installation and upgrade details](docs/releases/0.32.0.md).
+- Build Host Core from modular `src/` sources into the fixed-name payloads an installed 0.31.x upgrader already knows, and separate relay protocol checks from raw response storage.
+- Protocol remains `stub-0.30`; no data migration. See [installation and upgrade details](docs/releases/0.32.0.md).
 
 ## 0.31.4
 
