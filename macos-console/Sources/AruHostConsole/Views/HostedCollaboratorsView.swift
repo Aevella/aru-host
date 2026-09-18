@@ -118,8 +118,8 @@ struct HostedCollaboratorsView: View {
                                         providerProfile: providerRuntime.profiles.first {
                                             $0.profileId == collaborator.providerProfileId
                                         },
-                                        surfaceCount: runtime.collaboratorSurfaces[collaborator.id]?.count ?? 0,
-                                        conversations: runtime.collaboratorConversations[collaborator.id] ?? [])
+                                        surfaceCount: runtime.surfaces.collaboratorSurfaces[collaborator.id]?.count ?? 0,
+                                        conversations: runtime.conversations.collaboratorConversations[collaborator.id] ?? [])
                                 }
                                 .buttonStyle(.plain)
                                 Button {

@@ -6,7 +6,7 @@ PLUGIN_SUPERVISOR_MANIFEST_V2='{"schema":"aru.selfhost.plugin-manifest.v1","plug
 PLUGIN_SUPERVISOR_MANIFEST_FAIL='{"schema":"aru.selfhost.plugin-manifest.v1","pluginId":"memory.example","displayName":"Memory Example","version":"3.0.0","publisher":"Example","source":"https://example.invalid/memory","packageMode":"oci","image":"registry.example/failstart@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","protocols":["memory-v1"],"permissions":{"network":"outbound","persistentVolume":true,"secretHandles":[],"hostPaths":[],"deviceAccess":false},"resources":{"memoryMiB":256,"cpuMillis":750,"pids":48}}'
 
 plugin_supervisor_request() {
-  printf '{"schema":"aru.selfhost.plugin-mutation.v1","manifest":%s,"grantedPermissions":%s}' \
+  printf '{"schema":"aru.selfhost.plugin-mutation.v1","manifest":%s,"grantedPermissions":%s,"installReceiptId":"smoke-install-1"}' \
     "$1" "$(printf '%s' "$1" | node -e 'let b="";process.stdin.on("data",c=>b+=c);process.stdin.on("end",()=>process.stdout.write(JSON.stringify(JSON.parse(b).permissions)))')"
 }
 plugin_supervisor_smoke_before_restart() {
@@ -48,7 +48,13 @@ plugin_supervisor_smoke_before_restart() {
   curl -fsS -X POST "$base_url/aru/v1/plugins" \
     -H 'content-type: application/json' -H "authorization: Bearer $credential" \
     --data "$(plugin_supervisor_request "$PLUGIN_SUPERVISOR_MANIFEST_V1")" \
-    | node -e 'let b="";process.stdin.on("data",c=>b+=c);process.stdin.on("end",()=>{const p=JSON.parse(b);if(p.schema!=="aru.selfhost.plugin.v1"||p.desiredState!=="disabled"||p.health!=="disabled"||p.dataPresent!==true||p.rollbackAvailable!==false)process.exit(1)})'
+    | node -e 'let b="";process.stdin.on("data",c=>b+=c);process.stdin.on("end",()=>{const p=JSON.parse(b);if(p.schema!=="aru.selfhost.plugin.v1"||p.desiredState!=="disabled"||p.health!=="disabled"||p.dataPresent!==true||p.rollbackAvailable!==false||p.installReceiptId!=="smoke-install-1")process.exit(1)})'
+
+  # The same receipt is an idempotent replay, not a second installation.
+  curl -fsS -X POST "$base_url/aru/v1/plugins" \
+    -H 'content-type: application/json' -H "authorization: Bearer $credential" \
+    --data "$(plugin_supervisor_request "$PLUGIN_SUPERVISOR_MANIFEST_V1")" \
+    | node -e 'let b="";process.stdin.on("data",c=>b+=c);process.stdin.on("end",()=>{const p=JSON.parse(b);if(p.installReceiptId!=="smoke-install-1")process.exit(1)})'
 
   curl -fsS -X POST "$base_url/aru/v1/plugins/memory.example/enable" \
     -H "authorization: Bearer $credential" \
@@ -80,7 +86,7 @@ plugin_supervisor_smoke_after_restart() {
 
   curl -fsS "$base_url/aru/v1/plugins/memory.example" \
     -H "authorization: Bearer $credential" \
-    | node -e 'let b="";process.stdin.on("data",c=>b+=c);process.stdin.on("end",()=>{const p=JSON.parse(b);if(p.desiredState!=="enabled"||p.health!=="running"||p.manifest?.version!=="1.0.0")process.exit(1)})'
+    | node -e 'let b="";process.stdin.on("data",c=>b+=c);process.stdin.on("end",()=>{const p=JSON.parse(b);if(p.desiredState!=="enabled"||p.health!=="running"||p.manifest?.version!=="1.0.0"||p.installReceiptId!=="smoke-install-1")process.exit(1)})'
 }
 
 plugin_supervisor_smoke_uninstall() {

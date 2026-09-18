@@ -137,11 +137,12 @@ if ($Uninstall) {
   if (-not $SkipStart) {
     Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
   }
+  # Remove junctions before deleting their targets.
+  RemoveLink $currentLink
+  RemoveLink $previousLink
   foreach ($path in @($releasesDir, $configDir, $logDir)) {
     if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Recurse -Force }
   }
-  RemoveLink $currentLink
-  RemoveLink $previousLink
   foreach ($path in @($currentPointer, $previousPointer)) {
     if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force }
   }

@@ -17,3 +17,48 @@ External wake is a separate encrypted mailbox, not Host conversation ownership. 
 A page project binds one Host-managed collaborator workspace to an optional Git checkout, immutable artifact checkpoints, and at most one published phone surface. Phone and Console inspect the same checkout. Saving a checkpoint, publishing a phone release, and pushing Git commits are deliberately separate actions; none creates a second phone-side repository.
 
 Third-party plugins are separate permissioned lifecycle units. The official `full` profile installs the Host substrate and implemented official capability bundles; it does not silently install or grant arbitrary third-party code.
+
+## Runtime source and installed payloads
+
+The root `aru-selfhost-stub.mjs` and `conversation-turn-relay.mjs` are generated
+runtime payloads. Edit `src/` and run `node tools/build-runtime.mjs`; CI checks
+that checked-in payloads match their sources. Existing installed upgraders copy
+fixed filenames, so these two deployed entrypoints must not gain new local
+runtime dependencies. Source modules are assembled into those existing files,
+not maintained as a second hand-written implementation.
+
+| Source | Responsibility |
+| --- | --- |
+| `src/server/server.mjs` | Configuration, dependency assembly, pairing, authenticated routing and diagnostics |
+| `src/server/state-store.mjs` | State admission, last-good backup and atomic writes |
+| `src/server/backup-vault.mjs` | Encrypted backup upload validation, metadata, download and deletion |
+| `src/server/artifact-vault.mjs` | Artifact publication, integrity and removal |
+| `src/server/workspace-jobs.mjs` | Container job execution, deadlines, cancellation and restart recovery |
+| `src/server/mcp-catalog.mjs` | Static tool schemas |
+| `src/server/mcp-gateway.mjs` | MCP sessions, argument admission and dispatch to domain owners |
+| `src/conversation-relay/` | Phone-owned turn routing, provider admission and raw response files |
+
+Backup, artifact and job owners receive only their relevant state collections;
+`state.json` keeps its existing format and one write authority. Persistence is
+still synchronous and writes a complete snapshot: this restructuring is not a
+storage migration or a claim of measured large-dataset performance.
+
+Project Git and archive subprocesses are asynchronous. Checkpoint creation
+rechecks the project's revision after awaiting compression and before publishing
+an artifact; another request's archive or update cannot be overwritten by the
+old attempt. The project remains the authority for its own revision.
+
+The macOS Console's `HostConsoleConversations` and `HostConsoleSurfaces` own
+surface-specific projections and mutation admission. The connection supplies
+an authenticated byte-loading closure; credentials stay in the existing
+connection owner. Clearing the connection invalidates outstanding feature
+requests before their results can repopulate the new session.
+
+A running relay GET is a snapshot, not necessarily a complete JSON document or
+SSE event. The phone reconciles before acknowledging. Raw provider response
+bytes remain preserved; neither this split nor packaging filters provider output.
+
+Validation includes the actual v0.31.4 installer fixture with the new payload,
+retained state and successful startup, ordinary installers, state recovery,
+project concurrency and Console feature projection tests. New-installer tests
+alone are not sufficient evidence for an installed-upgrader path.

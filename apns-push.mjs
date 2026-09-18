@@ -5,7 +5,13 @@ import {
   sign,
 } from "node:crypto";
 import { connect as connectHTTP2, constants as http2Constants } from "node:http2";
-import { windowsDpapiScripts, windowsSecretFilePath } from "./provider-secret-store.mjs";
+import {
+  LINUX_AVAILABILITY_CACHE_MILLISECONDS,
+  lookupLinuxSecret,
+  probeLinuxSecretService,
+  windowsDpapiScripts,
+  windowsSecretFilePath,
+} from "./provider-secret-store.mjs";
 
 const WINDOWS_POWERSHELL_FLAGS = ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command"];
 
@@ -28,6 +34,8 @@ export function createAPNsPushHost({
   credentialStore = createAPNsCredentialStore(),
   sendPush = sendAPNsNotification,
   sendLiveActivity = sendAPNsLiveActivity,
+  relayBaseURL = null,
+  fetchImpl = fetch,
   topic = DEFAULT_TOPIC,
   log = () => {},
   now = Date.now,
@@ -142,11 +150,18 @@ export function createAPNsPushHost({
     if (body?.schema !== REGISTRATION_SCHEMA) {
       throw new HttpError(400, "push.registration_schema_unsupported", "unsupported push registration schema");
     }
-    const deviceToken = validatedDeviceToken(body.deviceToken);
+
     const environment = validatedEnvironment(body.environment);
     if (body.topic !== topic) {
       throw new HttpError(400, "push.topic_unsupported", "push topic does not match this Aru build");
     }
+    let relay = null;
+    if (body.relayRouteId || body.relayWakeToken) {
+      if (!/^[A-Za-z0-9_-]{16,128}$/.test(body.relayRouteId ?? "") ||
+          !/^[A-Za-z0-9_-]{32,256}$/.test(body.relayWakeToken ?? "")) throw new Error("invalid relay registration");
+      relay = { routeId: body.relayRouteId, wakeToken: body.relayWakeToken };
+    }
+    const deviceToken = relay ? null : validatedDeviceToken(body.deviceToken);
     const timestamp = now();
     const current = state.remotePushRegistrations.find(
       (item) => item.deviceId === device.deviceId
@@ -155,12 +170,14 @@ export function createAPNsPushHost({
     );
     if (current) {
       current.deviceToken = deviceToken;
+      current.relay = relay;
       current.updatedAt = timestamp;
       current.disabledAt = null;
       current.lastFailure = null;
     } else {
       state.remotePushRegistrations.push({
         schema: REGISTRATION_SCHEMA,
+        relay,
         deviceId: device.deviceId,
         deviceToken,
         environment,
@@ -191,11 +208,12 @@ export function createAPNsPushHost({
       serverId,
       topic,
       credentialStorage: credentialStore.availability(),
-      providerConfigured: providerConfigured(),
+      deliveryTransport: registrations.some((item) => item.relay) ? "relay" : "direct",
+      providerConfigured: providerConfigured() || Boolean(relayBaseURL && registrations.some((item) => item.relay)),
       registrations: registrations.map((item) => ({
         environment: item.environment,
         topic: item.topic,
-        tokenFingerprint: tokenFingerprint(item.deviceToken),
+        tokenFingerprint: tokenFingerprint(item.deviceToken ?? item.relay.routeId),
         updatedAt: item.updatedAt,
         lastAttemptAt: item.lastAttemptAt,
         lastDeliveredAt: item.lastDeliveredAt,
@@ -216,12 +234,7 @@ export function createAPNsPushHost({
     try {
       credentials = credentialStore.read();
     } catch (error) {
-      log(`remote push skipped: ${safePushFailure(error)}`);
-      return;
-    }
-    if (!credentials) {
-      log("remote push skipped: APNs provider credentials are unavailable");
-      return;
+      log(`direct push credentials unavailable: ${safePushFailure(error)}`);
     }
     const collaboratorId = isMobileReplica
       ? event.mobileReplica.sourceCollaboratorId
@@ -252,7 +265,23 @@ export function createAPNsPushHost({
     await Promise.all(registrations.map(async (registration) => {
       registration.lastAttemptAt = now();
       try {
-        await sendPush({ credentials, registration, payload });
+        if (registration.relay && relayBaseURL) {
+          const url = new URL(`/aru/v1/wake-relay/routes/${registration.relay.routeId}/requests`, relayBaseURL);
+          const response = await fetchImpl(url, {
+            method: "POST", redirect: "error",
+            headers: { "content-type": "application/json", authorization: `Bearer ${registration.relay.wakeToken}` },
+            body: JSON.stringify({ schema: "aru.wake-relay.request.v1", requestId: messageId,
+              notificationRoute: payload.route }),
+          });
+          if (response.status !== 202) throw new Error(`notification relay HTTP ${response.status}`);
+          const receipt = await response.json();
+          if (receipt?.schema !== "aru.wake-relay.receipt.v1" || receipt.requestId !== messageId || receipt.accepted !== true) {
+            throw new Error("notification relay returned an invalid receipt");
+          }
+        } else {
+          if (!credentials) throw new Error("APNs provider credentials are unavailable");
+          await sendPush({ credentials, registration, payload });
+        }
         registration.lastDeliveredAt = now();
         registration.lastFailure = null;
       } catch (error) {
@@ -333,7 +362,7 @@ export function createAPNsPushHost({
     state.remotePushRegistrations = state.remotePushRegistrations.filter((item) => {
       try {
         item.schema = REGISTRATION_SCHEMA;
-        item.deviceToken = validatedDeviceToken(item.deviceToken);
+        item.deviceToken = item.relay ? null : validatedDeviceToken(item.deviceToken);
         item.environment = validatedEnvironment(item.environment);
         item.topic = item.topic === topic ? topic : "";
         item.createdAt = safeTimestamp(item.createdAt, now());
@@ -406,10 +435,26 @@ export function createAPNsCredentialStore({
   service = DEFAULT_SERVICE,
   account = DEFAULT_ACCOUNT,
   run = spawnSync,
+  now = Date.now,
 } = {}) {
   let cachedAvailability;
+  let availabilityCheckedAt = 0;
 
   function availability() {
+    if (platform === "linux") {
+      const timestamp = now();
+      if (cachedAvailability
+          && timestamp - availabilityCheckedAt < LINUX_AVAILABILITY_CACHE_MILLISECONDS) {
+        return cachedAvailability;
+      }
+      const detected = probeLinuxSecretService(run);
+      const publicAvailability = detected.supported
+        ? { supported: true, storage: "linux-secret-service" }
+        : { supported: false, storage: "unavailable" };
+      cachedAvailability = publicAvailability;
+      availabilityCheckedAt = timestamp;
+      return publicAvailability;
+    }
     if (cachedAvailability) return cachedAvailability;
     if (platform === "darwin") {
       const result = run("/usr/bin/security", ["help"], {
@@ -418,15 +463,6 @@ export function createAPNsCredentialStore({
       cachedAvailability = result.error?.code === "ENOENT"
         ? { supported: false, storage: "unavailable" }
         : { supported: true, storage: "macos-keychain" };
-      return cachedAvailability;
-    }
-    if (platform === "linux") {
-      const result = run("/usr/bin/secret-tool", ["--version"], {
-        encoding: "utf8", timeout: 3_000, windowsHide: true,
-      });
-      cachedAvailability = result.error?.code === "ENOENT" || result.status !== 0
-        ? { supported: false, storage: "unavailable" }
-        : { supported: true, storage: "linux-secret-service" };
       return cachedAvailability;
     }
     if (platform === "win32") {
@@ -446,37 +482,47 @@ export function createAPNsCredentialStore({
 
   function read() {
     if (!availability().supported) return null;
+    if (platform === "linux") {
+      const result = lookupLinuxSecret({ run, service, account });
+      if (result.outcome === "missing") return null;
+      if (result.outcome === "tool-missing") {
+        throw new Error("Linux 系统没有安装 secret-tool，无法读取 APNs provider key");
+      }
+      if (result.outcome === "unavailable") {
+        throw new Error("Linux Secret Service 当前不可访问，无法读取 APNs provider key");
+      }
+      return decodedCredentials(result.value);
+    }
     const result = platform === "darwin"
       ? run("/usr/bin/security", ["find-generic-password", "-a", account, "-s", service, "-w"], {
         encoding: "utf8", timeout: 5_000, windowsHide: true,
       })
-      : platform === "win32"
-        ? run("powershell.exe", [
-          ...WINDOWS_POWERSHELL_FLAGS,
-          windowsDpapiScripts(windowsSecretFilePath(service, account)).read,
-        ], {
-          encoding: "utf8", timeout: 15_000, windowsHide: true,
-        })
-        : run("/usr/bin/secret-tool", ["lookup", "service", service, "account", account], {
-          encoding: "utf8", timeout: 5_000, windowsHide: true,
-        });
+      : run("powershell.exe", [
+        ...WINDOWS_POWERSHELL_FLAGS,
+        windowsDpapiScripts(windowsSecretFilePath(service, account)).read,
+      ], {
+        encoding: "utf8", timeout: 15_000, windowsHide: true,
+      });
     if (result.status === 44 || result.status === 1 || /could not be found/i.test(result.stderr ?? "")) {
       return null;
     }
     if (result.status !== 0) throw new Error("无法从系统安全凭据存储读取 APNs provider key");
-    try {
-      const stored = String(result.stdout ?? "").trim();
-      const encoded = stored.startsWith("aru-apns-v1:")
-        ? stored.slice("aru-apns-v1:".length)
-        : null;
-      if (!encoded) throw new Error("unsupported credential encoding");
-      return validatedCredentials(JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")));
-    } catch {
-      throw new Error("系统安全凭据存储中的 APNs provider key 无法解码");
-    }
+    return decodedCredentials(String(result.stdout ?? "").trim());
   }
 
   return { availability, read };
+}
+
+function decodedCredentials(stored) {
+  try {
+    const encoded = stored.startsWith("aru-apns-v1:")
+      ? stored.slice("aru-apns-v1:".length)
+      : null;
+    if (!encoded) throw new Error("unsupported credential encoding");
+    return validatedCredentials(JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")));
+  } catch {
+    throw new Error("系统安全凭据存储中的 APNs provider key 无法解码");
+  }
 }
 
 export async function sendAPNsNotification({ credentials, registration, payload }) {
@@ -544,7 +590,7 @@ function makeProviderToken(credentials, issuedAt = Math.floor(Date.now() / 1000)
   return `${signingInput}.${signature.toString("base64url")}`;
 }
 
-function encodedPayload(payload) {
+export function encodedPayload(payload) {
   const route = payload.route;
   let body = String(payload.body ?? "").trim();
   while (body.length > 64) {
@@ -553,6 +599,7 @@ function encodedPayload(payload) {
         alert: { title: payload.title, body },
         sound: "default",
         "thread-id": payload.threadId,
+        "content-available": 1,
       },
       aru: route,
     });
@@ -560,7 +607,12 @@ function encodedPayload(payload) {
     body = `${[...body].slice(0, Math.floor([...body].length * 0.82)).join("")}…`;
   }
   return JSON.stringify({
-    aps: { alert: { title: payload.title, body }, sound: "default", "thread-id": payload.threadId },
+    aps: {
+      alert: { title: payload.title, body },
+      sound: "default",
+      "thread-id": payload.threadId,
+      "content-available": 1,
+    },
     aru: route,
   });
 }

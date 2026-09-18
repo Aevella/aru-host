@@ -99,7 +99,7 @@ try {
   }).publishableBundle(collaboratorId, "surface_1", "surfacever_1", published[0]);
   assert.deepEqual(bundle.files.map((file) => file.path), ["index.html"]);
 
-  const inventory = host.inventory(collaboratorId);
+  const inventory = await host.inventory(collaboratorId);
   assert.equal(inventory.projects.length, 1);
   assert.equal(inventory.projects[0].checkpointCount, 1);
   assert.deepEqual(host.selfTools().map((tool) => tool.name), [

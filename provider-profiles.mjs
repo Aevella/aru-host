@@ -26,7 +26,7 @@ export function createProviderProfileHost({
         return true;
       }
       if (req.method === "POST") {
-        requireLocalHostConsole();
+        requireDevice();
         const body = await readJSONBody(req, 64 * 1024);
         sendJSON(res, 201, await createProfile(body));
         return true;
@@ -35,9 +35,10 @@ export function createProviderProfileHost({
     }
     const match = path.match(/^\/aru\/v1\/provider-profiles\/(provider_[A-Fa-f0-9-]+)(\/test)?$/);
     if (!match) return false;
-    if (match[2] === "/test" && req.method === "POST") requireLocalHostConsole();
+    let device = null;
+    if (match[2] === "/test" && req.method === "POST") requireDevice();
     else if (!match[2] && req.method === "GET") requireDevice();
-    else if (!match[2] && (req.method === "PUT" || req.method === "DELETE")) requireLocalHostConsole();
+    else if (!match[2] && (req.method === "PUT" || req.method === "DELETE")) device = requireDevice();
     else return false;
     const profile = storedProfileForId(match[1]);
     if (match[2] === "/test" && req.method === "POST") {
@@ -51,15 +52,14 @@ export function createProviderProfileHost({
     }
     if (req.method === "PUT") {
       const body = await readJSONBody(req, 64 * 1024);
-      sendJSON(res, 200, await updateProfile(profile, body));
+      sendJSON(res, 200, await updateProfile(profile, body, device));
       return true;
     }
     if (req.method === "DELETE") {
       if (isProfileInUse(profile.profileId)) {
         throw new HttpError(409, "provider_profile.in_use", "先把使用这个 API 配置的电脑协作者换到别的驱动");
       }
-      requireSecretStorage();
-      secretStore.remove(profile.profileId);
+      removeStoredSecret(profile);
       state.providerProfiles = state.providerProfiles.filter((item) => item.profileId !== profile.profileId);
       saveState();
       sendJSON(res, 200, { schema: PROFILE_SCHEMA, profileId: profile.profileId, deleted: true });
@@ -77,10 +77,16 @@ export function createProviderProfileHost({
   }
 
   async function createProfile(body) {
-    requireSecretStorage();
+    const requestId = body.requestId;
+    if (requestId !== undefined && !/^[A-Fa-f0-9-]{36}$/.test(requestId)) {
+      throw new HttpError(400, "provider_profile.request_id_invalid", "invalid request id");
+    }
+    const profileId = `provider_${requestId ?? randomUUID()}`;
+    const existing = state.providerProfiles.find((item) => item.profileId === profileId);
+    if (existing) return publicProfile(existing);
     const timestamp = now();
     const profile = normalizedProfile({
-      profileId: `provider_${randomUUID()}`,
+      profileId,
       revision: 1,
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -88,22 +94,35 @@ export function createProviderProfileHost({
       lastCheckedAt: null,
       lastError: null,
     }, body);
-    if (profile.authMode !== "none") secretStore.write(profile.profileId, body.apiKey);
+    if (profile.authMode !== "none") {
+      requireSecretStorage();
+      secretStore.write(profile.profileId, body.apiKey);
+    }
     state.providerProfiles.push(profile);
     saveState();
     return checkProfile(profile);
   }
 
-  async function updateProfile(profile, body) {
+  async function updateProfile(profile, body, device) {
     requireRevision(profile, body.expectedRevision);
-    normalizedProfile(profile, body);
-    if (profile.authMode === "none") {
-      requireSecretStorage();
-      secretStore.remove(profile.profileId);
+    const normalized = normalizedProfile({ ...profile }, body);
+    // A paired device may edit the profile, but a stored key must not follow
+    // an endpoint change it did not re-enter the key for: the immediate health
+    // check would deliver that key to the new origin. The local Console keeps
+    // its existing edit flow.
+    if (device?.deviceRole !== "host-console"
+        && profile.authMode !== "none" && normalized.authMode !== "none"
+        && (body.apiKey === undefined || body.apiKey === "")
+        && new URL(normalized.baseURL).origin !== new URL(profile.baseURL).origin) {
+      throw new HttpError(400, "provider_profile.secret_required", "更换接口地址时需要重新填写 API key");
+    }
+    if (normalized.authMode === "none") {
+      removeStoredSecret(profile);
     } else if (body.apiKey !== undefined && body.apiKey !== "") {
       requireSecretStorage();
       secretStore.write(profile.profileId, body.apiKey);
     }
+    Object.assign(profile, normalized);
     profile.revision += 1;
     profile.updatedAt = now();
     profile.health = "unchecked";
@@ -251,6 +270,14 @@ export function createProviderProfileHost({
   function hasSecret(profileId) {
     if (!secretStore.availability().supported) return false;
     return Boolean(secretStore.read(profileId));
+  }
+
+  // A keyless profile never wrote a key, so a Host without secret storage can
+  // still save, switch and delete it. A keyed profile's key must be removable.
+  function removeStoredSecret(profile) {
+    if (profile.authMode === "none" && !secretStore.availability().supported) return;
+    requireSecretStorage();
+    secretStore.remove(profile.profileId);
   }
 
   function requireSecretStorage() {

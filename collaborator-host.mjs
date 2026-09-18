@@ -382,9 +382,18 @@ export function createCollaboratorHost({
   }
 
   function createHostedCollaborator(body, device) {
+    if (body.requestId !== undefined && !/^[A-Fa-f0-9-]{36}$/.test(body.requestId)) {
+      throw new HttpError(400, "collaborator.request_id_invalid", "invalid request id");
+    }
+    if (body.requestId) {
+      const existing = state.hostedCollaborators.find((item) => item.createRequestId === body.requestId
+        && item.createdByDeviceId === device.deviceId);
+      if (existing) return publicCollaborator(existing);
+    }
     const timestamp = now();
     const collaborator = {
       collaboratorId: `hostcol_${randomUUID()}`,
+      createRequestId: body.requestId ?? null,
       displayName: validatedDisplayName(body.displayName),
       driverId: validatedDriverId(body.driverId),
       providerProfileId: validatedProviderProfileId(body.driverId, body.providerProfileId),
@@ -502,7 +511,7 @@ export function createCollaboratorHost({
 
   function driverStatus(drivers, providerInventory) {
     const codexReady = drivers.some((driver) => driver.id === "codex" && driver.status === "ready");
-    const apiConfigured = providerInventory.profiles.some((profile) => profile.hasSecret);
+    const apiConfigured = providerInventory.profiles.some((profile) => (profile.hasSecret || profile.authMode === "none"));
     if (!codexReady && !apiConfigured) {
       return { enabled: false, status: "driver-unavailable" };
     }
@@ -523,7 +532,7 @@ export function createCollaboratorHost({
   }
 
   function apiDriverInventory(inventory = providerProfiles.inventory()) {
-    const configured = inventory.profiles.filter((profile) => profile.hasSecret);
+    const configured = inventory.profiles.filter((profile) => (profile.hasSecret || profile.authMode === "none"));
     const ready = configured.filter((profile) => profile.health === "ready");
     return {
       ...API_DRIVER_DEFINITION,
@@ -540,7 +549,7 @@ export function createCollaboratorHost({
 
   function collaboratorTurnExecution(collaborator, driver, providerProfile) {
     if (collaborator.driverId === "codex") return driver?.status === "ready";
-    if (collaborator.driverId === "api") return providerProfile?.hasSecret === true;
+    if (collaborator.driverId === "api") return providerProfile?.hasSecret === true || providerProfile?.authMode === "none";
     return false;
   }
 

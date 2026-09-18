@@ -177,7 +177,7 @@ struct CollaboratorProjectStudioView: View {
     private func refresh() async {
         do {
             async let projectRefresh: Void = runtime.refreshProjects(collaboratorId: collaborator.id)
-            async let surfaceRefresh: Void = runtime.refreshSurfaces(collaboratorId: collaborator.id)
+            async let surfaceRefresh: Void = runtime.surfaces.refreshSurfaces(collaboratorId: collaborator.id)
             _ = try await (projectRefresh, surfaceRefresh)
             errorMessage = nil
         } catch { errorMessage = error.localizedDescription }

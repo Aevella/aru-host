@@ -215,6 +215,9 @@ console.log('dpapi-roundtrip-ok');
   Check "task removed by uninstall" ($null -eq (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue))
   Check "durable data preserved" (Test-Path $dataMarker)
   Check "releases removed" (-not (Test-Path (Join-Path $instanceRoot "releases")))
+  $remainingNames = @(Get-ChildItem -LiteralPath $instanceRoot -Force | Select-Object -ExpandProperty Name)
+  Check "current junction removed" ($remainingNames -notcontains "current")
+  Check "previous junction removed" ($remainingNames -notcontains "previous")
 
   # 6. Reinstall over preserved data keeps the server identity.
   & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer `

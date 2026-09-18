@@ -578,3 +578,25 @@ for (const protocol of ["openai-compatible", "anthropic-messages"]) {
 }
 
 console.log("ARU_DIRECT_API_DRIVER_SMOKE_OK");
+
+let noAuthRequest;
+// A keyless profile must not touch the secret store: on a Host without one,
+// reading throws before a key could ever be found.
+const noAuthDriver = createDirectAPIDriver({
+  profileForId: () => ({ ...profile, authMode: "none", hasSecret: false }),
+  readSecret: () => { throw new Error("secret storage unavailable"); },
+  fetchImpl: async (_, init) => {
+    noAuthRequest = init;
+    return new Response(JSON.stringify({ choices: [{ message: { content: "OK" }, finish_reason: "stop" }] }),
+      { status: 200, headers: { "content-type": "application/json" } });
+  },
+});
+await noAuthDriver.testProfile("provider_test");
+assert.equal(noAuthRequest.headers.authorization, undefined);
+assert.equal(noAuthRequest.headers["x-api-key"], undefined);
+const keylessTurn = noAuthDriver.forProfile("provider_test");
+assert.equal(keylessTurn.status(), "ready");
+const keylessResult = await runTurn(keylessTurn, [], async () => ({})).done;
+assert.equal(keylessResult.status, "completed", keylessResult.error?.message);
+assert.equal(noAuthRequest.headers.authorization, undefined);
+console.log("ARU_DIRECT_API_NO_AUTH_SMOKE_OK");

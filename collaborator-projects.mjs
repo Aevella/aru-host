@@ -1,7 +1,7 @@
+import { cp, readdir, lstat } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import { spawnSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import {
-  cpSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -26,6 +26,7 @@ export function createCollaboratorProjectHost({
   sendJSON,
   HttpError,
   now = Date.now,
+  runCommand = runProjectCommand,
 }) {
   const root = join(dataDir, "collaborator-projects");
   const snapshotRoot = join(dataDir, "collaborator-project-snapshots");
@@ -42,26 +43,26 @@ export function createCollaboratorProjectHost({
     const action = match[3] ?? null;
     const device = requireDevice();
     if (!projectId && req.method === "GET") {
-      sendJSON(res, 200, inventory(collaborator.collaboratorId));
+      sendJSON(res, 200, await inventory(collaborator.collaboratorId));
       return true;
     }
     if (!projectId && req.method === "POST") {
       const body = await readJSONBody(req, 256 * 1024);
-      sendJSON(res, 201, clientInput(() => createProject(collaborator.collaboratorId, body, device)));
+      sendJSON(res, 201, await clientInput(() => createProject(collaborator.collaboratorId, body, device)));
       return true;
     }
     if (projectId && !action && req.method === "GET") {
-      sendJSON(res, 200, clientInput(() => project(collaborator.collaboratorId, projectId)));
+      sendJSON(res, 200, await clientInput(() => project(collaborator.collaboratorId, projectId)));
       return true;
     }
     if (projectId && !action && req.method === "PUT") {
       const body = await readJSONBody(req, 256 * 1024);
-      sendJSON(res, 200, clientInput(() => updateProject(collaborator.collaboratorId, projectId, body, device)));
+      sendJSON(res, 200, await clientInput(() => updateProject(collaborator.collaboratorId, projectId, body, device)));
       return true;
     }
     if (projectId && action && req.method === "POST") {
       const body = await readJSONBody(req, 256 * 1024);
-      const value = clientInput(() => action === "checkpoint"
+      const value = await clientInput(() => action === "checkpoint"
         ? checkpoint(collaborator.collaboratorId, projectId, body, device)
         : action === "publish"
           ? publish(collaborator.collaboratorId, projectId, body, device)
@@ -72,18 +73,22 @@ export function createCollaboratorProjectHost({
     return false;
   }
 
-  function inventory(collaboratorId) {
+  async function inventory(collaboratorId) {
+    // A list read must not launch one group of Git processes per project at
+    // once. Await sequentially while leaving unrelated Host requests runnable.
+    const projects = [];
+    for (const record of loadAll(collaboratorId)) projects.push(await publicProject(record));
     return {
       schema: INVENTORY_SCHEMA,
       collaboratorId,
-      projects: loadAll(collaboratorId).map(publicProject).sort((left, right) =>
+      projects: projects.sort((left, right) =>
         right.updatedAt - left.updatedAt || left.projectId.localeCompare(right.projectId)),
     };
   }
 
-  function clientInput(operation) {
+  async function clientInput(operation) {
     try {
-      return operation();
+      return await operation();
     } catch (error) {
       if (error instanceof HttpError) throw error;
       throw new HttpError(400, "project.input_invalid", String(error?.message ?? "project input is invalid"));
@@ -94,7 +99,7 @@ export function createCollaboratorProjectHost({
     return publicProject(loadProject(collaboratorId, projectId));
   }
 
-  function createProject(collaboratorId, body, device) {
+  async function createProject(collaboratorId, body, device) {
     const timestamp = now();
     const projectId = `hostproject_${randomUUID()}`;
     const title = validatedText(body?.title, "title", 160);
@@ -111,7 +116,7 @@ export function createCollaboratorProjectHost({
     const requestedRepository = String(body?.repositoryURL ?? "").trim();
     if (requestedRepository) {
       ({ sourceURL, repositoryURL } = validatedGitHubRepository(requestedRepository));
-      const result = spawnSync("git", ["clone", "--", repositoryURL, directory], {
+      const result = await runCommand("git", ["clone", "--", repositoryURL, directory], {
         encoding: "utf8",
         timeout: 120_000,
         windowsHide: true,
@@ -160,15 +165,26 @@ export function createCollaboratorProjectHost({
     return publicProject(record);
   }
 
-  function checkpoint(collaboratorId, projectId, body, device) {
+  async function checkpoint(collaboratorId, projectId, body, device) {
     const record = loadProject(collaboratorId, projectId);
     requireProjectRevision(record, body?.expectedRevision);
     requireProjectLive(record);
     const checkpointId = `hostcheckpoint_${randomUUID()}`;
     const source = projectDirectory(record);
     const destination = join(snapshotRoot, collaboratorId, projectId, checkpointId);
-    copyProject(source, destination);
-    const archive = archiveSnapshot(destination);
+    await copyProject(source, destination);
+    let archive;
+    try {
+      archive = await archiveSnapshot(destination);
+      // Awaiting the archiver lets other requests run. A changed/archived
+      // project must not be overwritten by this older checkpoint attempt.
+      const current = loadProject(collaboratorId, projectId);
+      requireProjectRevision(current, record.revision);
+      requireProjectLive(current);
+    } catch (error) {
+      rmSync(destination, { recursive: true, force: true });
+      throw error;
+    }
     const note = optionalText(body?.note, 1_000);
     const artifact = createArtifact({
       filename: `${safeFilename(record.title)}-${record.checkpointCount + 1}.tar.gz`,
@@ -192,10 +208,10 @@ export function createCollaboratorProjectHost({
     record.updatedAt = record.latestCheckpoint.createdAt;
     record.updatedByDeviceId = device.deviceId;
     saveProject(record);
-    return { project: publicProject(record), artifact };
+    return { project: await publicProject(record), artifact };
   }
 
-  function publish(collaboratorId, projectId, body, device) {
+  async function publish(collaboratorId, projectId, body, device) {
     const record = loadProject(collaboratorId, projectId);
     requireProjectRevision(record, body?.expectedRevision);
     requireProjectLive(record);
@@ -220,7 +236,7 @@ export function createCollaboratorProjectHost({
     record.updatedAt = now();
     record.updatedByDeviceId = device.deviceId;
     saveProject(record);
-    return { project: publicProject(record), surface };
+    return { project: await publicProject(record), surface };
   }
 
   function setArchived(collaboratorId, projectId, body, device, archived) {
@@ -234,24 +250,24 @@ export function createCollaboratorProjectHost({
     return publicProject(record);
   }
 
-  function publicProject(record) {
+  async function publicProject(record) {
     const { updatedByDeviceId: _, ...value } = record;
-    return { ...value, repository: repositoryStatus(record) };
+    return { ...value, repository: await repositoryStatus(record) };
   }
 
-  function repositoryStatus(record) {
+  async function repositoryStatus(record) {
     const directory = projectDirectory(record);
     if (!existsSync(join(directory, ".git"))) {
       return record.repositoryURL ? { state: "unavailable", sourceURL: record.sourceURL, repositoryURL: record.repositoryURL } : null;
     }
-    const branch = git(directory, ["branch", "--show-current"]);
-    const commit = git(directory, ["rev-parse", "HEAD"]);
-    const status = git(directory, ["status", "--porcelain"]);
-    const upstream = git(directory, ["rev-parse", "--abbrev-ref", "@{upstream}"], true);
+    const branch = await git(directory, ["branch", "--show-current"]);
+    const commit = await git(directory, ["rev-parse", "HEAD"]);
+    const status = await git(directory, ["status", "--porcelain"]);
+    const upstream = await git(directory, ["rev-parse", "--abbrev-ref", "@{upstream}"], true);
     let ahead = 0;
     let behind = 0;
     if (upstream) {
-      const counts = git(directory, ["rev-list", "--left-right", "--count", `${upstream}...HEAD`], true)
+      const counts = (await git(directory, ["rev-list", "--left-right", "--count", `${upstream}...HEAD`], true))
         .split(/\s+/).map(Number);
       behind = Number.isFinite(counts[0]) ? counts[0] : 0;
       ahead = Number.isFinite(counts[1]) ? counts[1] : 0;
@@ -259,7 +275,7 @@ export function createCollaboratorProjectHost({
     return {
       state: "ready",
       sourceURL: record.sourceURL,
-      repositoryURL: record.repositoryURL ?? (git(directory, ["remote", "get-url", "origin"], true) || null),
+      repositoryURL: record.repositoryURL ?? ((await git(directory, ["remote", "get-url", "origin"], true)) || null),
       branch: branch || null,
       commit: commit || null,
       dirty: Boolean(status),
@@ -269,8 +285,8 @@ export function createCollaboratorProjectHost({
     };
   }
 
-  function git(directory, args, permitsFailure = false) {
-    const result = spawnSync("git", ["-C", directory, ...args], {
+  async function git(directory, args, permitsFailure = false) {
+    const result = await runCommand("git", ["-C", directory, ...args], {
       encoding: "utf8",
       timeout: 10_000,
       windowsHide: true,
@@ -356,14 +372,14 @@ export function createCollaboratorProjectHost({
     return workspace;
   }
 
-  function copyProject(source, destination) {
+  async function copyProject(source, destination) {
     const staging = `${destination}.${randomUUID()}.tmp`;
     mkdirSync(staging, { recursive: true, mode: 0o700 });
     try {
-      for (const name of readdirSync(source)) {
+      for (const name of await readdir(source)) {
         if (name === ".git") continue;
-        rejectSymlinks(join(source, name));
-        cpSync(join(source, name), join(staging, name), {
+        await rejectSymlinks(join(source, name));
+        await cp(join(source, name), join(staging, name), {
           recursive: true,
           errorOnExist: true,
           filter: (candidate) => basename(candidate) !== ".git",
@@ -377,16 +393,16 @@ export function createCollaboratorProjectHost({
     }
   }
 
-  function rejectSymlinks(path) {
-    const stat = lstatSync(path);
+  async function rejectSymlinks(path) {
+    const stat = await lstat(path);
     if (stat.isSymbolicLink()) {
       throw new HttpError(400, "project.symlink_rejected", "project checkpoints cannot contain symbolic links");
     }
-    if (stat.isDirectory()) for (const name of readdirSync(path)) rejectSymlinks(join(path, name));
+    if (stat.isDirectory()) for (const name of await readdir(path)) await rejectSymlinks(join(path, name));
   }
 
-  function archiveSnapshot(directory) {
-    const result = spawnSync("tar", ["-czf", "-", "-C", directory, "."], {
+  async function archiveSnapshot(directory) {
+    const result = await runCommand("tar", ["-czf", "-", "-C", directory, "."], {
       encoding: null,
       timeout: 120_000,
       maxBuffer: 128 * 1024 * 1024,
@@ -520,4 +536,14 @@ function safeProcessFailure(result, fallback) {
 function starterHTML(title) {
   const escaped = title.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
   return `<!doctype html>\n<meta name="viewport" content="width=device-width,initial-scale=1">\n<title>${escaped}</title>\n<style>body{font:17px system-ui;margin:0;min-height:100vh;display:grid;place-items:center;background:#f5f2fb;color:#211d2d}main{padding:32px;text-align:center}</style>\n<main><h1>${escaped}</h1><p>在电脑协作者的工作区继续编辑，然后保存检查点或发布到手机。</p></main>\n`;
+}
+
+// execFile drains output without blocking the Host event loop. Existing time
+// and output limits remain unchanged; no shell is involved.
+export function runProjectCommand(command, args, options) {
+  return new Promise(resolve => {
+    execFile(command, args, options, (error, stdout, stderr) => {
+      resolve({ status: error ? (error.code ?? 1) : 0, stdout, stderr, error });
+    });
+  });
 }

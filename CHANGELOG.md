@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.32.0
+
+- Manage model API profiles from a paired iPhone and create computer collaborators there; keys stay in the OS secret store, creation is replay-safe, and moving a keyed profile to another origin asks for the key again.
+- Run keyless (`authMode: none`) profiles, including on a Host without secret storage.
+- Register result notifications on the official relay route (message route only, no reply text) alongside direct APNs tokens, and mark remote notifications `content-available`. Relay delivery also needs Aru from TestFlight 0.3 (202609160540) and the relay update that accepts Host result routes.
+- Fix Linux Secret Service detection, add idempotent plugin install receipts, and remove Windows uninstall junctions before deleting release targets.
+- Build Host Core from modular `src/` sources into the fixed-name payloads an installed 0.31.x upgrader already knows, and separate relay protocol checks from raw response storage.
+- Protocol remains `stub-0.30`; no data migration. See [installation and upgrade details](docs/releases/0.32.0.md).
+
 ## 0.31.4
 
 - Fix Windows / Linux desktop Console conversation sending and approval decisions: the Console issued `PUT` while Host Core only serves `POST`, so every send since 0.31.0 failed with `route.unknown`. macOS Console was not affected.

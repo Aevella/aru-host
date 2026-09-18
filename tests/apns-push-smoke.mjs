@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createAPNsPushHost } from "../apns-push.mjs";
+import { createAPNsCredentialStore, createAPNsPushHost, encodedPayload } from "../apns-push.mjs";
 
 class HttpError extends Error {
   constructor(status, code, message) {
@@ -63,6 +63,9 @@ assert.equal(deliveries.length, 2);
 assert.deepEqual(new Set(deliveries.map((item) => item.registration.environment)),
                  new Set(["sandbox", "production"]));
 assert.equal(deliveries[0].payload.route.conversationId, "hostconv_test");
+const backgroundAlert = JSON.parse(encodedPayload(deliveries[0].payload));
+assert.equal(backgroundAlert.aps["content-available"], 1);
+assert.equal(backgroundAlert.aru.messageId, "hostmsg_test");
 
 state.devices[1].revokedAt = ++clock;
 await host.deliverHostedCollaboratorTurn(completedEvent());
@@ -71,6 +74,22 @@ assert.equal(deliveries.at(-1).registration.deviceId, "phone_one");
 
 await host.deliverHostedCollaboratorTurn({ ...completedEvent(), turn: { source: "client" } });
 assert.equal(deliveries.length, 3);
+
+const linuxSecretCalls = [];
+const linuxCredentialStore = createAPNsCredentialStore({
+  platform: "linux",
+  run: (command, args) => {
+    linuxSecretCalls.push({ command, args });
+    if (args[0] === "--version") return { status: 2, stdout: "", stderr: "usage: secret-tool ..." };
+    return { status: 1, stdout: "", stderr: "" };
+  },
+});
+assert.deepEqual(linuxCredentialStore.availability(), {
+  supported: true,
+  storage: "linux-secret-service",
+});
+assert.equal(linuxCredentialStore.read(), null);
+assert.ok(linuxSecretCalls.every((call) => !call.args.includes("--version")));
 
 await registerLiveActivity("phone_one", "cc".repeat(32), "sandbox");
 await host.deliverConversationTurnRelayUpdate({
@@ -156,3 +175,30 @@ function completedEvent() {
     assistantMessage: { messageId: "hostmsg_test", content: "我从电脑醒来啦。" },
   };
 }
+
+const relayState = { devices: [{ deviceId: "relay_phone", revokedAt: null }] };
+const relayCalls = [];
+const relayOptions = {
+  state: relayState, saveState() {}, readJSONBody: async (req) => req.body,
+  sendJSON(res, status, body) { res.status = status; res.body = body; }, HttpError,
+  serverId: "server_test", credentialStore: { availability: () => ({ supported: false }), read: () => null },
+  relayBaseURL: "https://wake.example.test",
+  fetchImpl: async (url, init) => { relayCalls.push({ url: String(url), body: JSON.parse(init.body) }); return { status: 202, json: async () => ({ schema: "aru.wake-relay.receipt.v1", requestId: "hostmsg_test", accepted: true }) }; },
+};
+let relayHost = createAPNsPushHost(relayOptions);
+const relayResponse = {};
+await relayHost.route({ method: "PUT", body: {
+  schema: "aru.selfhost.remote-push-registration.v1", environment: "sandbox", topic: "cn.aelion.aru",
+  relayRouteId: "22222222-2222-4222-8222-222222222222", relayWakeToken: "w".repeat(64),
+} }, relayResponse, "/aru/v1/push-devices/current", () => relayState.devices[0]);
+assert.equal(relayResponse.body.providerConfigured, true);
+assert.equal(relayState.remotePushRegistrations[0].deviceToken, null);
+relayHost = createAPNsPushHost(relayOptions); // durable registration survives Host restart
+await relayHost.deliverHostedCollaboratorTurn(completedEvent());
+assert.equal(relayCalls.length, 1);
+assert.equal(relayCalls[0].body.notificationRoute.messageId, "hostmsg_test");
+assert.equal("body" in relayCalls[0].body.notificationRoute, false);
+relayState.devices[0].revokedAt = Date.now();
+await relayHost.deliverHostedCollaboratorTurn(completedEvent());
+assert.equal(relayCalls.length, 1);
+console.log("ARU_HOST_NOTIFICATION_RELAY_SMOKE_OK");

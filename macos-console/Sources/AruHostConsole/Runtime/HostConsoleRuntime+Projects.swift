@@ -56,7 +56,7 @@ extension HostConsoleRuntime {
                         note: String,
                         allowsOutboundNetwork: Bool) async throws -> HostCollaboratorProjectPublishReceipt {
         try await mutateProject(mutationId: project.projectId) {
-            let expectedSurfaceRevision = collaboratorSurfaces[collaboratorId]?
+            let expectedSurfaceRevision = surfaces.collaboratorSurfaces[collaboratorId]?
                 .first(where: { $0.surfaceId == project.surfaceId })?.revision
             let body = try JSONEncoder().encode(PublishHostCollaboratorProjectBody(
                 expectedRevision: project.revision,
@@ -67,7 +67,7 @@ extension HostConsoleRuntime {
                 "\(projectRoot(collaboratorId))/\(project.projectId)/publish",
                 method: "POST", body: body, authenticated: true)
             try acceptProject(receipt.project, collaboratorId: collaboratorId)
-            try await refreshSurfaces(collaboratorId: collaboratorId)
+            try await surfaces.refreshSurfaces(collaboratorId: collaboratorId)
             return receipt
         }
     }

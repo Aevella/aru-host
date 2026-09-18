@@ -4,6 +4,54 @@ import { join } from "node:path";
 
 const DEFAULT_SERVICE = "cn.aelion.aru.host-provider.v1";
 const WINDOWS_POWERSHELL_FLAGS = ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command"];
+const LINUX_SECRET_TOOL = "/usr/bin/secret-tool";
+const LINUX_AVAILABILITY_PROBE_SERVICE = "cn.aelion.aru.secret-service-probe.v1";
+const LINUX_AVAILABILITY_PROBE_ACCOUNT = "availability-probe";
+export const LINUX_AVAILABILITY_CACHE_MILLISECONDS = 5_000;
+
+export function lookupLinuxSecret({
+  run = spawnSync,
+  service,
+  account,
+  timeout = 5_000,
+}) {
+  const result = run(LINUX_SECRET_TOOL, [
+    "lookup", "service", service, "account", account,
+  ], {
+    encoding: "utf8",
+    timeout,
+    windowsHide: true,
+  });
+  if (result.error?.code === "ENOENT") return { outcome: "tool-missing", value: null };
+  if (result.status === 0) {
+    return {
+      outcome: "found",
+      value: String(result.stdout ?? "").replace(/[\r\n]+$/, ""),
+    };
+  }
+  // libsecret uses exit 1 for both "no matching item" and backend failures.
+  // A missing item is silent; D-Bus, unlock, and service failures write stderr.
+  if (result.status === 1 && !String(result.stderr ?? "").trim()) {
+    return { outcome: "missing", value: null };
+  }
+  return { outcome: "unavailable", value: null };
+}
+
+export function probeLinuxSecretService(run = spawnSync) {
+  const result = lookupLinuxSecret({
+    run,
+    service: LINUX_AVAILABILITY_PROBE_SERVICE,
+    account: LINUX_AVAILABILITY_PROBE_ACCOUNT,
+    timeout: 3_000,
+  });
+  if (result.outcome === "tool-missing") {
+    return { supported: false, storage: "unavailable", failure: "secret-tool-not-found" };
+  }
+  if (result.outcome === "unavailable") {
+    return { supported: false, storage: "unavailable", failure: "linux-secret-service-unavailable" };
+  }
+  return { supported: true, storage: "linux-secret-service", failure: null };
+}
 
 // Windows secrets are DPAPI (CurrentUser) ciphertext files: the OS-native
 // protected storage a background Scheduled Task process can read without a
@@ -44,23 +92,24 @@ export function createProviderSecretStore({
   platform = process.platform,
   service = DEFAULT_SERVICE,
   run = spawnSync,
+  now = Date.now,
 } = {}) {
-  const linuxSecretTool = "/usr/bin/secret-tool";
   let cachedAvailability;
+  let availabilityCheckedAt = 0;
 
   function availability() {
-    if (cachedAvailability) return cachedAvailability;
     if (platform === "linux") {
-      const result = run(linuxSecretTool, ["--version"], {
-        encoding: "utf8",
-        timeout: 3_000,
-        windowsHide: true,
-      });
-      cachedAvailability = result.error?.code === "ENOENT" || result.status !== 0
-        ? { supported: false, storage: "unavailable", failure: "secret-tool-not-found" }
-        : { supported: true, storage: "linux-secret-service", failure: null };
-      return cachedAvailability;
+      const timestamp = now();
+      if (cachedAvailability
+          && timestamp - availabilityCheckedAt < LINUX_AVAILABILITY_CACHE_MILLISECONDS) {
+        return cachedAvailability;
+      }
+      const detected = probeLinuxSecretService(run);
+      cachedAvailability = detected;
+      availabilityCheckedAt = timestamp;
+      return detected;
     }
+    if (cachedAvailability) return cachedAvailability;
     if (platform === "win32") {
       const result = run("powershell.exe", [
         ...WINDOWS_POWERSHELL_FLAGS, windowsDpapiScripts("").probe,
@@ -98,16 +147,19 @@ export function createProviderSecretStore({
   function read(profileId) {
     requireAvailable();
     if (platform === "linux") {
-      const result = run(linuxSecretTool, [
-        "lookup", "service", service, "account", account(profileId),
-      ], {
-        encoding: "utf8",
-        timeout: 5_000,
-        windowsHide: true,
+      const result = lookupLinuxSecret({
+        run,
+        service,
+        account: account(profileId),
       });
-      if (result.status === 1) return null;
-      if (result.status !== 0) throw new Error("无法从 Linux Secret Service 读取模型 API 密钥");
-      return String(result.stdout ?? "").replace(/[\r\n]+$/, "");
+      if (result.outcome === "missing") return null;
+      if (result.outcome === "tool-missing") {
+        throw new Error("Linux 系统没有安装 secret-tool，无法读取模型 API 密钥");
+      }
+      if (result.outcome === "unavailable") {
+        throw new Error("Linux Secret Service 当前不可访问，无法读取模型 API 密钥");
+      }
+      return result.value;
     }
     if (platform === "win32") {
       const result = run("powershell.exe", [
@@ -141,7 +193,7 @@ export function createProviderSecretStore({
     requireAvailable();
     const value = validatedSecret(secret);
     if (platform === "linux") {
-      const result = run(linuxSecretTool, [
+      const result = run(LINUX_SECRET_TOOL, [
         "store", "--label=Aru Host provider", "service", service, "account", account(profileId),
       ], {
         input: `${value}\n`,
@@ -149,7 +201,12 @@ export function createProviderSecretStore({
         timeout: 10_000,
         windowsHide: true,
       });
-      if (result.status !== 0) throw new Error("无法把模型 API 密钥保存到 Linux Secret Service");
+      if (result.error?.code === "ENOENT") {
+        throw new Error("Linux 系统没有安装 secret-tool，无法保存模型 API 密钥");
+      }
+      if (result.status !== 0) {
+        throw new Error("Linux Secret Service 当前不可访问，无法保存模型 API 密钥");
+      }
       return;
     }
     if (platform === "win32") {
@@ -183,15 +240,18 @@ export function createProviderSecretStore({
   function remove(profileId) {
     requireAvailable();
     if (platform === "linux") {
-      const result = run(linuxSecretTool, [
+      const result = run(LINUX_SECRET_TOOL, [
         "clear", "service", service, "account", account(profileId),
       ], {
         encoding: "utf8",
         timeout: 5_000,
         windowsHide: true,
       });
-      if (result.status !== 0 && result.status !== 1) {
-        throw new Error("无法从 Linux Secret Service 删除模型 API 密钥");
+      if (result.error?.code === "ENOENT") {
+        throw new Error("Linux 系统没有安装 secret-tool，无法删除模型 API 密钥");
+      }
+      if (result.status !== 0) {
+        throw new Error("Linux Secret Service 当前不可访问，无法删除模型 API 密钥");
       }
       return;
     }
@@ -221,9 +281,15 @@ export function createProviderSecretStore({
   }
 
   function requireAvailable() {
-    if (!availability().supported) {
-      throw new Error("当前系统没有可用的安全凭据存储");
+    const current = availability();
+    if (current.supported) return;
+    if (current.failure === "secret-tool-not-found") {
+      throw new Error("当前 Linux 系统没有安装 secret-tool");
     }
+    if (current.failure === "linux-secret-service-unavailable") {
+      throw new Error("Linux Secret Service 当前不可访问或尚未解锁");
+    }
+    throw new Error("当前系统没有可用的安全凭据存储");
   }
 
   return { availability, read, write, remove };

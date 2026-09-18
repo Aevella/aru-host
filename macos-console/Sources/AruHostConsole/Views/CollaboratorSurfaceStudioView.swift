@@ -539,11 +539,11 @@ struct CollaboratorSurfaceStudioView: View {
     }
 
     private var surfaces: [HostCollaboratorSurface] {
-        runtime.collaboratorSurfaces[collaborator.id] ?? []
+        runtime.surfaces.collaboratorSurfaces[collaborator.id] ?? []
     }
 
     private var isMutating: Bool {
-        runtime.mutatingSurfaceIds.contains(detail?.surfaceId ?? "new::\(collaborator.id)")
+        runtime.surfaces.mutatingSurfaceIds.contains(detail?.surfaceId ?? "new::\(collaborator.id)")
     }
 
     private var isProjectSurface: Bool { detail?.delivery == "bundle" }
@@ -579,7 +579,7 @@ struct CollaboratorSurfaceStudioView: View {
         errorMessage = nil
         defer { isLoadingDetail = false }
         do {
-            let value = try await runtime.surfaceDetail(
+            let value = try await runtime.surfaces.surfaceDetail(
                 collaboratorId: collaborator.id, surfaceId: surface.surfaceId)
             detail = value
             title = value.title
@@ -588,7 +588,7 @@ struct CollaboratorSurfaceStudioView: View {
             versionNote = ""
             surfaceBundle = nil
             if value.delivery == "bundle" {
-                surfaceBundle = try await runtime.surfaceBundle(
+                surfaceBundle = try await runtime.surfaces.surfaceBundle(
                     collaboratorId: collaborator.id,
                     surfaceId: value.surfaceId,
                     versionId: value.activeVersionId)
@@ -604,7 +604,7 @@ struct CollaboratorSurfaceStudioView: View {
         errorMessage = nil
         defer { isRefreshingInventory = false }
         do {
-            try await runtime.refreshSurfaces(collaboratorId: collaborator.id)
+            try await runtime.surfaces.refreshSurfaces(collaboratorId: collaborator.id)
             if !hasEditorChanges,
                let selectedSurfaceId,
                let selected = surfaces.first(where: { $0.surfaceId == selectedSurfaceId }) {
@@ -627,7 +627,7 @@ struct CollaboratorSurfaceStudioView: View {
         errorMessage = nil
         successMessage = nil
         do {
-            let value = try await runtime.publishSurface(
+            let value = try await runtime.surfaces.publishSurface(
                 collaborator: collaborator,
                 surface: detail,
                 title: title,
@@ -647,7 +647,7 @@ struct CollaboratorSurfaceStudioView: View {
         guard let detail else { return }
         errorMessage = nil
         do {
-            let value = try await runtime.setSurfaceNetworkAccess(
+            let value = try await runtime.surfaces.setSurfaceNetworkAccess(
                 enabled, collaborator: collaborator, surface: detail)
             self.detail = value
             allowsOutboundNetwork = value.allowsOutboundNetwork
@@ -662,13 +662,13 @@ struct CollaboratorSurfaceStudioView: View {
         guard let detail else { return }
         errorMessage = nil
         do {
-            let value = try await runtime.rollbackSurface(
+            let value = try await runtime.surfaces.rollbackSurface(
                 collaborator: collaborator, surface: detail, versionId: versionId)
             self.detail = value
             sourceHTML = value.sourceHTML ?? sourceHTML
             surfaceBundle = nil
             if value.delivery == "bundle" {
-                surfaceBundle = try await runtime.surfaceBundle(
+                surfaceBundle = try await runtime.surfaces.surfaceBundle(
                     collaboratorId: collaborator.id,
                     surfaceId: value.surfaceId,
                     versionId: value.activeVersionId)
@@ -683,7 +683,7 @@ struct CollaboratorSurfaceStudioView: View {
         guard let detail else { return }
         errorMessage = nil
         do {
-            let value = try await runtime.setSurfaceArchived(
+            let value = try await runtime.surfaces.setSurfaceArchived(
                 archived, collaborator: collaborator, surface: detail)
             self.detail = value
             successMessage = archived ? L10n.surfaceArchived : L10n.surfaceRestored

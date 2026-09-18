@@ -229,7 +229,7 @@ struct HostGettingStartedGuideView: View {
     }
 
     private var conversationStatus: HostGuideStatus {
-        let count = runtime.collaboratorConversations.values.reduce(0) { $0 + $1.count }
+        let count = runtime.conversations.collaboratorConversations.values.reduce(0) { $0 + $1.count }
         return HostGuideStatus(
             label: count > 0 ? L10n.guideConversationCount(count) : L10n.guideNoConversation,
             ready: count > 0
