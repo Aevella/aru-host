@@ -2051,7 +2051,10 @@ const conversationTurnRelay = createConversationTurnRelay({
   HttpError,
   maximumRequestBytes: config.maxWorkspaceBytes,
   log,
-  onTurnUpdated: (turn) => remotePush.deliverConversationTurnRelayUpdate(turn),
+  onTurnUpdated: async (turn) => {
+    await remotePush.deliverConversationTurnRelayUpdate(turn);
+    await remotePush.deliverConversationTurnRelayResult(turn);
+  },
 });
 
 // A fresh single-use pairing token on every boot (unless pinned for dev).

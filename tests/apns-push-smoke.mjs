@@ -121,6 +121,28 @@ assert.deepEqual(liveActivityDeliveries.at(-1).payload.alert, {
   title: "Example Collaborator",
   body: "Reply ready",
 });
+const relayedTurn = (overrides = {}) => ({
+  turnId: "turn_result_1", deviceId: "phone_one", conversationId: "conversation-local",
+  state: "succeeded", providerStatus: 200, acknowledgedAt: null, ...overrides,
+});
+const directCount = deliveries.length;
+await host.deliverConversationTurnRelayResult(relayedTurn({ state: "running" }));
+assert.equal(deliveries.length, directCount, "non-terminal turns do not wake the phone");
+await host.deliverConversationTurnRelayResult(relayedTurn({ acknowledgedAt: 1 }));
+assert.equal(deliveries.length, directCount, "an acknowledged turn was already fetched");
+await host.deliverConversationTurnRelayResult(relayedTurn({ deviceId: "phone_two" }));
+assert.equal(deliveries.length, directCount, "revoked device receives nothing");
+await host.deliverConversationTurnRelayResult(relayedTurn());
+assert.equal(deliveries.length, directCount + 1);
+assert.equal(deliveries.at(-1).registration.deviceId, "phone_one");
+const relayedAlert = JSON.parse(encodedPayload(deliveries.at(-1).payload));
+assert.equal(relayedAlert.aps.alert["loc-key"], "polaris.host.relayedReply.notification.body");
+assert.equal("body" in relayedAlert.aps.alert, false);
+assert.equal(relayedAlert.aps["content-available"], 1);
+assert.deepEqual(relayedAlert.aru, {
+  schema: "aru.conversation-turn-relay-route.v1", serverId: "server_test",
+  conversationId: "conversation-local", turnId: "turn_result_1",
+});
 console.log("ARU_APNS_PUSH_SMOKE_OK");
 
 async function register(deviceId, deviceToken, environment) {
@@ -198,7 +220,17 @@ await relayHost.deliverHostedCollaboratorTurn(completedEvent());
 assert.equal(relayCalls.length, 1);
 assert.equal(relayCalls[0].body.notificationRoute.messageId, "hostmsg_test");
 assert.equal("body" in relayCalls[0].body.notificationRoute, false);
+await relayHost.deliverConversationTurnRelayResult({
+  turnId: "turn_relay_1", deviceId: "relay_phone", conversationId: "conversation-local",
+  state: "succeeded", providerStatus: 200, acknowledgedAt: null,
+});
+assert.equal(relayCalls.length, 2);
+assert.equal(relayCalls[1].body.requestId, "turn_relay_1");
+assert.deepEqual(relayCalls[1].body.notificationRoute, {
+  schema: "aru.conversation-turn-relay-route.v1", serverId: "server_test",
+  conversationId: "conversation-local", turnId: "turn_relay_1",
+});
 relayState.devices[0].revokedAt = Date.now();
 await relayHost.deliverHostedCollaboratorTurn(completedEvent());
-assert.equal(relayCalls.length, 1);
+assert.equal(relayCalls.length, 2);
 console.log("ARU_HOST_NOTIFICATION_RELAY_SMOKE_OK");
