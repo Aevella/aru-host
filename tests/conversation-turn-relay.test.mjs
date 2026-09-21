@@ -128,6 +128,12 @@ test("rejects malformed provider bodies at the device boundary", async () => {
         && error.status === 400
         && error.code === "conversation_turn.invalid_request");
     assert.equal(state.conversationTurns.length, 0);
+    // A JSON body of null must still be a 400, not a TypeError from the rejection log.
+    await assert.rejects(
+      relay.route({ method: "POST", body: null }, {}, "/aru/v1/conversation-turns",
+        () => ({ deviceId: "device-one" })),
+      (error) => error instanceof HttpError && error.status === 400);
+    assert.equal(state.conversationTurns.length, 0);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

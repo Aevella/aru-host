@@ -302,7 +302,13 @@ export function createAPNsPushHost({
   async function deliverConversationTurnRelayResult(turn) {
     if (!turn?.deviceId || !turn?.conversationId || !turn?.turnId) return;
     if (!TERMINAL_TURN_STATES.includes(turn.state) || turn.acknowledgedAt) return;
-    const registrations = activeRegistrations().filter((item) => item.deviceId === turn.deviceId);
+    // Only a finished reply deserves a visible notice. A failed, interrupted or
+    // cancelled turn still reaches the phone, but silently: direct registrations
+    // get a background push so the failure state syncs; the official relay only
+    // sends visible alerts, so relay registrations wait for the next foreground.
+    const succeeded = turn.state === "succeeded";
+    const registrations = activeRegistrations().filter((item) =>
+      item.deviceId === turn.deviceId && (succeeded || !item.relay));
     if (registrations.length === 0) return;
     let credentials = null;
     if (registrations.some((item) => !item.relay)) {
@@ -336,12 +342,14 @@ export function createAPNsPushHost({
           }
         } else {
           if (!credentials) throw new Error("APNs provider credentials are unavailable");
-          await sendPush({ credentials, registration, payload: {
-            title: "Aru",
-            localizedBodyKey: "polaris.host.relayedReply.notification.body",
-            threadId: `aru.relay.${turn.conversationId}`,
-            route,
-          } });
+          await sendPush({ credentials, registration, payload: succeeded
+            ? {
+              title: "Aru",
+              localizedBodyKey: "polaris.host.relayedReply.notification.body",
+              threadId: `aru.relay.${turn.conversationId}`,
+              route,
+            }
+            : { silent: true, route } });
         }
         registration.lastDeliveredAt = now();
         registration.lastFailure = null;
@@ -598,8 +606,8 @@ export async function sendAPNsNotification({ credentials, registration, payload 
     [http2Constants.HTTP2_HEADER_PATH]: `/3/device/${registration.deviceToken}`,
     authorization: `bearer ${token}`,
     "apns-topic": registration.topic,
-    "apns-push-type": "alert",
-    "apns-priority": "10",
+    "apns-push-type": payload.silent ? "background" : "alert",
+    "apns-priority": payload.silent ? "5" : "10",
     "apns-expiration": "0",
     "content-type": "application/json",
     "content-length": String(Buffer.byteLength(body)),
@@ -654,6 +662,9 @@ function makeProviderToken(credentials, issuedAt = Math.floor(Date.now() / 1000)
 
 export function encodedPayload(payload) {
   const route = payload.route;
+  if (payload.silent) {
+    return JSON.stringify({ aps: { "content-available": 1 }, aru: route });
+  }
   if (payload.localizedBodyKey) {
     return JSON.stringify({
       aps: {

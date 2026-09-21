@@ -143,6 +143,14 @@ assert.deepEqual(relayedAlert.aru, {
   schema: "aru.conversation-turn-relay-route.v1", serverId: "server_test",
   conversationId: "conversation-local", turnId: "turn_result_1",
 });
+for (const failedState of ["failed", "interrupted", "cancelled"]) {
+  await host.deliverConversationTurnRelayResult(relayedTurn({ turnId: `turn_${failedState}`, state: failedState }));
+  const silent = JSON.parse(encodedPayload(deliveries.at(-1).payload));
+  assert.equal(deliveries.at(-1).payload.silent, true, `${failedState} syncs silently`);
+  assert.equal("alert" in silent.aps, false, `${failedState} shows no reply notice`);
+  assert.equal(silent.aps["content-available"], 1);
+  assert.equal(silent.aru.turnId, `turn_${failedState}`);
+}
 console.log("ARU_APNS_PUSH_SMOKE_OK");
 
 async function register(deviceId, deviceToken, environment) {
@@ -230,6 +238,11 @@ assert.deepEqual(relayCalls[1].body.notificationRoute, {
   schema: "aru.conversation-turn-relay-route.v1", serverId: "server_test",
   conversationId: "conversation-local", turnId: "turn_relay_1",
 });
+await relayHost.deliverConversationTurnRelayResult({
+  turnId: "turn_relay_failed", deviceId: "relay_phone", conversationId: "conversation-local",
+  state: "failed", providerStatus: 500, acknowledgedAt: null,
+});
+assert.equal(relayCalls.length, 2, "a failed turn never becomes a visible relay alert");
 relayState.devices[0].revokedAt = Date.now();
 await relayHost.deliverHostedCollaboratorTurn(completedEvent());
 assert.equal(relayCalls.length, 2);

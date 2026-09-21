@@ -83,7 +83,7 @@ export function createConversationTurnRelay({
       providerBody = decodedBody(body.request?.bodyBase64);
     } catch (error) {
       const reason = error instanceof RangeError ? "range_error" : "invalid_field";
-      log(`conversation relay rejected validation=${reason} encodedBytes=${typeof body.request?.bodyBase64 === "string" ? body.request.bodyBase64.length : 0}`);
+      log(`conversation relay rejected validation=${reason} encodedBytes=${typeof body?.request?.bodyBase64 === "string" ? body.request.bodyBase64.length : 0}`);
       throw new HttpError(400, "conversation_turn.invalid_request", String(error?.message ?? error));
     }
     const existing = state.conversationTurns.find((candidate) =>
