@@ -108,9 +108,8 @@ function decodedBody(value) {
   if (typeof value !== "string" || value.length === 0) {
     throw new Error("request.bodyBase64 is required");
   }
-  if (value.length % 4 !== 0 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) {
-    throw new Error("request.bodyBase64 must be canonical Base64");
-  }
+  // Decode/re-encode is the canonical check. Repeating a Base64 quartet in a
+  // regexp over multi-megabyte requests can overflow V8's regexp stack.
   const decoded = Buffer.from(value, "base64");
   if (decoded.toString("base64") !== value) {
     throw new Error("request.bodyBase64 must be canonical Base64");
@@ -206,6 +205,8 @@ function createConversationTurnRelay({
       headers = validatedHeaders(body.request?.headers);
       providerBody = decodedBody(body.request?.bodyBase64);
     } catch (error) {
+      const reason = error instanceof RangeError ? "range_error" : "invalid_field";
+      log(`conversation relay rejected validation=${reason} encodedBytes=${typeof body.request?.bodyBase64 === "string" ? body.request.bodyBase64.length : 0}`);
       throw new HttpError(400, "conversation_turn.invalid_request", String(error?.message ?? error));
     }
     const existing = state.conversationTurns.find((candidate) =>

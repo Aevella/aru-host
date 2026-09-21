@@ -8,7 +8,7 @@ import {
   SUPPORTED_CONVERSATION_TURN_PROTOCOLS,
 } from "../conversation-turn-relay.mjs";
 
-test("durable turn submission is idempotent and never persists provider secrets", async () => {
+test("multi-megabyte durable turn submission is idempotent and never persists provider secrets", async () => {
   const root = mkdtempSync(join(tmpdir(), "aru-turn-relay-"));
   const statePath = join(root, "state.json");
   const state = { conversationTurns: [] };
@@ -59,7 +59,7 @@ test("durable turn submission is idempotent and never persists provider secrets"
         request: {
           endpoint: "https://provider.example/v1/chat/completions",
           headers: { authorization: "Bearer secret-for-one-request" },
-          bodyBase64: Buffer.from('{"stream":true}').toString("base64"),
+          bodyBase64: Buffer.from(JSON.stringify({ stream: true, input: "x".repeat(8 * 1024 * 1024) })).toString("base64"),
         },
       },
     };
