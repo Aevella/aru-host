@@ -73,9 +73,8 @@ export function decodedBody(value) {
   if (typeof value !== "string" || value.length === 0) {
     throw new Error("request.bodyBase64 is required");
   }
-  if (value.length % 4 !== 0 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) {
-    throw new Error("request.bodyBase64 must be canonical Base64");
-  }
+  // Decode/re-encode is the canonical check. Repeating a Base64 quartet in a
+  // regexp over multi-megabyte requests can overflow V8's regexp stack.
   const decoded = Buffer.from(value, "base64");
   if (decoded.toString("base64") !== value) {
     throw new Error("request.bodyBase64 must be canonical Base64");

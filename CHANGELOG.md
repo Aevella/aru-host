@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.32.1
+
+- Fix relay requests being rejected with HTTP 400 once a conversation grows: the Base64 check used a repeated-group regexp that overflowed V8's stack on large bodies, so the phone silently fell back to generating locally and the reply was lost when Aru left the foreground. Validation now decodes and re-encodes instead.
+- Record why a relay request was rejected (validation category and encoded size) in the Host log, without request content.
+- Wake the submitting phone when a relayed conversation turn finishes and has not been acknowledged yet, so the reply is already in the conversation when Aru is reopened. The push carries only the Host identity, the phone conversation id and the turn id; relay-registered phones go through the official relay, direct registrations through APNs. Needs Aru 0.3 (202609220010) or newer; older phones ignore the push.
+- Protocol remains `stub-0.30`; no data migration. See [installation and upgrade details](docs/releases/0.32.1.md).
+
 ## 0.32.0
 
 - Manage model API profiles from a paired iPhone and create computer collaborators there; keys stay in the OS secret store, creation is replay-safe, and moving a keyed profile to another origin asks for the key again.

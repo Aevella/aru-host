@@ -293,6 +293,75 @@ export function createAPNsPushHost({
     saveState();
   }
 
+  // The Host owns the durable result of a relayed conversation turn. When the
+  // turn reaches a terminal state and the submitting phone has not already
+  // acknowledged it, wake that phone so it fetches the result before the user
+  // reopens Aru. The payload carries only opaque turn identity, never content.
+  const CONVERSATION_TURN_RELAY_ROUTE_SCHEMA = "aru.conversation-turn-relay-route.v1";
+  const TERMINAL_TURN_STATES = ["succeeded", "failed", "interrupted", "cancelled"];
+  async function deliverConversationTurnRelayResult(turn) {
+    if (!turn?.deviceId || !turn?.conversationId || !turn?.turnId) return;
+    if (!TERMINAL_TURN_STATES.includes(turn.state) || turn.acknowledgedAt) return;
+    // Only a finished reply deserves a visible notice. A failed, interrupted or
+    // cancelled turn still reaches the phone, but silently: direct registrations
+    // get a background push so the failure state syncs; the official relay only
+    // sends visible alerts, so relay registrations wait for the next foreground.
+    const succeeded = turn.state === "succeeded";
+    const registrations = activeRegistrations().filter((item) =>
+      item.deviceId === turn.deviceId && (succeeded || !item.relay));
+    if (registrations.length === 0) return;
+    let credentials = null;
+    if (registrations.some((item) => !item.relay)) {
+      try {
+        credentials = credentialStore.read();
+      } catch (error) {
+        log(`direct push credentials unavailable: ${safePushFailure(error)}`);
+      }
+    }
+    const route = {
+      schema: CONVERSATION_TURN_RELAY_ROUTE_SCHEMA,
+      serverId,
+      conversationId: turn.conversationId,
+      turnId: turn.turnId,
+    };
+    await Promise.all(registrations.map(async (registration) => {
+      registration.lastAttemptAt = now();
+      try {
+        if (registration.relay && relayBaseURL) {
+          const url = new URL(`/aru/v1/wake-relay/routes/${registration.relay.routeId}/requests`, relayBaseURL);
+          const response = await fetchImpl(url, {
+            method: "POST", redirect: "error",
+            headers: { "content-type": "application/json", authorization: `Bearer ${registration.relay.wakeToken}` },
+            body: JSON.stringify({ schema: "aru.wake-relay.request.v1", requestId: turn.turnId,
+              notificationRoute: route }),
+          });
+          if (response.status !== 202) throw new Error(`notification relay HTTP ${response.status}`);
+          const receipt = await response.json();
+          if (receipt?.schema !== "aru.wake-relay.receipt.v1" || receipt.requestId !== turn.turnId || receipt.accepted !== true) {
+            throw new Error("notification relay returned an invalid receipt");
+          }
+        } else {
+          if (!credentials) throw new Error("APNs provider credentials are unavailable");
+          await sendPush({ credentials, registration, payload: succeeded
+            ? {
+              title: "Aru",
+              localizedBodyKey: "polaris.host.relayedReply.notification.body",
+              threadId: `aru.relay.${turn.conversationId}`,
+              route,
+            }
+            : { silent: true, route } });
+        }
+        registration.lastDeliveredAt = now();
+        registration.lastFailure = null;
+      } catch (error) {
+        registration.lastFailure = safePushFailure(error);
+        if (invalidatesDeviceToken(error)) registration.disabledAt = now();
+        log(`relayed turn result push failed for ${registration.deviceId}: ${registration.lastFailure}`);
+      }
+    }));
+    saveState();
+  }
+
   async function deliverConversationTurnRelayUpdate(turn) {
     if (!turn?.deviceId || !turn?.conversationId) return;
     const registrations = activeLiveActivityRegistrations().filter(
@@ -416,6 +485,7 @@ export function createAPNsPushHost({
     route,
     deliverHostedCollaboratorTurn,
     deliverConversationTurnRelayUpdate,
+    deliverConversationTurnRelayResult,
     publicStatus,
     manifestCapability() {
       return {
@@ -536,8 +606,8 @@ export async function sendAPNsNotification({ credentials, registration, payload 
     [http2Constants.HTTP2_HEADER_PATH]: `/3/device/${registration.deviceToken}`,
     authorization: `bearer ${token}`,
     "apns-topic": registration.topic,
-    "apns-push-type": "alert",
-    "apns-priority": "10",
+    "apns-push-type": payload.silent ? "background" : "alert",
+    "apns-priority": payload.silent ? "5" : "10",
     "apns-expiration": "0",
     "content-type": "application/json",
     "content-length": String(Buffer.byteLength(body)),
@@ -592,6 +662,20 @@ function makeProviderToken(credentials, issuedAt = Math.floor(Date.now() / 1000)
 
 export function encodedPayload(payload) {
   const route = payload.route;
+  if (payload.silent) {
+    return JSON.stringify({ aps: { "content-available": 1 }, aru: route });
+  }
+  if (payload.localizedBodyKey) {
+    return JSON.stringify({
+      aps: {
+        alert: { title: payload.title, "loc-key": payload.localizedBodyKey },
+        sound: "default",
+        "thread-id": payload.threadId,
+        "content-available": 1,
+      },
+      aru: route,
+    });
+  }
   let body = String(payload.body ?? "").trim();
   while (body.length > 64) {
     const value = JSON.stringify({
