@@ -150,7 +150,8 @@ deterministic dev flows.
 | `POST /aru/v1/agent-drivers/refresh` | Bearer | rerun bounded local driver version probes |
 | `GET/POST /aru/v1/hosted-collaborators` | Bearer | list or create computer-authoritative collaborator roots |
 | `GET/PUT /aru/v1/hosted-collaborators/:id` | Bearer | read or update one hosted root and selected driver |
-| `GET/PUT/DELETE /aru/v1/mobile-collaborator-replicas/:sourceCollaboratorId` | Bearer | inspect, publish, or revoke one phone-authoritative read-only execution replica |
+| `PUT /aru/v1/mobile-collaborator-replicas/:sourceCollaboratorId` | Bearer | publish one phone-authoritative read-only execution replica; a revoked epoch is rejected with `mobile_replica.epoch_revoked` |
+| `POST .../mobile-collaborator-replicas/:sourceCollaboratorId/revoke` | Bearer | return proactive execution to the phone: records the revoked epoch, stops scheduling, drops late results of that epoch, and returns a strict receipt; a newer active epoch answers `mobile_replica.epoch_stale` |
 | `GET .../mobile-collaborator-replicas/:sourceCollaboratorId/deliveries` | Bearer | read stable proactive deliveries for idempotent phone import and append-or-branch reconciliation |
 | `GET/POST /aru/v1/hosted-collaborators/:id/initiative` | Bearer | list or create durable one-shot/recurring proactive rules |
 | `PUT .../initiative/rules/:ruleId`, `POST .../initiative/rules/:ruleId/archive`, `/restore`, `/run` | Bearer | revision-safely edit, archive, restore, or explicitly run one rule |

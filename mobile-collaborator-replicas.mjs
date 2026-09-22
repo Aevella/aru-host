@@ -34,6 +34,7 @@ export function createMobileCollaboratorReplicaHost({
   const statePath = join(root, "ledger.json");
   mkdirSync(root, { recursive: true, mode: 0o700 });
   const ledger = loadLedger();
+  ledger.revokedExecutions ??= [];
   let timer = null;
   let started = false;
   for (const replica of ledger.replicas) {
@@ -49,7 +50,26 @@ export function createMobileCollaboratorReplicaHost({
     requireDevice();
     if (!suffix && req.method === "PUT") {
       const body = await readJSONBody(req, maximumRequestBytes);
+      requireDevice();
       sendJSON(res, 200, upsert(sourceCollaboratorId, body));
+      return true;
+    }
+    if (suffix === "/revoke" && req.method === "POST") {
+      const body = await readJSONBody(req, 64 * 1024);
+      requireDevice();
+      const epoch = positiveInteger(body?.epoch, "epoch");
+      const current = replicaForId(sourceCollaboratorId, false);
+      if (current && current.epoch > epoch) {
+        throw new HttpError(409, "mobile_replica.epoch_stale", "a newer execution grant is active");
+      }
+      const previous = ledger.revokedExecutions;
+      ledger.revokedExecutions = previous.filter((item) => item.sourceCollaboratorId !== sourceCollaboratorId);
+      ledger.revokedExecutions.push({ sourceCollaboratorId,
+        epoch: Math.max(epoch, previous.find((item) => item.sourceCollaboratorId === sourceCollaboratorId)?.epoch ?? 0) });
+      try { saveLedger(); }
+      catch (error) { ledger.revokedExecutions = previous; throw error; }
+      schedule();
+      sendJSON(res, 200, { schema: "aru.selfhost.mobile-collaborator-revoke-receipt.v1", sourceCollaboratorId, epoch });
       return true;
     }
     if (suffix === "/deliveries" && req.method === "GET") {
@@ -71,6 +91,9 @@ export function createMobileCollaboratorReplicaHost({
     }
     const epoch = positiveInteger(body.epoch, "epoch");
     const revision = nonnegativeInteger(body.revision, "revision");
+    if (executionRevoked(sourceCollaboratorId, epoch)) {
+      throw new HttpError(409, "mobile_replica.epoch_revoked", "mobile collaborator execution grant was revoked");
+    }
     const readerIds = uniqueIds(body.readerHostCollaboratorIds);
     const executorHostCollaboratorId = validatedId(body.executorHostCollaboratorId, "executor collaborator");
     if (!readerIds.includes(executorHostCollaboratorId)) readerIds.push(executorHostCollaboratorId);
@@ -201,7 +224,7 @@ export function createMobileCollaboratorReplicaHost({
     if (!started) return;
     if (timer) clearTimer(timer);
     timer = null;
-    const nextFireAt = ledger.replicas.flatMap((replica) => (replica.rules ?? [])
+    const nextFireAt = ledger.replicas.filter((replica) => !executionRevoked(replica.sourceCollaboratorId, replica.epoch)).flatMap((replica) => (replica.rules ?? [])
       .filter((rule) => rule.enabled && rule.nextFireAt && !rule.inFlightDeliveryId)
       .map((rule) => rule.nextFireAt)).sort((left, right) => left - right)[0];
     if (!nextFireAt) return;
@@ -213,6 +236,7 @@ export function createMobileCollaboratorReplicaHost({
     const due = [];
     const timestamp = now();
     for (const replica of ledger.replicas) {
+      if (executionRevoked(replica.sourceCollaboratorId, replica.epoch)) continue;
       for (const rule of replica.rules ?? []) {
         if (rule.enabled && rule.nextFireAt && rule.nextFireAt <= timestamp && !rule.inFlightDeliveryId) {
           due.push({ replica, rule });
@@ -240,7 +264,7 @@ export function createMobileCollaboratorReplicaHost({
     if (event?.turn?.source !== "mobile-replica-proactive") return false;
     const replica = replicaForId(event.turn.sourceCollaboratorId, false);
     const rule = replica?.rules?.find((candidate) => candidate.ruleId === event.turn.ruleId);
-    if (!replica || !rule || replica.epoch !== event.turn.executionEpoch
+    if (!replica || !rule || executionRevoked(replica.sourceCollaboratorId, replica.epoch) || replica.epoch !== event.turn.executionEpoch
         || rule.inFlightDeliveryId !== event.turn.deliveryId) return true;
     rule.inFlightDeliveryId = null;
     if (event.outcome === "completed") {
@@ -287,6 +311,10 @@ export function createMobileCollaboratorReplicaHost({
       rule.nextFireAt = null;
       rule.enabled = false;
     }
+  }
+
+  function executionRevoked(sourceCollaboratorId, epoch) {
+    return ledger.revokedExecutions.some((item) => item.sourceCollaboratorId === sourceCollaboratorId && epoch <= item.epoch);
   }
 
   function loadLedger() {

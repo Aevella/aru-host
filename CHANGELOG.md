@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Add `POST /aru/v1/mobile-collaborator-replicas/:sourceCollaboratorId/revoke` so a paired phone can return proactive-message execution from the Host to itself. The Host records the revoked epoch in the replica ledger, stops scheduling that epoch, refuses stale re-syncs of it, and no longer records deliveries for tasks of that epoch that finish after the revocation; a newer grant with a higher epoch takes over again. Needs Aru with the "切回这台手机" control; older phones are unaffected.
+
 ## 0.32.1
 
 - Fix relay requests being rejected with HTTP 400 once a conversation grows: the Base64 check used a repeated-group regexp that overflowed V8's stack on large bodies, so the phone silently fell back to generating locally and the reply was lost when Aru left the foreground. Validation now decodes and re-encodes instead.

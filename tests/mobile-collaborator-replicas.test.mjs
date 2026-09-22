@@ -213,3 +213,117 @@ test("daily phone rule keeps its wall-clock schedule and resolved target", async
   assert.equal(triggered.rule.nextFireAt, Date.parse("2026-08-14T13:00:00Z"));
   host.stop();
 });
+
+test("revoking phone execution stops the Host scheduler, drops late results, and blocks stale re-sync", async (context) => {
+  const directory = mkdtempSync(join(tmpdir(), "aru-mobile-replica-revoke-"));
+  context.after(() => rmSync(directory, { recursive: true, force: true }));
+  let clock = 1_000;
+  let triggered = [];
+  let response = null;
+  const options = {
+    dataDir: directory,
+    readJSONBody: async (request) => request.body,
+    sendJSON: (_response, status, value) => { response = { status, value }; },
+    HttpError,
+    collaboratorForId: (id) => ({ collaboratorId: id, displayName: "Computer", driverId: "codex" }),
+    maximumRequestBytes: 64 * 1024 * 1024,
+    trigger(_executor, replica, rule, deliveryId) { triggered.push({ epoch: replica.epoch, rule, deliveryId }); },
+    now: () => clock,
+    setTimer: () => 1,
+    clearTimer: () => {},
+  };
+  const host = createMobileCollaboratorReplicaHost(options);
+  const rule = (ruleId, nextFireAt) => ({
+    ruleId,
+    conversationMode: "fixed",
+    conversationId: "phone_conversation",
+    title: ruleId,
+    goal: "Check in",
+    instructions: "Be direct",
+    nextFireAt,
+    scheduleKind: "one_time",
+    recurrenceMinutes: null,
+    dailyTimeMinutes: null,
+    scheduleTimeZoneIdentifier: null,
+    notificationsEnabled: true,
+    enabled: true,
+    updatedAt: 940,
+    sourceVersion: `${ruleId}-version-1`,
+  });
+  const replica = (epoch, revision) => ({
+    schema: "aru.selfhost.mobile-collaborator-replica.v1",
+    sourceCollaboratorId: "phone_aru",
+    displayName: "Aru",
+    systemPrompt: "Stay close.",
+    memories: [],
+    references: [],
+    conversations: [{ conversationId: "phone_conversation", title: "Us", baseMessageId: null, messages: [] }],
+    rules: [rule("rule_now", 1_000), rule("rule_later", 2_000)],
+    readerHostCollaboratorIds: ["hostcol_reader"],
+    executorHostCollaboratorId: "hostcol_reader",
+    epoch,
+    revision,
+    generatedAt: 950,
+  });
+  const path = "/aru/v1/mobile-collaborator-replicas/phone_aru";
+  const device = () => ({ deviceId: "phone" });
+  const send = (method, suffix, body) => host.route({ method, body, url: path + suffix }, {}, path + suffix.split("?")[0], device);
+
+  await send("PUT", "", replica(1, 1));
+  assert.equal(response.status, 200);
+  host.start();
+  await host.runDue();
+  assert.equal(triggered.length, 1);
+  const inFlight = triggered[0];
+
+  await send("POST", "/revoke", { epoch: 1 });
+  assert.deepEqual(response, {
+    status: 200,
+    value: { schema: "aru.selfhost.mobile-collaborator-revoke-receipt.v1", sourceCollaboratorId: "phone_aru", epoch: 1 },
+  });
+
+  // A task that was already running may finish, but its result is no longer accepted as a delivery.
+  clock = 1_100;
+  await host.settle({
+    outcome: "completed",
+    turn: {
+      source: "mobile-replica-proactive",
+      sourceCollaboratorId: "phone_aru",
+      sourceConversationId: "phone_conversation",
+      baseMessageId: null,
+      basisMessages: [],
+      executionEpoch: 1,
+      ruleId: "rule_now",
+      ruleVersion: "rule_now-version-1",
+      deliveryId: inFlight.deliveryId,
+    },
+    assistantMessage: { content: "Late result." },
+  });
+  await send("GET", "/deliveries?epoch=1");
+  assert.equal(response.value.deliveries.length, 0);
+
+  // The revoked epoch no longer fires and cannot be re-enabled by an old sync.
+  clock = 2_500;
+  await host.runDue();
+  assert.equal(triggered.length, 1);
+  await assert.rejects(send("PUT", "", replica(1, 2)),
+    (error) => error instanceof HttpError && error.status === 409 && error.code === "mobile_replica.epoch_revoked");
+
+  // Revocation survives a Host restart.
+  host.stop();
+  const restarted = createMobileCollaboratorReplicaHost(options);
+  restarted.start();
+  await restarted.runDue();
+  assert.equal(triggered.length, 1);
+
+  // A fresh grant with a higher epoch takes over again; an old revoke cannot clear it.
+  await restarted.route({ method: "PUT", body: replica(2, 1), url: path }, {}, path, device);
+  assert.equal(response.status, 200);
+  await restarted.runDue();
+  assert.equal(triggered.length, 3);
+  assert.ok(triggered.slice(1).every((item) => item.epoch === 2));
+  await assert.rejects(
+    restarted.route({ method: "POST", body: { epoch: 1 }, url: `${path}/revoke` }, {}, `${path}/revoke`, device),
+    (error) => error instanceof HttpError && error.status === 409 && error.code === "mobile_replica.epoch_stale");
+  restarted.stop();
+});
