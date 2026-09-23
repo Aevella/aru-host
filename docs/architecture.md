@@ -83,4 +83,6 @@ preserved. Ordinary mobile replica reads no longer expose memories or references
 execution snapshots remain owned by the separate delegation chain.
 
 
-2026-09-23 validation: residence reading and mobile replica suites pass (6 tests); cognition smoke and generated runtime checks pass. Host Core bundle loads with an isolated `--check-state` data directory; Linux release archive contains residence-reading.mjs. These are local implementation/package checks, not a deployed-node or phone integration claim. Existing saved cognition remains unchanged; legacy memory-sync is retired with HTTP 410.
+2026-09-23 validation: residence reading and mobile replica suites pass (6 tests); cognition smoke and generated runtime checks pass. Host Core bundle loads with an isolated `--check-state` data directory; Linux release archive keeps the existing fixed filename set. These are local implementation/package checks, not a deployed-node or phone integration claim. Existing saved cognition remains unchanged; legacy memory-sync is retired with HTTP 410.
+
+The cognition source now lives in `src/cognition/`; the existing runtime generator assembles cognition and residence reading into the fixed `collaborator-cognition.mjs` deployment artifact. This preserves the already-shipped fixed-list installer contract without a runtime fallback. The old 0.31.4 installer fixture and reading/replica tests pass together (7 tests); the isolated macOS installer smoke also passes. Do not add a separate runtime dependency on residence-reading.mjs to deployed cognition.

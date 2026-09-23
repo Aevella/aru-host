@@ -5,7 +5,7 @@ readonly PRODUCT="Aru Host for Linux"
 readonly REPO_RAW_DEFAULT="https://raw.githubusercontent.com/Aevella/aru-host"
 readonly CORE_FILES=(
   aru-selfhost-stub.mjs backup-settings.mjs conversation-turn-relay.mjs
-  collaborator-host.mjs mobile-collaborator-replicas.mjs mobile-collaborator-identities.mjs container-runtime-setup.mjs collaborator-cognition.mjs residence-reading.mjs collaborator-surfaces.mjs
+  collaborator-host.mjs mobile-collaborator-replicas.mjs mobile-collaborator-identities.mjs container-runtime-setup.mjs collaborator-cognition.mjs collaborator-surfaces.mjs
   collaborator-surface-bundles.mjs collaborator-conversations.mjs
   collaborator-conversation-attachments.mjs
   collaborator-initiative.mjs collaborator-projects.mjs apns-push.mjs wake-bridge.mjs

@@ -15,7 +15,7 @@ files=(
   conversation-turn-relay.mjs
   collaborator-host.mjs
   mobile-collaborator-replicas.mjs mobile-collaborator-identities.mjs container-runtime-setup.mjs
-  collaborator-cognition.mjs residence-reading.mjs
+  collaborator-cognition.mjs
   collaborator-surfaces.mjs
   collaborator-surface-bundles.mjs
   collaborator-conversations.mjs
