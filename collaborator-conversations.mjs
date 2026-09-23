@@ -403,6 +403,7 @@ function createCollaboratorConversationHost({
         configurationRevision(collaborator),
       );
       const canResumeDriverThread = conversation.driverConfigurationFingerprint === configurationFingerprint;
+      if (!canResumeDriverThread) sessionToolGrants.delete(conversationKey(collaboratorId, conversationId));
       const started = await driver.startTurn({
         threadId: canResumeDriverThread ? conversation.driverThreadId : null,
         cwd: workspace,
@@ -469,6 +470,10 @@ function createCollaboratorConversationHost({
   async function requestDriverApproval(conversation, request) {
     const turn = conversation.activeTurn;
     if (!turn) return;
+    if (collaboratorForId(conversation.collaboratorId).approvalMode === "always_allow") {
+      request.respond(driverApprovalResponse(request.method, request.params, "allowOnce"));
+      return;
+    }
     const approval = addApproval(conversation, {
       kind: driverApprovalKind(request.method),
       title: driverApprovalTitle(request.method),
@@ -491,7 +496,8 @@ function createCollaboratorConversationHost({
     const grants = sessionToolGrants.get(
       conversationKey(conversation.collaboratorId, conversation.conversationId),
     ) ?? new Set();
-    if (!tool.annotations?.readOnlyHint && !grants.has(tool.name)) {
+    if (!tool.annotations?.readOnlyHint && !grants.has(tool.name)
+        && collaboratorForId(conversation.collaboratorId).approvalMode !== "always_allow") {
       await waitForToolApproval(conversation, tool, params.arguments ?? {});
     }
     setTurnState(conversation, "toolRunning");

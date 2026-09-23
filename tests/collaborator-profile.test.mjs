@@ -70,3 +70,31 @@ test('lost create replies reuse the same identity; failed persistence does not p
   assert.equal(first.collaboratorId, second.collaboratorId);
   assert.equal(f.state.hostedCollaborators.length, 1);
 });
+
+test('approval policy persists through collaborator revisions and rejects invalid or stale updates', async t => {
+  const f = fixture(t);
+  const item = await f.request('POST', '/aru/v1/hosted-collaborators', {displayName: 'Astra', driverId: 'codex'});
+  assert.equal(item.approvalMode, 'confirm');
+  assert.equal(item.supportsAvatarEditing, true);
+  const path = `/aru/v1/hosted-collaborators/${item.collaboratorId}`;
+  await assert.rejects(f.request('PUT', path, {expectedRevision: 1, approvalMode: 'unknown'}));
+  f.failSave(true);
+  await assert.rejects(f.request('PUT', path, {expectedRevision: 1, approvalMode: 'always_allow'}));
+  assert.equal(f.state.hostedCollaborators[0].approvalMode, undefined);
+  f.failSave(false);
+  const allowed = await f.request('PUT', path, {expectedRevision: 1, approvalMode: 'always_allow'});
+  assert.equal(allowed.approvalMode, 'always_allow');
+  assert.equal(f.state.hostedCollaborators[0].approvalMode, 'always_allow');
+  await assert.rejects(f.request('PUT', path, {expectedRevision: 1, approvalMode: 'confirm'}));
+  const revoked = await f.request('PUT', path, {expectedRevision: 2, approvalMode: 'confirm'});
+  assert.equal(revoked.approvalMode, 'confirm');
+});
+
+test('avatar content above the old 64KB limit round-trips in the profile', async t => {
+  const f = fixture(t);
+  const item = await f.request('POST', '/aru/v1/hosted-collaborators', {displayName: 'Avatar', driverId: 'codex'});
+  const avatarDataURL = 'data:image/jpeg;base64,' + Buffer.alloc(100000, 7).toString('base64');
+  const updated = await f.request('PUT', `/aru/v1/hosted-collaborators/${item.collaboratorId}`, {expectedRevision: 1, avatarDataURL});
+  assert.equal(updated.avatarDataURL, avatarDataURL);
+  assert.equal(f.state.hostedCollaborators[0].avatarDataURL, avatarDataURL);
+});

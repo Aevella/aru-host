@@ -288,6 +288,7 @@ export function createCollaboratorHost({
       collaboratorId: collaborator.collaboratorId,
       displayName: collaborator.displayName,
       avatarDataURL: collaborator.avatarDataURL ?? null,
+      supportsAvatarEditing: true,
       driverId: collaborator.driverId,
       providerProfileId: collaborator.providerProfileId ?? null,
       driverDisplayName: providerProfile?.displayName ?? driver?.displayName ?? collaborator.driverId,
@@ -300,6 +301,7 @@ export function createCollaboratorHost({
       clientProjection: "read-only-replica",
       activationStatus,
       turnExecution,
+      approvalMode: collaborator.approvalMode ?? "confirm",
       toolAccess: publicToolAccess(collaborator.toolAccess),
       cognition: cognition.summary(collaborator.collaboratorId),
     };
@@ -459,7 +461,7 @@ export function createCollaboratorHost({
       throw new HttpError(409, "collaborator.revision_conflict", "hosted collaborator changed since it was read");
     }
     if (body.displayName === undefined && body.driverId === undefined
-        && body.providerProfileId === undefined && body.toolAccess === undefined && body.avatarDataURL === undefined) {
+        && body.approvalMode === undefined && body.providerProfileId === undefined && body.toolAccess === undefined && body.avatarDataURL === undefined) {
       throw new HttpError(400, "collaborator.no_changes", "displayName, driverId, providerProfileId, or toolAccess required");
     }
     const next = { ...collaborator };
@@ -479,6 +481,12 @@ export function createCollaboratorHost({
       next.driverId = driverId;
       next.providerProfileId = validatedProviderProfileId(driverId,
         body.providerProfileId === undefined ? collaborator.providerProfileId : body.providerProfileId);
+    }
+    if (body.approvalMode !== undefined) {
+      if (!["confirm", "always_allow"].includes(body.approvalMode)) {
+        throw new HttpError(400, "collaborator.approval_mode_invalid", "approvalMode must be confirm or always_allow");
+      }
+      next.approvalMode = body.approvalMode;
     }
     if (body.toolAccess !== undefined) next.toolAccess = validatedToolAccess(body.toolAccess);
     next.revision += 1;
