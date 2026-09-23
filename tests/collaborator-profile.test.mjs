@@ -24,6 +24,11 @@ function fixture(t) {
   };
   return { state, request, active: value => active = value, failSave: value => failSave = value };
 }
+test('inventory declares protocol compatibility before opening individual features', async t => {
+  const f = fixture(t);
+  const inventory = await f.request('GET', '/aru/v1/hosted-collaborators');
+  assert.deepEqual(inventory.compatibility, { revision: 1, minimumClientRevision: 1 });
+});
 test('profile validation and failed persistence cannot partially mutate a collaborator', async t => {
   const f = fixture(t);
   const item = await f.request('POST', '/aru/v1/hosted-collaborators', { displayName: 'Astra', driverId: 'codex' });

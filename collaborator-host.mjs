@@ -269,6 +269,7 @@ export function createCollaboratorHost({
     const projection = collaboratorProjection();
     return {
       schema: HOSTED_COLLABORATOR_INVENTORY_SCHEMA,
+      compatibility: { revision: 1, minimumClientRevision: 1 },
       mobileIdentities: mobileIdentities.inventory(),
       collaborators: state.hostedCollaborators.map((collaborator) => publicCollaborator(collaborator, projection)),
     };
