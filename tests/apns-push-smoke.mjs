@@ -152,6 +152,9 @@ for (const failedState of ["failed", "interrupted", "cancelled"]) {
   assert.equal(silent.aps["content-available"], 1);
   assert.equal(silent.aru.turnId, `turn_${failedState}`);
 }
+await host.deliverConversationTurnRelayResult(relayedTurn({notificationTitle:"Astra",notificationPreview:"正文预览"}));
+const named = JSON.parse(encodedPayload(deliveries.at(-1).payload));
+assert.deepEqual(named.aps.alert,{title:"Astra",body:"正文预览"});
 console.log("ARU_APNS_PUSH_SMOKE_OK");
 
 async function register(deviceId, deviceToken, environment) {

@@ -407,7 +407,8 @@ export function createAPNsPushHost({
             timestamp: Math.floor(now() / 1_000),
             dismissalDate: terminal ? Math.floor(now() / 1_000) + 8 : null,
             alert: turn.state === "succeeded"
-              ? { title: registration.collaboratorName, body: registration.completionBody }
+              ? { title: turn.notificationTitle || registration.collaboratorName,
+                  body: turn.notificationPreview || registration.completionBody }
               : null,
           },
         });
