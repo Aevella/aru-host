@@ -76,6 +76,9 @@ const API_DRIVER_DEFINITION = {
   integrationGuide: null,
 };
 const DRIVER_DEFINITIONS = [...LOCAL_DRIVER_DEFINITIONS, API_DRIVER_DEFINITION];
+// Drivers that driverForCollaborator can run. Others are probed and listed so
+// the Console can show them, but a collaborator cannot be created on them.
+const TURN_EXECUTING_DRIVER_IDS = new Set(["codex", "api"]);
 
 export function createCollaboratorHost({
   dataDir,
@@ -379,9 +382,28 @@ export function createCollaboratorHost({
       if (body.expectedRevision !== collaborator.revision) {
         throw new HttpError(409, "collaborator.revision_conflict", "hosted collaborator changed since it was read");
       }
-      const active = conversations.inventory(collaboratorId).conversations.some(
+      if (mobileReplicas.hasExecutionGrant(collaboratorId)) {
+        throw new HttpError(409, "collaborator.delegated", "Return mobile proactive execution to the phone before deleting this computer collaborator.");
+      }
+      const hasActiveTurn = () => conversations.inventory(collaboratorId).conversations.some(
         (item) => ["queued", "starting", "streaming", "waitingApproval", "toolRunning"].includes(item.activeTurn?.state));
-      if (active) throw new HttpError(409, "collaborator.busy", "Stop the current task before deleting this computer collaborator.");
+      if (hasActiveTurn()) {
+        if (body.stopActiveTurns !== true) {
+          throw new HttpError(409, "collaborator.busy", "Stop the current task before deleting this computer collaborator.");
+        }
+        await conversations.stopActiveTurns(collaboratorId, device);
+        // Stopping awaited drivers; the collaborator may have changed meanwhile.
+        if (collaborator.archivedAt) {
+          sendJSON(res, 200, publicCollaborator(collaborator));
+          return true;
+        }
+        if (body.expectedRevision !== collaborator.revision) {
+          throw new HttpError(409, "collaborator.revision_conflict", "hosted collaborator changed since it was read");
+        }
+        if (hasActiveTurn()) {
+          throw new HttpError(409, "collaborator.busy", "A new task started while stopping; try again.");
+        }
+      }
       if (mobileReplicas.hasExecutionGrant(collaboratorId)) {
         throw new HttpError(409, "collaborator.delegated", "Return mobile proactive execution to the phone before deleting this computer collaborator.");
       }
@@ -519,6 +541,9 @@ export function createCollaboratorHost({
     if (!DRIVER_DEFINITIONS.some((driver) => driver.id === driverId)) {
       throw new HttpError(400, "agent_driver.unknown", "driverId must name a supported agent driver");
     }
+    if (!TURN_EXECUTING_DRIVER_IDS.has(driverId)) {
+      throw new HttpError(400, "agent_driver.not_executable", "This agent driver cannot run collaborator turns on this Host yet");
+    }
     return driverId;
   }
 
@@ -588,8 +613,9 @@ export function createCollaboratorHost({
         ...LOCAL_DRIVER_DEFINITIONS.map((definition) => ({
           ...publicDriverDefinition(definition),
           ...(probes.get(definition.id) ?? unavailableProbe(definition, null)),
+          executesTurns: TURN_EXECUTING_DRIVER_IDS.has(definition.id),
         })),
-        apiDriverInventory(providerInventory),
+        { ...apiDriverInventory(providerInventory), executesTurns: true },
       ],
     };
   }

@@ -253,7 +253,7 @@ await assert.rejects(
 console.log("ARU_COLLABORATOR_HOST_SMOKE_OK");
 
 const createRequest = {
-  method: "POST", body: { displayName: "Phone-created", driverId: "claude-code",
+  method: "POST", body: { displayName: "Phone-created", driverId: "codex",
     requestId: "33333333-3333-4333-8333-333333333333" },
 };
 const firstCreate = {}, repeatedCreate = {};
@@ -262,3 +262,11 @@ await host.route(createRequest, repeatedCreate, "/aru/v1/hosted-collaborators", 
 assert.equal(firstCreate.body.collaboratorId, repeatedCreate.body.collaboratorId);
 assert.equal(state.hostedCollaborators.filter((item) => item.createRequestId === createRequest.body.requestId).length, 1);
 console.log("ARU_HOST_CREATE_REPLAY_SMOKE_OK");
+
+await assert.rejects(
+  host.route({ method: "POST", body: { displayName: "Claude", driverId: "claude-code" } }, {},
+    "/aru/v1/hosted-collaborators", () => ({ deviceId: "phone-create" }), () => {}),
+  (error) => error.code === "agent_driver.not_executable",
+);
+assert.equal(host.driverInventory().drivers.find((driver) => driver.id === "claude-code").executesTurns, false);
+console.log("ARU_HOST_NON_EXECUTING_DRIVER_SMOKE_OK");

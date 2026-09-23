@@ -9,12 +9,14 @@ function fixture(t) {
   const dir = mkdtempSync(join(tmpdir(), 'aru-profile-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const state = { hostedCollaborators: [], agentDriverProbes: [], providerProfiles: [] };
-  let active = false, failSave = false;
+  let active = false, failSave = false, restartDuringStop = false;
+  const stopped = [];
   const host = createCollaboratorHost({ dataDir: dir, managedWorkspaceRoot: dir, state,
     saveState() { if (failSave) throw new Error('disk failure'); },
     readJSONBody: async req => req.body, sendJSON: (res, status, body) => Object.assign(res, { status, body }), HttpError,
     conversationHostFactory: () => ({ route: async () => false,
       inventory: () => ({ conversations: active ? [{ activeTurn: { state: 'streaming' } }] : [] }),
+      stopActiveTurns: async (id, device) => { stopped.push({ id, device: device.deviceId }); active = restartDuringStop; },
       status: () => ({ conversationCount: 0, activeTurnCount: 0, pendingApprovalCount: 0 }) }),
   });
   const request = async (method, path, body = {}) => {
@@ -22,7 +24,8 @@ function fixture(t) {
     assert.equal(await host.route({ method, body }, res, path, () => ({ deviceId: 'test' })), true);
     return res.body;
   };
-  return { state, request, active: value => active = value, failSave: value => failSave = value };
+  return { state, request, stopped, active: value => active = value, failSave: value => failSave = value,
+    restartDuringStop: value => restartDuringStop = value };
 }
 test('inventory declares protocol compatibility before opening individual features', async t => {
   const f = fixture(t);
@@ -102,4 +105,17 @@ test('avatar content above the old 64KB limit round-trips in the profile', async
   const updated = await f.request('PUT', `/aru/v1/hosted-collaborators/${item.collaboratorId}`, {expectedRevision: 1, avatarDataURL});
   assert.equal(updated.avatarDataURL, avatarDataURL);
   assert.equal(f.state.hostedCollaborators[0].avatarDataURL, avatarDataURL);
+});
+
+test('deletion can stop running tasks when the person confirms it, and never deletes over a task that restarted', async t => {
+  const f = fixture(t);
+  const item = await f.request('POST', '/aru/v1/hosted-collaborators', { displayName: 'Astra', driverId: 'codex' });
+  const path = `/aru/v1/hosted-collaborators/${item.collaboratorId}`;
+  f.active(true); f.restartDuringStop(true);
+  await assert.rejects(f.request('DELETE', path, { expectedRevision: 1, stopActiveTurns: true }), e => e.code === 'collaborator.busy');
+  assert.equal(f.state.hostedCollaborators[0].archivedAt, null);
+  f.active(true); f.restartDuringStop(false);
+  const deleted = await f.request('DELETE', path, { expectedRevision: 1, stopActiveTurns: true });
+  assert.ok(deleted.archivedAt);
+  assert.deepEqual(f.stopped.map(item => item.id), [item.collaboratorId, item.collaboratorId]);
 });

@@ -307,6 +307,7 @@ export function createCollaboratorConversationHost({
       collaboratorId: `mobilereplica_${replica.sourceCollaboratorId}`,
       displayName: replica.displayName,
       authority: "mobile-replica",
+      executorCollaboratorId: executor.collaboratorId,
       mobileInstructions: replicaInstructions(replica),
       revision: replica.revision,
     };
@@ -384,7 +385,7 @@ export function createCollaboratorConversationHost({
         userMessageId: turn.userMessageId,
         handler: {
           onNotification: (method, params) => handleNotification(conversation, method, params, workspace),
-          onApproval: (request) => requestDriverApproval(conversation, request),
+          onApproval: (request) => requestDriverApproval(conversation, collaborator, request),
           onToolCall: (params) => handleToolCall(conversation, collaborator, tools, params),
           onDisconnect: (error) => interruptConversation(conversation, error.message),
         },
@@ -435,10 +436,23 @@ export function createCollaboratorConversationHost({
     }
   }
 
-  async function requestDriverApproval(conversation, request) {
+  // A mobile replica turn runs under the computer face that executes it, so its
+  // approval policy is that face's current setting, read at each action.
+  function approvalAllowsAlways(collaborator) {
+    const ownerId = collaborator.authority === "mobile-replica"
+      ? collaborator.executorCollaboratorId
+      : collaborator.collaboratorId;
+    try {
+      return collaboratorForId(ownerId).approvalMode === "always_allow";
+    } catch {
+      return false;
+    }
+  }
+
+  async function requestDriverApproval(conversation, collaborator, request) {
     const turn = conversation.activeTurn;
     if (!turn) return;
-    if (collaboratorForId(conversation.collaboratorId).approvalMode === "always_allow") {
+    if (approvalAllowsAlways(collaborator)) {
       request.respond(driverApprovalResponse(request.method, request.params, "allowOnce"));
       return;
     }
@@ -465,7 +479,7 @@ export function createCollaboratorConversationHost({
       conversationKey(conversation.collaboratorId, conversation.conversationId),
     ) ?? new Set();
     if (!tool.annotations?.readOnlyHint && !grants.has(tool.name)
-        && collaboratorForId(conversation.collaboratorId).approvalMode !== "always_allow") {
+        && !approvalAllowsAlways(collaborator)) {
       await waitForToolApproval(conversation, tool, params.arguments ?? {});
     }
     setTurnState(conversation, "toolRunning");
@@ -601,6 +615,21 @@ export function createCollaboratorConversationHost({
     }
     interruptConversation(conversation, "用户取消了这次回合");
     return publicConversation(conversation, true);
+  }
+
+  // Deleting a computer collaborator on request stops its running turns first.
+  // Each turn is cancelled on its live conversation, the same way a person would.
+  async function stopActiveTurns(collaboratorId, device) {
+    const stopped = [];
+    for (const stored of loadConversations(collaboratorId)) {
+      if (!ACTIVE_STATES.has(stored.activeTurn?.state)) continue;
+      const conversation = loadConversation(collaboratorId, stored.conversationId);
+      const turn = conversation.activeTurn;
+      if (!ACTIVE_STATES.has(turn?.state)) continue;
+      await cancelTurn(conversation, turn.turnId, device);
+      stopped.push(conversation.conversationId);
+    }
+    return stopped;
   }
 
   function availableTools(collaborator) {
@@ -872,6 +901,7 @@ export function createCollaboratorConversationHost({
   return {
     route,
     inventory,
+    stopActiveTurns,
     hasConversation,
     runProactive,
     runReplicaProactive,
