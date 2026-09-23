@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import {
-  createPrivateKey,
+  createPrivateKey, createPublicKey, generateKeyPairSync, diffieHellman, hkdfSync, randomBytes, createCipheriv,
   createHash,
   sign,
 } from "node:crypto";
@@ -161,6 +161,11 @@ export function createAPNsPushHost({
           !/^[A-Za-z0-9_-]{32,256}$/.test(body.relayWakeToken ?? "")) throw new Error("invalid relay registration");
       relay = { routeId: body.relayRouteId, wakeToken: body.relayWakeToken };
     }
+    const previewPublicKey = body.previewPublicKey ?? null;
+    if (previewPublicKey !== null && (typeof previewPublicKey !== "string" ||
+        !/^[A-Za-z0-9+/]{43}=$/.test(previewPublicKey) || Buffer.from(previewPublicKey, "base64").length !== 32)) {
+      throw new HttpError(400, "push.preview_key_invalid", "invalid notification preview public key");
+    }
     const deviceToken = relay ? null : validatedDeviceToken(body.deviceToken);
     const timestamp = now();
     const current = state.remotePushRegistrations.find(
@@ -171,6 +176,7 @@ export function createAPNsPushHost({
     if (current) {
       current.deviceToken = deviceToken;
       current.relay = relay;
+      current.previewPublicKey = previewPublicKey;
       current.updatedAt = timestamp;
       current.disabledAt = null;
       current.lastFailure = null;
@@ -178,6 +184,7 @@ export function createAPNsPushHost({
       state.remotePushRegistrations.push({
         schema: REGISTRATION_SCHEMA,
         relay,
+        previewPublicKey,
         deviceId: device.deviceId,
         deviceToken,
         environment,
@@ -189,6 +196,10 @@ export function createAPNsPushHost({
         lastFailure: null,
         disabledAt: null,
       });
+    }
+    if (relay) {
+      state.remotePushRegistrations = state.remotePushRegistrations.filter(item =>
+        item.deviceId !== device.deviceId || item.relay?.routeId !== relay.routeId || item.environment === environment);
     }
     saveState();
   }
@@ -271,7 +282,8 @@ export function createAPNsPushHost({
             method: "POST", redirect: "error",
             headers: { "content-type": "application/json", authorization: `Bearer ${registration.relay.wakeToken}` },
             body: JSON.stringify({ schema: "aru.wake-relay.request.v1", requestId: messageId,
-              notificationRoute: payload.route }),
+              notificationRoute: payload.route,
+              sealedPreview: sealNotificationPreview(registration.previewPublicKey, payload) }),
           });
           if (response.status !== 202) throw new Error(`notification relay HTTP ${response.status}`);
           const receipt = await response.json();
@@ -296,7 +308,7 @@ export function createAPNsPushHost({
   // The Host owns the durable result of a relayed conversation turn. When the
   // turn reaches a terminal state and the submitting phone has not already
   // acknowledged it, wake that phone so it fetches the result before the user
-  // reopens Aru. The payload carries only opaque turn identity, never content.
+  // reopens Aru. The relay carries opaque turn identity plus a device-sealed preview.
   const CONVERSATION_TURN_RELAY_ROUTE_SCHEMA = "aru.conversation-turn-relay-route.v1";
   const TERMINAL_TURN_STATES = ["succeeded", "failed", "interrupted", "cancelled"];
   async function deliverConversationTurnRelayResult(turn) {
@@ -333,7 +345,9 @@ export function createAPNsPushHost({
             method: "POST", redirect: "error",
             headers: { "content-type": "application/json", authorization: `Bearer ${registration.relay.wakeToken}` },
             body: JSON.stringify({ schema: "aru.wake-relay.request.v1", requestId: turn.turnId,
-              notificationRoute: route }),
+              notificationRoute: route,
+              sealedPreview: sealNotificationPreview(registration.previewPublicKey, {
+                title: turn.notificationTitle, body: turn.notificationPreview, route }) }),
           });
           if (response.status !== 202) throw new Error(`notification relay HTTP ${response.status}`);
           const receipt = await response.json();
@@ -344,8 +358,9 @@ export function createAPNsPushHost({
           if (!credentials) throw new Error("APNs provider credentials are unavailable");
           await sendPush({ credentials, registration, payload: succeeded
             ? {
-              title: "Aru",
-              localizedBodyKey: "polaris.host.relayedReply.notification.body",
+              title: turn.notificationTitle || "Aru",
+              ...(turn.notificationPreview ? { body: turn.notificationPreview }
+                : { localizedBodyKey: "polaris.host.relayedReply.notification.body" }),
               threadId: `aru.relay.${turn.conversationId}`,
               route,
             }
@@ -791,4 +806,41 @@ function safeTimestamp(value, fallback) {
 
 function optionalTimestamp(value) {
   return value === null || value === undefined ? null : safeTimestamp(value, null);
+}
+
+// Device-only decryption: the relay stores neither plaintext previews nor private keys.
+export function sealNotificationPreview(publicKey, payload) {
+  if (!publicKey || !payload.body?.trim()) return undefined;
+  const raw = Buffer.from(publicKey, "base64");
+  if (raw.length !== 32) throw new Error("invalid notification preview public key");
+  const peer = createPublicKey({ key: Buffer.concat([
+    Buffer.from("302a300506032b656e032100", "hex"), raw]), format: "der", type: "spki" });
+  const pair = generateKeyPairSync("x25519");
+  const secret = diffieHellman({ privateKey: pair.privateKey, publicKey: peer });
+  const key = hkdfSync("sha256", secret, Buffer.alloc(0), "aru.notification-preview.v1", 32);
+  const nonce = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", key, nonce);
+  const fields = ["schema", "serverId", "conversationId", "messageId", "turnId"];
+  cipher.setAAD(Buffer.from(fields.map(field => {
+    const value = payload.route[field] ?? "";
+    return `${Buffer.byteLength(value)}:${value}`;
+  }).join("")));
+  const compact = (value, budget) => {
+    let result = "";
+    for (const char of String(value).replace(/\s+/gu, " ").trim()) {
+      if (Buffer.byteLength(result + char) > budget) break;
+      result += char;
+    }
+    return result;
+  };
+  const preview = { title: compact(payload.title || "Aru", 160) || "Aru", body: compact(payload.body, 700) };
+  let plaintext = JSON.stringify(preview);
+  while (Buffer.byteLength(plaintext) > 1000) {
+    preview.body = Array.from(preview.body).slice(0, -1).join("");
+    plaintext = JSON.stringify(preview);
+  }
+  const encrypted = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+  return { schema: "aru.notification-preview.v1",
+    ephemeralPublicKey: pair.publicKey.export({format: "der", type: "spki"}).subarray(-32).toString("base64"),
+    combined: Buffer.concat([nonce, encrypted, cipher.getAuthTag()]).toString("base64") };
 }

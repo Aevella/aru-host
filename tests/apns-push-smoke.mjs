@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import {generateKeyPairSync} from "node:crypto";
 import { createAPNsCredentialStore, createAPNsPushHost, encodedPayload } from "../apns-push.mjs";
 
 class HttpError extends Error {
@@ -243,7 +244,20 @@ await relayHost.deliverConversationTurnRelayResult({
   state: "failed", providerStatus: 500, acknowledgedAt: null,
 });
 assert.equal(relayCalls.length, 2, "a failed turn never becomes a visible relay alert");
+const previewPair = generateKeyPairSync("x25519");
+const previewPublicKey = previewPair.publicKey.export({format:"der",type:"spki"}).subarray(-32).toString("base64");
+await relayHost.route({ method: "PUT", body: {
+  schema: "aru.selfhost.remote-push-registration.v1", environment: "production", topic: "cn.aelion.aru",
+  relayRouteId: "22222222-2222-4222-8222-222222222222", relayWakeToken: "w".repeat(64), previewPublicKey,
+} }, {}, "/aru/v1/push-devices/current", () => relayState.devices[0]);
+assert.equal(relayState.remotePushRegistrations.length,1, "same relay route replaces old environment registration");
+await relayHost.deliverHostedCollaboratorTurn(completedEvent());
+assert.equal(relayCalls.at(-1).body.sealedPreview.schema,"aru.notification-preview.v1");
+assert.ok(!JSON.stringify(relayCalls.at(-1).body).includes("我从电脑"));
+await relayHost.deliverConversationTurnRelayResult({turnId:"preview_turn",deviceId:"relay_phone",conversationId:"conversation-local",state:"succeeded",notificationTitle:"Astra",notificationPreview:"Hello"});
+assert.equal(relayCalls.at(-1).body.sealedPreview.schema,"aru.notification-preview.v1");
+const deliveryCount = relayCalls.length;
 relayState.devices[0].revokedAt = Date.now();
 await relayHost.deliverHostedCollaboratorTurn(completedEvent());
-assert.equal(relayCalls.length, 2);
+assert.equal(relayCalls.length, deliveryCount);
 console.log("ARU_HOST_NOTIFICATION_RELAY_SMOKE_OK");
