@@ -342,7 +342,12 @@ export function createMobileCollaboratorReplicaHost({
     return value;
   }
 
-  return { route, selfTools, callSelfTool, start, stop, settle, runDue };
+  return { route, selfTools, callSelfTool, start, stop, settle, runDue,
+    hasExecutionGrant(collaboratorId) {
+      return ledger.replicas.some((replica) => replica.executorHostCollaboratorId === collaboratorId
+        && !ledger.revokedExecutions.some((entry) => entry.sourceCollaboratorId === replica.sourceCollaboratorId && entry.epoch >= replica.epoch));
+    },
+  };
 }
 
 function publicReceipt(replica) {

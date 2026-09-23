@@ -29,6 +29,14 @@ export function createCollaboratorCognitionHost({
   mkdirSync(root, { recursive: true, mode: 0o700 });
 
   async function route(req, res, path, requireDevice, collaboratorForId) {
+    const syncMatch = path.match(/^\/aru\/v1\/hosted-collaborators\/([^/]+)\/cognition\/memory-sync$/);
+    if (syncMatch && req.method === "POST") {
+      const device = requireDevice();
+      const collaborator = collaboratorForId(syncMatch[1]);
+      const body = await readJSONBody(req, 64 * 1024 * 1024);
+      sendJSON(res, 200, clientInput(() => synchronizeMemories(collaborator.collaboratorId, body, device)));
+      return true;
+    }
     const match = path.match(
       /^\/aru\/v1\/hosted-collaborators\/([^/]+)\/cognition(?:\/(memories|references)(?:\/([^/]+)(?:\/(archive|restore))?)?)?$/,
     );
@@ -185,6 +193,12 @@ export function createCollaboratorCognitionHost({
       archivedAt: null,
       updatedByDeviceId: device.deviceId,
     };
+    if (kind === "memories") {
+      if (body.origin !== undefined && !["phone", "computer"].includes(body.origin)) {
+        throw new HttpError(400, "cognition.origin_invalid", "Invalid memory origin");
+      }
+      record.origin = body.origin ?? "computer";
+    }
     cognition[kind].push(record);
     touch(cognition, device);
     save(cognition);
@@ -217,6 +231,48 @@ export function createCollaboratorCognitionHost({
     touch(cognition, device);
     save(cognition);
     return publicCognition(cognition);
+  }
+
+  // Three-way merge against the last acknowledged content. A repeated upload
+  // after a lost response is idempotent. Conflicts retain both original owners.
+  function synchronizeMemories(collaboratorId, body, device) {
+    if (body?.schema !== "aru.residence-memory-sync.v1" || !Array.isArray(body.changes)) {
+      throw new HttpError(400, "memory_sync.invalid", "Invalid memory synchronization payload");
+    }
+    const cognition = load(collaboratorId);
+    const conflicts = [];
+    let changed = false;
+    const seen = new Set();
+    for (const change of body.changes) {
+      if (typeof change.sharedId !== "string" || !/^[A-Za-z0-9_:-]+$/.test(change.sharedId) || seen.has(change.sharedId)
+          || !(change.base === null || typeof change.base === "string")
+          || !(change.content === null || typeof change.content === "string")) {
+        throw new HttpError(400, "memory_sync.invalid", "Invalid or duplicate memory identity");
+      }
+      seen.add(change.sharedId);
+      let record = cognition.memories.find(item => (item.sharedId ?? item.memoryId) === change.sharedId);
+      const current = record && !record.archivedAt ? record.content : null;
+      if (current === change.content) continue;
+      if (current !== change.base) { conflicts.push(change.sharedId); continue; }
+      if (!record) {
+        if (change.content === null) continue;
+        record = { memoryId: `hostmem_${randomUUID()}`, sharedId: change.sharedId,
+          title: change.content.split("\n")[0].slice(0, 80) || "Memory",
+          content: change.content, createdAt: now(), updatedAt: now(), archivedAt: null,
+          origin: "phone", updatedByDeviceId: device.deviceId };
+        cognition.memories.push(record);
+      } else {
+        if (change.content !== null) record.content = change.content;
+        record.archivedAt = change.content === null ? now() : null;
+        record.updatedAt = now();
+        record.updatedByDeviceId = device.deviceId;
+      }
+      changed = true;
+    }
+    if (changed) { touch(cognition, device); save(cognition); }
+    return { schema: "aru.residence-memory-sync.v1", collaboratorId, conflicts,
+      records: cognition.memories.map(item => ({ sharedId: item.sharedId ?? item.memoryId,
+        content: item.archivedAt ? null : item.content, origin: item.origin ?? "computer" })) };
   }
 
   function selfTools() {

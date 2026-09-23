@@ -285,6 +285,7 @@ export function createCollaboratorHost({
       schema: HOSTED_COLLABORATOR_SCHEMA,
       collaboratorId: collaborator.collaboratorId,
       displayName: collaborator.displayName,
+      avatarDataURL: collaborator.avatarDataURL ?? null,
       driverId: collaborator.driverId,
       providerProfileId: collaborator.providerProfileId ?? null,
       driverDisplayName: providerProfile?.displayName ?? driver?.displayName ?? collaborator.driverId,
@@ -352,15 +353,45 @@ export function createCollaboratorHost({
     if (!/^hostcol_[A-Fa-f0-9-]+$/.test(collaboratorId)) {
       throw new HttpError(400, "collaborator.id_invalid", "invalid hosted collaborator id");
     }
-    const collaborator = collaboratorForId(collaboratorId);
+    // Retrying a lost deletion receipt must be harmless. Other routes continue
+    // rejecting tombstoned identities before admitting any new work.
+    const collaborator = req.method === "DELETE"
+      ? state.hostedCollaborators.find(item => item.collaboratorId === collaboratorId)
+      : collaboratorForId(collaboratorId);
+    if (!collaborator) throw new HttpError(404, "collaborator.unknown", "unknown hosted collaborator");
     if (req.method === "GET") {
       requireDevice();
       sendJSON(res, 200, publicCollaborator(collaborator));
       return true;
     }
-    if (req.method === "PUT") {
+    if (req.method === "DELETE") {
       const device = requireDevice();
       const body = await readJSONBody(req, 64 * 1024);
+      if (collaborator.archivedAt) {
+        sendJSON(res, 200, publicCollaborator(collaborator));
+        return true;
+      }
+      if (body.expectedRevision !== collaborator.revision) {
+        throw new HttpError(409, "collaborator.revision_conflict", "hosted collaborator changed since it was read");
+      }
+      const active = conversations.inventory(collaboratorId).conversations.some(
+        (item) => ["queued", "starting", "streaming", "waitingApproval", "toolRunning"].includes(item.activeTurn?.state));
+      if (active) throw new HttpError(409, "collaborator.busy", "Stop the current task before deleting this computer collaborator.");
+      if (mobileReplicas.hasExecutionGrant(collaboratorId)) {
+        throw new HttpError(409, "collaborator.delegated", "Return mobile proactive execution to the phone before deleting this computer collaborator.");
+      }
+      const previous = { ...collaborator };
+      collaborator.archivedAt = now();
+      collaborator.revision += 1;
+      collaborator.updatedAt = now();
+      collaborator.updatedByDeviceId = device.deviceId;
+      try { saveState(); } catch (error) { Object.assign(collaborator, previous); throw error; }
+      sendJSON(res, 200, publicCollaborator(collaborator));
+      return true;
+    }
+    if (req.method === "PUT") {
+      const device = requireDevice();
+      const body = await readJSONBody(req, maximumReplicaBytes);
       sendJSON(res, 200, updateHostedCollaborator(collaborator, body, device));
       return true;
     }
@@ -375,7 +406,7 @@ export function createCollaboratorHost({
     const collaborator = state.hostedCollaborators.find(
       (candidate) => candidate.collaboratorId === collaboratorId,
     );
-    if (!collaborator) {
+    if (!collaborator || collaborator.archivedAt) {
       throw new HttpError(404, "collaborator.unknown", "unknown hosted collaborator");
     }
     return collaborator;
@@ -388,7 +419,10 @@ export function createCollaboratorHost({
     if (body.requestId) {
       const existing = state.hostedCollaborators.find((item) => item.createRequestId === body.requestId
         && item.createdByDeviceId === device.deviceId);
-      if (existing) return publicCollaborator(existing);
+      if (existing) {
+        if (existing.archivedAt) throw new HttpError(409, "collaborator.create_deleted", "This creation was already deleted; start a new creation");
+        return publicCollaborator(existing);
+      }
     }
     const timestamp = now();
     const collaborator = {
@@ -405,10 +439,13 @@ export function createCollaboratorHost({
       createdByDeviceId: device.deviceId,
       updatedByDeviceId: device.deviceId,
     };
-    state.hostedCollaborators.push(collaborator);
     cognition.initialize(collaborator.collaboratorId, "isolated");
     initiative.initialize(collaborator.collaboratorId);
-    saveState();
+    state.hostedCollaborators.push(collaborator);
+    try { saveState(); } catch (error) {
+      state.hostedCollaborators = state.hostedCollaborators.filter(item => item !== collaborator);
+      throw error;
+    }
     return publicCollaborator(collaborator);
   }
 
@@ -420,23 +457,38 @@ export function createCollaboratorHost({
       throw new HttpError(409, "collaborator.revision_conflict", "hosted collaborator changed since it was read");
     }
     if (body.displayName === undefined && body.driverId === undefined
-        && body.providerProfileId === undefined && body.toolAccess === undefined) {
+        && body.providerProfileId === undefined && body.toolAccess === undefined && body.avatarDataURL === undefined) {
       throw new HttpError(400, "collaborator.no_changes", "displayName, driverId, providerProfileId, or toolAccess required");
     }
-    if (body.displayName !== undefined) collaborator.displayName = validatedDisplayName(body.displayName);
-    if (body.driverId !== undefined || body.providerProfileId !== undefined) {
-      const driverId = body.driverId === undefined ? collaborator.driverId : validatedDriverId(body.driverId);
-      collaborator.driverId = driverId;
-      collaborator.providerProfileId = validatedProviderProfileId(
-        driverId,
-        body.providerProfileId === undefined ? collaborator.providerProfileId : body.providerProfileId,
-      );
+    const next = { ...collaborator };
+    if (body.displayName !== undefined) next.displayName = validatedDisplayName(body.displayName);
+    if (body.avatarDataURL !== undefined) {
+      const value = body.avatarDataURL;
+      if (value !== null && (typeof value !== "string" || !/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(value))) {
+        throw new HttpError(400, "collaborator.avatar_invalid", "Expected a PNG, JPEG or WebP avatar");
+      }
+      next.avatarDataURL = value;
     }
-    if (body.toolAccess !== undefined) collaborator.toolAccess = validatedToolAccess(body.toolAccess);
-    collaborator.revision += 1;
-    collaborator.updatedAt = now();
-    collaborator.updatedByDeviceId = device.deviceId;
-    saveState();
+    if (body.driverId !== undefined || body.providerProfileId !== undefined) {
+      const active = conversations.inventory(collaborator.collaboratorId).conversations.some(
+        (item) => ["queued", "starting", "streaming", "waitingApproval", "toolRunning"].includes(item.activeTurn?.state));
+      if (active) throw new HttpError(409, "collaborator.busy", "Stop the current task before changing its execution configuration.");
+      const driverId = body.driverId === undefined ? collaborator.driverId : validatedDriverId(body.driverId);
+      next.driverId = driverId;
+      next.providerProfileId = validatedProviderProfileId(driverId,
+        body.providerProfileId === undefined ? collaborator.providerProfileId : body.providerProfileId);
+    }
+    if (body.toolAccess !== undefined) next.toolAccess = validatedToolAccess(body.toolAccess);
+    next.revision += 1;
+    next.updatedAt = now();
+    next.updatedByDeviceId = device.deviceId;
+    const previous = { ...collaborator };
+    Object.assign(collaborator, next);
+    try { saveState(); } catch (error) {
+      for (const key of Object.keys(next)) if (!(key in previous)) delete collaborator[key];
+      Object.assign(collaborator, previous);
+      throw error;
+    }
     return publicCollaborator(collaborator);
   }
 

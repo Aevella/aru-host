@@ -20,10 +20,10 @@ Third-party plugins are separate permissioned lifecycle units. The official `ful
 
 ## Runtime source and installed payloads
 
-The root `aru-selfhost-stub.mjs` and `conversation-turn-relay.mjs` are generated
+The root `aru-selfhost-stub.mjs`, `collaborator-conversations.mjs` and `conversation-turn-relay.mjs` are generated
 runtime payloads. Edit `src/` and run `node tools/build-runtime.mjs`; CI checks
 that checked-in payloads match their sources. Existing installed upgraders copy
-fixed filenames, so these two deployed entrypoints must not gain new local
+fixed filenames, so these deployed entrypoints must not gain new local
 runtime dependencies. Source modules are assembled into those existing files,
 not maintained as a second hand-written implementation.
 
@@ -36,6 +36,7 @@ not maintained as a second hand-written implementation.
 | `src/server/workspace-jobs.mjs` | Container job execution, deadlines, cancellation and restart recovery |
 | `src/server/mcp-catalog.mjs` | Static tool schemas |
 | `src/server/mcp-gateway.mjs` | MCP sessions, argument admission and dispatch to domain owners |
+| `src/conversations/` | Computer conversation execution and revision-checked rename/deletion; active turns cannot be deleted |
 | `src/conversation-relay/` | Phone-owned turn routing, provider admission and raw response files |
 
 Backup, artifact and job owners receive only their relevant state collections;
@@ -62,3 +63,21 @@ Validation includes the actual v0.31.4 installer fixture with the new payload,
 retained state and successful startup, ordinary installers, state recovery,
 project concurrency and Console feature projection tests. New-installer tests
 alone are not sufficient evidence for an installed-upgrader path.
+
+## Collaborator residences
+
+A phone room may associate a computer identity without delegating phone execution.
+The phone owns this presentation relationship and a cached directory; Host remains
+the only writer of computer profiles, conversation history, cognition and task state.
+Profile PUT uses expectedRevision, and DELETE retains a tombstone. Active computer
+turns or phone execution grants block deletion. Repeated deletion returns the same
+receipt; deleted identities reject new mutations and work admission.
+
+`collaborator-cognition.mjs` owns `aru.residence-memory-sync.v1`. Each explicit
+memory carries stable shared identity and provenance. Exchanges use per-record
+base/content comparison: identical retry is harmless, divergent edits return a
+conflict, and null is an explicit deletion. Missing records never imply deletion.
+The phone retains its local content, last accepted computer baseline and conflict
+in SQLite. Unlinking changes the relationship generation and rejects late results.
+This protocol shares explicit memory content; it does not merge conversation
+histories, prompts, model settings, credentials or environment permissions.

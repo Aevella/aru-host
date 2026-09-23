@@ -3,7 +3,8 @@
 Please keep Host Core as the durable owner. Clients render state and send intents; plugins, jobs and artifacts keep their own permissioned lifecycle; the phone does not become a hidden second database for computer-hosted collaborators.
 
 Runtime implementation starts in [`src/server/`](src/server/) and
-[`src/conversation-relay/`](src/conversation-relay/). The root server and relay
+[`src/conversation-relay/`](src/conversation-relay/) and
+[`src/conversations/`](src/conversations/). The root server, conversation and relay
 files are fixed-name deployment payloads generated from that source. Do not edit
 them directly. See [the responsibility map](docs/architecture.md).
 
