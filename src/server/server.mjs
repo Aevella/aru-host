@@ -147,6 +147,16 @@ const CONTAINER_STOP_GRACE_SECONDS = 5;
 const ARTIFACT_METADATA_SCHEMA = "aru.selfhost.artifact-metadata.v1";
 const WORKSPACE_RUNTIMES = ["node", "python", "shell"];
 const SERVER_VERSION = "stub-0.30";
+// The installed release (e.g. "0.32.1") when the installer placed release.json
+// beside this file; SERVER_VERSION stays the protocol identity.
+const RELEASE_VERSION = (() => {
+  try {
+    const release = JSON.parse(readFileSync(fileURLToPath(new URL("release.json", import.meta.url)), "utf8"));
+    return release?.schema === "aru.host.release.v1" && typeof release.version === "string" ? release.version : null;
+  } catch {
+    return null;
+  }
+})();
 const ENCRYPTED_PACKAGE_MAGIC = Buffer.from("ARUEPKG2", "ascii");
 const ENCRYPTED_PACKAGE_VERSION = 2;
 const ENCRYPTED_PACKAGE_CONTENT_TYPE = "application/vnd.aru.encrypted-backup";
@@ -477,6 +487,7 @@ function manifest() {
     nodeKind: config.nodeKind,
     displayName: nodeControl.displayName(),
     serverVersion: SERVER_VERSION,
+    releaseVersion: RELEASE_VERSION,
     minClientVersion: "1.0",
     transportProfiles: [
       {
@@ -732,6 +743,7 @@ function handleDiagnostics(req, res) {
     serverId: state.serverId,
     displayName: nodeControl.displayName(),
     serverVersion: SERVER_VERSION,
+    releaseVersion: RELEASE_VERSION,
     serverTime: Date.now(),
     manifest: "ok",
     auth: authStatus,
