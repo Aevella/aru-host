@@ -23,7 +23,9 @@ test('source reading survives restart without changing computer cognition',async
  const f=fixture(t);
  f.host.callSelfTool('aru_collaborator_memory_save',{expectedRevision:1,title:'Existing computer memory',content:'Keep this'}, {deviceId:'host'},{collaboratorId:id});
  const before=f.host.read(id);
- await f.request(f.body);f.restart();
+ const receipt = await f.request(f.body);
+ assert.equal(receipt.revision,1);assert.equal(receipt.records,undefined);assert.equal(receipt.deviceId,undefined);
+ f.restart();
  assert.equal(f.read().records[0].content,'Original phone material');
  assert.equal(f.read().readOnly,true);assert.equal(f.read().generatedAt,100);
  assert.deepEqual(f.host.read(id),before);

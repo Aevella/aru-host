@@ -29,8 +29,8 @@ export function createResidenceReading({ root, HttpError }) {
     }
     const path = pathFor(id), temporary = `${path}.tmp`;
     writeFileSync(temporary, JSON.stringify(value), { mode: 0o600 }); renameSync(temporary, path);
-    const { deviceId: _, ...receipt } = value;
-    return receipt;
+    const { schema, sourceCollaboratorId, generation, revision, generatedAt, enabled } = value;
+    return { schema, sourceCollaboratorId, generation, revision, generatedAt, enabled };
   }
   function read(id) {
     const value = load(id);
