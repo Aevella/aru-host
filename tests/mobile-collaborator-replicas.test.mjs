@@ -136,6 +136,8 @@ test("computer collaborator reads a phone replica without owning it and Host set
     collaborators.get("hostcol_reader"),
   );
   assert.equal(readable.value.systemPrompt, "Stay close.");
+  assert.equal(readable.value.memories, undefined);
+  assert.equal(readable.value.references, undefined);
   assert.throws(() => host.callSelfTool(
     "aru_mobile_replica_read",
     { sourceCollaboratorId: "phone_aru" },

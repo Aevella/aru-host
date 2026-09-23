@@ -73,11 +73,14 @@ Profile PUT uses expectedRevision, and DELETE retains a tombstone. Active comput
 turns or phone execution grants block deletion. Repeated deletion returns the same
 receipt; deleted identities reject new mutations and work admission.
 
-`collaborator-cognition.mjs` owns `aru.residence-memory-sync.v1`. Each explicit
-memory carries stable shared identity and provenance. Exchanges use per-record
-base/content comparison: identical retry is harmless, divergent edits return a
-conflict, and null is an explicit deletion. Missing records never imply deletion.
-The phone retains its local content, last accepted computer baseline and conflict
-in SQLite. Unlinking changes the relationship generation and rejects late results.
-This protocol shares explicit memory content; it does not merge conversation
-histories, prompts, model settings, credentials or environment permissions.
+`residence-reading.mjs` owns the separate source-labelled phone reading projection.
+PUT cognition/phone-reading accepts the paired phone's monotonic relationship generation
+and revision; the self tool aru_phone_memory_read returns the last supplied timestamp
+and records as read-only material, never as current computer memory or a live phone read.
+Disabling clears projected content and stale uploads cannot re-enable it. The old
+memory-sync endpoint returns 410 before any mutation. Existing copied memories are
+preserved. Ordinary mobile replica reads no longer expose memories or references;
+execution snapshots remain owned by the separate delegation chain.
+
+
+2026-09-23 validation: residence reading and mobile replica suites pass (6 tests); cognition smoke and generated runtime checks pass. Host Core bundle loads with an isolated `--check-state` data directory; Linux release archive contains residence-reading.mjs. These are local implementation/package checks, not a deployed-node or phone integration claim. Existing saved cognition remains unchanged; legacy memory-sync is retired with HTTP 410.

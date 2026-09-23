@@ -2382,7 +2382,7 @@ function manifest() {
         maximumAttachmentBytes: 50 * 1024 * 1024,
         maximumAttachmentsPerMessage: 8,
         cognitionEndpoint: "/aru/v1/hosted-collaborators/{collaboratorId}/cognition",
-        residenceMemoryProtocol: "aru.residence-memory-sync.v1",
+        residenceReadingProtocol: "aru.residence-reading.v1",
         collaboratorManagementProtocol: "aru.residence-management.v1",
         initiativeEndpoint: "/aru/v1/hosted-collaborators/{collaboratorId}/initiative",
         mobileReplicaEndpoint: "/aru/v1/mobile-collaborator-replicas/{sourceCollaboratorId}",

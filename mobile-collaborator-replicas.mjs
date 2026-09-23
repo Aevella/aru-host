@@ -173,7 +173,7 @@ export function createMobileCollaboratorReplicaHost({
       {
         name: "aru_mobile_replica_read",
         title: "读取手机协作者副本",
-        description: "只读查看一位已授权手机协作者的身份、记忆、资料和对话上下文；不会修改对方。",
+        description: "只读查看一位已授权手机协作者的身份和对话上下文；不会修改对方。记忆与长期资料通过独立的 aru_phone_memory_read 查阅权限读取。",
         inputSchema: {
           type: "object",
           additionalProperties: false,
@@ -370,8 +370,6 @@ function publicReadableReplica(replica) {
     sourceCollaboratorId: replica.sourceCollaboratorId,
     displayName: replica.displayName,
     systemPrompt: replica.systemPrompt,
-    memories: replica.memories,
-    references: replica.references,
     conversations: replica.conversations,
     revision: replica.revision,
     generatedAt: replica.generatedAt,

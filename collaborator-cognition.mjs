@@ -1,3 +1,4 @@
+import { createResidenceReading } from "./residence-reading.mjs";
 import { randomUUID } from "node:crypto";
 import {
   chmodSync,
@@ -28,13 +29,20 @@ export function createCollaboratorCognitionHost({
   const root = join(dataDir, "collaborator-cognition");
   mkdirSync(root, { recursive: true, mode: 0o700 });
 
+  const residenceReading = createResidenceReading({ root, HttpError });
   async function route(req, res, path, requireDevice, collaboratorForId) {
+    const readingMatch = path.match(/^\/aru\/v1\/hosted-collaborators\/([^/]+)\/cognition\/phone-reading$/);
+    if (readingMatch && req.method === "PUT") {
+      const device = requireDevice();
+      const collaborator = collaboratorForId(readingMatch[1]);
+      sendJSON(res, 200, residenceReading.accept(collaborator.collaboratorId, await readJSONBody(req, 64 * 1024 * 1024), device));
+      return true;
+    }
     const syncMatch = path.match(/^\/aru\/v1\/hosted-collaborators\/([^/]+)\/cognition\/memory-sync$/);
     if (syncMatch && req.method === "POST") {
       const device = requireDevice();
       const collaborator = collaboratorForId(syncMatch[1]);
-      const body = await readJSONBody(req, 64 * 1024 * 1024);
-      sendJSON(res, 200, clientInput(() => synchronizeMemories(collaborator.collaboratorId, body, device)));
+      throw new HttpError(410, "memory_sync.retired", "Memory synchronization has been replaced by read-only cross-residence reading");
       return true;
     }
     const match = path.match(
@@ -233,48 +241,6 @@ export function createCollaboratorCognitionHost({
     return publicCognition(cognition);
   }
 
-  // Three-way merge against the last acknowledged content. A repeated upload
-  // after a lost response is idempotent. Conflicts retain both original owners.
-  function synchronizeMemories(collaboratorId, body, device) {
-    if (body?.schema !== "aru.residence-memory-sync.v1" || !Array.isArray(body.changes)) {
-      throw new HttpError(400, "memory_sync.invalid", "Invalid memory synchronization payload");
-    }
-    const cognition = load(collaboratorId);
-    const conflicts = [];
-    let changed = false;
-    const seen = new Set();
-    for (const change of body.changes) {
-      if (typeof change.sharedId !== "string" || !/^[A-Za-z0-9_:-]+$/.test(change.sharedId) || seen.has(change.sharedId)
-          || !(change.base === null || typeof change.base === "string")
-          || !(change.content === null || typeof change.content === "string")) {
-        throw new HttpError(400, "memory_sync.invalid", "Invalid or duplicate memory identity");
-      }
-      seen.add(change.sharedId);
-      let record = cognition.memories.find(item => (item.sharedId ?? item.memoryId) === change.sharedId);
-      const current = record && !record.archivedAt ? record.content : null;
-      if (current === change.content) continue;
-      if (current !== change.base) { conflicts.push(change.sharedId); continue; }
-      if (!record) {
-        if (change.content === null) continue;
-        record = { memoryId: `hostmem_${randomUUID()}`, sharedId: change.sharedId,
-          title: change.content.split("\n")[0].slice(0, 80) || "Memory",
-          content: change.content, createdAt: now(), updatedAt: now(), archivedAt: null,
-          origin: "phone", updatedByDeviceId: device.deviceId };
-        cognition.memories.push(record);
-      } else {
-        if (change.content !== null) record.content = change.content;
-        record.archivedAt = change.content === null ? now() : null;
-        record.updatedAt = now();
-        record.updatedByDeviceId = device.deviceId;
-      }
-      changed = true;
-    }
-    if (changed) { touch(cognition, device); save(cognition); }
-    return { schema: "aru.residence-memory-sync.v1", collaboratorId, conflicts,
-      records: cognition.memories.map(item => ({ sharedId: item.sharedId ?? item.memoryId,
-        content: item.archivedAt ? null : item.content, origin: item.origin ?? "computer" })) };
-  }
-
   function selfTools() {
     const string = (description) => ({ type: "string", description });
     const revision = { type: "integer", minimum: 1, description: "Revision returned by the latest cognition read." };
@@ -292,6 +258,8 @@ export function createCollaboratorCognitionHost({
       },
     });
     return [
+      tool("aru_phone_memory_read", "Read my phone-side memories and references",
+        "Read the last source-labelled material provided by your linked phone side, with its timestamp. Does not copy it into your own memory or modify either side. Unavailable when reading is disabled or no phone snapshot has been provided.", {}, [], true),
       tool(
         "aru_collaborator_cognition_read",
         "Read my Aru prompt and memories",
@@ -345,6 +313,7 @@ export function createCollaboratorCognitionHost({
   }
 
   function callSelfTool(name, args, device, collaborator) {
+    if (name === "aru_phone_memory_read") return { matched: true, value: residenceReading.read(collaborator.collaboratorId) };
     if (name === "aru_collaborator_cognition_read") {
       return { matched: true, value: read(collaborator.collaboratorId) };
     }
