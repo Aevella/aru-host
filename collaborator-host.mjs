@@ -33,6 +33,8 @@ const LOCAL_DRIVER_DEFINITIONS = [
       ]
       : [
         "codex",
+        "/Applications/ChatGPT.app/Contents/Resources/codex",
+        `${homedir()}/Applications/ChatGPT.app/Contents/Resources/codex`,
         "/Applications/Codex.app/Contents/Resources/codex",
         `${homedir()}/Applications/Codex.app/Contents/Resources/codex`,
         `${homedir()}/.local/bin/codex`,
