@@ -16,6 +16,9 @@ const DELIVERY_INVENTORY_SCHEMA = "aru.selfhost.mobile-collaborator-delivery-inv
 const DELIVERY_ACK_SCHEMA = "aru.selfhost.mobile-collaborator-delivery-ack.v1";
 const ID = /^[A-Za-z0-9_-]+$/;
 
+// Bounds the Host's own not-yet-synced messages added to one turn's context.
+const MAX_CONTINUED_DELIVERIES = 24;
+
 export function createMobileCollaboratorReplicaHost({
   dataDir,
   readJSONBody,
@@ -250,7 +253,7 @@ export function createMobileCollaboratorReplicaHost({
       saveLedger();
       try {
         const executor = collaboratorForId(replica.executorHostCollaboratorId);
-        trigger(executor, replica, rule, deliveryId);
+        trigger(executor, replicaContinuingOwnDeliveries(replica, rule), rule, deliveryId);
       } catch (error) {
         rule.inFlightDeliveryId = null;
         log(`mobile collaborator proactive trigger failed: ${error?.message ?? error}`);
@@ -258,6 +261,48 @@ export function createMobileCollaboratorReplicaHost({
       }
     }
     schedule();
+  }
+
+  // While the phone has not uploaded a replica that includes the Host's own
+  // earlier deliveries (it may be offline for hours), the next turn continues
+  // from them instead of from a context where they never happened. They carry
+  // the id the phone imports them under, so the phone still appends each
+  // delivery right after the previous one.
+  function replicaContinuingOwnDeliveries(replica, rule) {
+    if (!rule.conversationId) return replica;
+    const pending = ledger.deliveries
+      .filter((delivery) => delivery.sourceCollaboratorId === replica.sourceCollaboratorId
+        && delivery.epoch === replica.epoch
+        && delivery.sourceConversationId === rule.conversationId
+        && !deliveryReflectedInReplica(delivery, replica))
+      .sort((left, right) => left.createdAt - right.createdAt)
+      .slice(-MAX_CONTINUED_DELIVERIES);
+    if (pending.length === 0) return replica;
+    return {
+      ...replica,
+      conversations: replica.conversations.map((conversation) => {
+        if (conversation.conversationId !== rule.conversationId) return conversation;
+        const known = new Set(conversation.messages.map((message) => message.messageId));
+        const continued = pending
+          .map((delivery) => ({
+            messageId: `hostmessage_${delivery.deliveryId}`,
+            role: "assistant",
+            content: delivery.assistantContent,
+            createdAt: delivery.createdAt,
+            updatedAt: delivery.createdAt,
+          }))
+          .filter((message) => !known.has(message.messageId));
+        if (continued.length === 0) return conversation;
+        const messages = [...conversation.messages, ...continued];
+        return { ...conversation, messages, baseMessageId: messages.at(-1).messageId };
+      }),
+    };
+  }
+
+  function deliveryReflectedInReplica(delivery, replica) {
+    // Deliveries recorded before replicaRevision existed fall back to acknowledgement.
+    if (Number.isSafeInteger(delivery.replicaRevision)) return replica.revision > delivery.replicaRevision;
+    return Boolean(delivery.acknowledgedAt);
   }
 
   async function settle(event) {
@@ -282,6 +327,7 @@ export function createMobileCollaboratorReplicaHost({
           basisMessages: validatedContextMessages(event.turn.basisMessages),
           assistantContent,
           createdAt: now(),
+          replicaRevision: replica.revision,
           acknowledgedAt: null,
         };
         if (!ledger.deliveries.some((item) => item.deliveryId === delivery.deliveryId)) {
@@ -360,7 +406,7 @@ function publicReceipt(replica) {
 }
 
 function publicDelivery(delivery) {
-  const { acknowledgedAt: _, ...value } = delivery;
+  const { acknowledgedAt: _, replicaRevision: __, ...value } = delivery;
   return value;
 }
 

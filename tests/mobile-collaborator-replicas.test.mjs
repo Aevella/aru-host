@@ -329,3 +329,67 @@ test("revoking phone execution stops the Host scheduler, drops late results, and
     (error) => error instanceof HttpError && error.status === 409 && error.code === "mobile_replica.epoch_stale");
   restarted.stop();
 });
+
+test("a recurring phone rule continues from the Host's own unsynced deliveries while the phone is away", async (context) => {
+  const directory = mkdtempSync(join(tmpdir(), "aru-mobile-replica-chain-"));
+  context.after(() => rmSync(directory, { recursive: true, force: true }));
+  const hour = 60 * 60 * 1000;
+  let clock = 1_000;
+  let triggered = null;
+  const host = createMobileCollaboratorReplicaHost({
+    dataDir: directory,
+    readJSONBody: async (request) => request.body,
+    sendJSON: () => {},
+    HttpError,
+    collaboratorForId: (id) => ({ collaboratorId: id, displayName: "Computer", driverId: "codex" }),
+    maximumRequestBytes: 64 * 1024 * 1024,
+    trigger(executor, replica, rule, deliveryId) { triggered = { replica, deliveryId }; },
+    now: () => clock,
+    setTimer: () => 1,
+    clearTimer: () => {},
+  });
+  const hello = { messageId: "phone_message", role: "user", content: "hello", createdAt: 900, updatedAt: 900 };
+  const replica = (revision, messages) => ({
+    schema: "aru.selfhost.mobile-collaborator-replica.v1",
+    sourceCollaboratorId: "phone_aru", displayName: "Aru", systemPrompt: "", memories: [], references: [],
+    conversations: [{ conversationId: "phone_conversation", title: "Us",
+      baseMessageId: messages.at(-1).messageId, messages }],
+    rules: [{ ruleId: "hourly", conversationMode: "fixed", conversationId: "phone_conversation", title: "Hourly",
+      goal: "Say hi", instructions: "", nextFireAt: 1_000, scheduleKind: "interval", recurrenceMinutes: 60,
+      dailyTimeMinutes: null, scheduleTimeZoneIdentifier: null, notificationsEnabled: true, enabled: true,
+      updatedAt: 940, sourceVersion: "v1" }],
+    readerHostCollaboratorIds: ["hostcol_reader"], executorHostCollaboratorId: "hostcol_reader",
+    epoch: 1, revision, generatedAt: 950,
+  });
+  const upload = (value) => host.route({ method: "PUT", body: value, url: "/aru/v1/mobile-collaborator-replicas/phone_aru" },
+    {}, "/aru/v1/mobile-collaborator-replicas/phone_aru", () => ({ deviceId: "phone" }));
+  await upload(replica(1, [hello]));
+  host.start();
+
+  const deliveries = [];
+  for (let turn = 1; turn <= 3; turn++) {
+    await host.runDue();
+    const context = triggered.replica.conversations[0];
+    assert.deepEqual(context.messages.slice(1).map((message) => message.content), deliveries.map((d) => d.content),
+      `turn ${turn} continues from every earlier Host message`);
+    assert.equal(context.baseMessageId, context.messages.at(-1).messageId);
+    await host.settle({
+      outcome: "completed",
+      turn: { source: "mobile-replica-proactive", sourceCollaboratorId: "phone_aru",
+        sourceConversationId: "phone_conversation", baseMessageId: context.baseMessageId,
+        basisMessages: context.messages, executionEpoch: 1, ruleId: "hourly", ruleVersion: "v1",
+        deliveryId: triggered.deliveryId },
+      assistantMessage: { content: `message ${turn}` },
+    });
+    deliveries.push({ id: `hostmessage_${triggered.deliveryId}`, content: `message ${turn}` });
+    clock += hour;
+  }
+
+  // The phone comes back, imports all three, and uploads a replica that has them.
+  await upload(replica(2, [hello, ...deliveries.map((d, index) => ({
+    messageId: d.id, role: "assistant", content: d.content, createdAt: 2_000 + index, updatedAt: 2_000 + index }))]));
+  await host.runDue();
+  const ids = triggered.replica.conversations[0].messages.map((message) => message.messageId);
+  assert.equal(new Set(ids).size, ids.length, "synced deliveries are not added twice");
+  assert.equal(ids.length, 4);
+});
