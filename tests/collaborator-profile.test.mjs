@@ -17,6 +17,7 @@ function fixture(t) {
     conversationHostFactory: () => ({ route: async () => false,
       inventory: () => ({ conversations: active ? [{ activeTurn: { state: 'streaming' } }] : [] }),
       stopActiveTurns: async (id, device) => { stopped.push({ id, device: device.deviceId }); active = restartDuringStop; },
+      hasActiveTurns: () => active,
       status: () => ({ conversationCount: 0, activeTurnCount: 0, pendingApprovalCount: 0 }) }),
   });
   const request = async (method, path, body = {}) => {

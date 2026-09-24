@@ -98,3 +98,27 @@ test('stopping a collaborator\'s active turns cancels the live turn and leaves i
   assert.equal((await call('GET', `${base}/${idle.conversationId}`)).activeTurn, null);
   assert.deepEqual(await host.stopActiveTurns('a', {deviceId: 'd'}), []);
 });
+
+test('stopping a computer face also stops the phone proactive turn it is running', async t => {
+  const root = mkdtempSync(join(tmpdir(), 'aru-stop-replica-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const executor = { collaboratorId: 'hostcol_1', displayName: 'Computer', driverId: 'codex' };
+  const deferred = []; const interrupted = [];
+  const host = createCollaboratorConversationHost({ dataDir: root,
+    driverForCollaborator: () => ({ status: () => 'ready',
+      startTurn: async () => ({ threadId: 'thread', turnId: 'driver-turn' }),
+      interrupt: async (thread, turn) => { interrupted.push([thread, turn]); } }),
+    collaboratorForId: id => { if (id !== executor.collaboratorId) throw new Error('unknown'); return executor; },
+    readJSONBody: async req => req.body, sendJSON: (res, status, body) => Object.assign(res, {status, body}),
+    HttpError: class extends Error { constructor(status, code, message) { super(message); Object.assign(this, {status, code}); } },
+    toolCatalog: () => [], executeTool: async () => ({}), defer: fn => deferred.push(fn),
+  });
+  const replica = { sourceCollaboratorId: 'phone1', displayName: 'Phone', revision: 1, epoch: 1, conversations: [] };
+  host.runReplicaProactive(executor, replica, { ruleId: 'r', title: 'Morning', seed: 'hi', sourceVersion: 1 }, 'd1');
+  await deferred.shift()();
+  assert.equal(host.hasActiveTurns('hostcol_1'), true);
+  assert.equal((await host.stopActiveTurns('hostcol_1', { deviceId: 'd' })).length, 1);
+  assert.deepEqual(interrupted, [['thread', 'driver-turn']]);
+  assert.equal(host.hasActiveTurns('hostcol_1'), false);
+  assert.equal(host.hasActiveTurns('hostcol_other'), false);
+});

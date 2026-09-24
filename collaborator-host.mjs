@@ -385,8 +385,8 @@ export function createCollaboratorHost({
       if (mobileReplicas.hasExecutionGrant(collaboratorId)) {
         throw new HttpError(409, "collaborator.delegated", "Return mobile proactive execution to the phone before deleting this computer collaborator.");
       }
-      const hasActiveTurn = () => conversations.inventory(collaboratorId).conversations.some(
-        (item) => ["queued", "starting", "streaming", "waitingApproval", "toolRunning"].includes(item.activeTurn?.state));
+      // Includes proactive turns this face runs for a phone.
+      const hasActiveTurn = () => conversations.hasActiveTurns(collaboratorId);
       if (hasActiveTurn()) {
         if (body.stopActiveTurns !== true) {
           throw new HttpError(409, "collaborator.busy", "Stop the current task before deleting this computer collaborator.");

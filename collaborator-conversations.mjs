@@ -350,6 +350,8 @@ function createCollaboratorConversationHost({
       collaborator.collaboratorId,
       createConversation(collaborator, { title: source?.title || rule.title || "主动消息" }, device).conversationId,
     );
+    // Lets deleting the executing face find and stop this turn.
+    conversation.executorCollaboratorId = executor.collaboratorId;
     for (const item of source?.messages ?? []) {
       const content = String(item.content ?? "").trim();
       if (!content) continue;
@@ -649,13 +651,31 @@ function createCollaboratorConversationHost({
     return publicConversation(conversation, true);
   }
 
-  // Deleting a computer collaborator on request stops its running turns first.
-  // Each turn is cancelled on its live conversation, the same way a person would.
+  // A computer face's own conversations plus the phone-replica conversations it
+  // executes, which live under the replica's id rather than the face's.
+  function executedConversations(collaboratorId) {
+    const own = loadConversations(collaboratorId).map((stored) => ({ ownerId: collaboratorId, stored }));
+    if (!existsSync(root)) return own;
+    const replicas = readdirSync(root)
+      .filter((name) => name.startsWith("mobilereplica_") && ID.test(name))
+      .flatMap((ownerId) => loadConversations(ownerId)
+        .filter((stored) => stored.executorCollaboratorId === collaboratorId)
+        .map((stored) => ({ ownerId, stored })));
+    return [...own, ...replicas];
+  }
+
+  function hasActiveTurns(collaboratorId) {
+    return executedConversations(collaboratorId).some(({ stored }) => ACTIVE_STATES.has(stored.activeTurn?.state));
+  }
+
+  // Deleting a computer collaborator on request stops its running turns first,
+  // including proactive turns it runs for a phone. Each is cancelled on its live
+  // conversation, the same way a person would.
   async function stopActiveTurns(collaboratorId, device) {
     const stopped = [];
-    for (const stored of loadConversations(collaboratorId)) {
+    for (const { ownerId, stored } of executedConversations(collaboratorId)) {
       if (!ACTIVE_STATES.has(stored.activeTurn?.state)) continue;
-      const conversation = loadConversation(collaboratorId, stored.conversationId);
+      const conversation = loadConversation(ownerId, stored.conversationId);
       const turn = conversation.activeTurn;
       if (!ACTIVE_STATES.has(turn?.state)) continue;
       await cancelTurn(conversation, turn.turnId, device);
@@ -934,6 +954,7 @@ function createCollaboratorConversationHost({
     route,
     inventory,
     stopActiveTurns,
+    hasActiveTurns,
     hasConversation,
     runProactive,
     runReplicaProactive,
