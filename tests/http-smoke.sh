@@ -409,11 +409,11 @@ grep -Fq 'node_workspace.path_outside_root' "$data_dir/workspace-escape.json"
 curl -fsS -X PUT "http://127.0.0.1:$port/aru/v1/hosted-collaborators/$hosted_collaborator_id" \
   -H 'content-type: application/json' \
   -H "authorization: Bearer $credential" \
-  --data '{"expectedRevision":1,"displayName":"Computer Aru Renamed","driverId":"claude-code","toolAccess":{"schema":"aru.selfhost.collaborator-tool-access.v1","mode":"selected","toolNames":["aru_plugin_inventory","aru_node_status","aru_node_status"]}}' \
+  --data '{"expectedRevision":1,"displayName":"Computer Aru Renamed","driverId":"codex","toolAccess":{"schema":"aru.selfhost.collaborator-tool-access.v1","mode":"selected","toolNames":["aru_plugin_inventory","aru_node_status","aru_node_status"]}}' \
   | node -e '
       let b="";process.stdin.on("data",c=>b+=c);process.stdin.on("end",()=>{
         const p=JSON.parse(b);
-        if(p.displayName!=="Computer Aru Renamed"||p.driverId!=="claude-code"||p.revision!==2)process.exit(1);
+        if(p.displayName!=="Computer Aru Renamed"||p.driverId!=="codex"||p.revision!==2)process.exit(1);
         if(p.toolAccess?.mode!=="selected"||JSON.stringify(p.toolAccess?.toolNames)!==JSON.stringify(["aru_node_status","aru_plugin_inventory"]))process.exit(2);
       });'
 
@@ -1345,7 +1345,7 @@ curl -fsS "http://127.0.0.1:$port/aru/v1/hosted-collaborators/$hosted_collaborat
   | node -e '
       let b="";process.stdin.on("data",c=>b+=c);process.stdin.on("end",()=>{
         const p=JSON.parse(b);
-        if(p.displayName!=="Computer Aru Renamed"||p.driverId!=="claude-code"||p.revision!==2)process.exit(1);
+        if(p.displayName!=="Computer Aru Renamed"||p.driverId!=="codex"||p.revision!==2)process.exit(1);
         if(p.toolAccess?.mode!=="selected"||p.toolAccess?.toolNames?.length!==2)process.exit(2);
       });'
 curl -fsS "http://127.0.0.1:$port/aru/v1/plugins/workshop.echo" \
