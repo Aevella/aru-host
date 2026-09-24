@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+- Let a paired phone delete a computer collaborator (`DELETE /aru/v1/hosted-collaborators/:id`, revision-checked and replay-safe). The Host refuses with `collaborator.delegated` while the collaborator still runs a phone's proactive messages, and with `collaborator.busy` while a task runs unless the request sets `stopActiveTurns: true`; then it cancels those turns first and deletes only if no new task started meanwhile.
+- Persist a per-collaborator `approvalMode` (`confirm` or `always_allow`). `always_allow` answers driver approvals and non-read-only tool calls without waiting, including in unattended proactive turns; it is read again at each action, so switching back to `confirm` applies to the next one. Proactive turns the Host runs for a phone collaborator follow the setting of the computer collaborator that executes them.
+- Accept PNG, JPEG or WebP avatars on computer collaborators.
+- Replace the shared memory exchange with read-only, source-labelled reading of the phone's records (`aru.residence-reading.v1`), kept outside the computer collaborator's own cognition.
+- Advertise `residenceReadingProtocol` and `collaboratorManagementProtocol` during discovery so Aru can tell when the Host needs an update.
+- Seal a reply preview for the paired phone into collaborator and relay result notifications, and use it in Live Activity completion alerts; the phone decrypts it locally. Phones without a registered preview key keep the generic text.
+- Mark each agent driver with `executesTurns` and refuse to create a collaborator on a driver the Host cannot run (`agent_driver.not_executable`). Claude Code is still detected and listed but is not offered for collaborators yet.
+- Report the installed release (from `release.json` beside Host Core) as `releaseVersion` in the manifest and diagnostics, so a paired phone can show it and compare it with the latest release; `serverVersion` stays the protocol identity.
+- Continue recurring proactive messages for a phone from the Host's own earlier deliveries while the phone has not synced them yet, instead of writing each one as if the previous never happened. Continued messages use the id the phone imports them under, so they still append in order.
+- Stop proactive turns a computer collaborator runs for a phone when deleting it with `stopActiveTurns`.
+- Find the Codex bundled with the ChatGPT desktop app.
+- Bundle cognition sources into the fixed-name payloads so upgrades from installed 0.31.x keep working.
+- Add `POST /aru/v1/mobile-collaborator-replicas/:sourceCollaboratorId/revoke` so a paired phone can return proactive-message execution from the Host to itself. The Host records the revoked epoch in the replica ledger, stops scheduling that epoch, refuses stale re-syncs of it, and no longer records deliveries for tasks of that epoch that finish after the revocation; a newer grant with a higher epoch takes over again. Needs Aru with the "切回这台手机" control; older phones are unaffected.
+
 ## 0.32.1
 
 - Fix relay requests being rejected with HTTP 400 once a conversation grows: the Base64 check used a repeated-group regexp that overflowed V8's stack on large bodies, so the phone silently fell back to generating locally and the reply was lost when Aru left the foreground. Validation now decodes and re-encodes instead.

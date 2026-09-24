@@ -20,10 +20,10 @@ Third-party plugins are separate permissioned lifecycle units. The official `ful
 
 ## Runtime source and installed payloads
 
-The root `aru-selfhost-stub.mjs` and `conversation-turn-relay.mjs` are generated
+The root `aru-selfhost-stub.mjs`, `collaborator-conversations.mjs` and `conversation-turn-relay.mjs` are generated
 runtime payloads. Edit `src/` and run `node tools/build-runtime.mjs`; CI checks
 that checked-in payloads match their sources. Existing installed upgraders copy
-fixed filenames, so these two deployed entrypoints must not gain new local
+fixed filenames, so these deployed entrypoints must not gain new local
 runtime dependencies. Source modules are assembled into those existing files,
 not maintained as a second hand-written implementation.
 
@@ -36,6 +36,7 @@ not maintained as a second hand-written implementation.
 | `src/server/workspace-jobs.mjs` | Container job execution, deadlines, cancellation and restart recovery |
 | `src/server/mcp-catalog.mjs` | Static tool schemas |
 | `src/server/mcp-gateway.mjs` | MCP sessions, argument admission and dispatch to domain owners |
+| `src/conversations/` | Computer conversation execution and revision-checked rename/deletion; active turns cannot be deleted |
 | `src/conversation-relay/` | Phone-owned turn routing, provider admission and raw response files |
 
 Backup, artifact and job owners receive only their relevant state collections;
@@ -62,3 +63,26 @@ Validation includes the actual v0.31.4 installer fixture with the new payload,
 retained state and successful startup, ordinary installers, state recovery,
 project concurrency and Console feature projection tests. New-installer tests
 alone are not sufficient evidence for an installed-upgrader path.
+
+## Collaborator residences
+
+A phone room may associate a computer identity without delegating phone execution.
+The phone owns this presentation relationship and a cached directory; Host remains
+the only writer of computer profiles, conversation history, cognition and task state.
+Profile PUT uses expectedRevision, and DELETE retains a tombstone. Active computer
+turns or phone execution grants block deletion. Repeated deletion returns the same
+receipt; deleted identities reject new mutations and work admission.
+
+`residence-reading.mjs` owns the separate source-labelled phone reading projection.
+PUT cognition/phone-reading accepts the paired phone's monotonic relationship generation
+and revision; the self tool aru_phone_memory_read returns the last supplied timestamp
+and records as read-only material, never as current computer memory or a live phone read.
+Disabling clears projected content and stale uploads cannot re-enable it. The old
+memory-sync endpoint returns 410 before any mutation. Existing copied memories are
+preserved. Ordinary mobile replica reads no longer expose memories or references;
+execution snapshots remain owned by the separate delegation chain.
+
+
+2026-09-23 validation: residence reading and mobile replica suites pass (6 tests); cognition smoke and generated runtime checks pass. Host Core bundle loads with an isolated `--check-state` data directory; Linux release archive keeps the existing fixed filename set. These are local implementation/package checks, not a deployed-node or phone integration claim. Existing saved cognition remains unchanged; legacy memory-sync is retired with HTTP 410.
+
+The cognition source now lives in `src/cognition/`; the existing runtime generator assembles cognition and residence reading into the fixed `collaborator-cognition.mjs` deployment artifact. This preserves the already-shipped fixed-list installer contract without a runtime fallback. The old 0.31.4 installer fixture and reading/replica tests pass together (7 tests); the isolated macOS installer smoke also passes. Do not add a separate runtime dependency on residence-reading.mjs to deployed cognition.

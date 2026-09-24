@@ -53,6 +53,7 @@ test("multi-megabyte durable turn submission is idempotent and never persists pr
     const request = {
       method: "POST",
       body: {
+        notificationTitle: "Astra",
         clientTurnId: "assistant-one",
         conversationId: "conversation-one",
         protocolId: "openai-compatible",
@@ -76,6 +77,8 @@ test("multi-megabyte durable turn submission is idempotent and never persists pr
     await new Promise((resolve) => setTimeout(resolve, 60));
     assert.equal(fetchCount, 1);
     assert.equal(state.conversationTurns[0].state, "succeeded");
+    assert.equal(state.conversationTurns[0].notificationTitle, "Astra");
+    assert.equal(state.conversationTurns[0].notificationPreview, "好");
     assert.equal(readFileSync(statePath, "utf8").includes("secret-for-one-request"), false);
 
     await relay.route({ method: "GET" }, {}, statusPath, () => device);

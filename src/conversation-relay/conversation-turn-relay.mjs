@@ -1,3 +1,4 @@
+import { createNotificationPreviewCollector } from "./notification-preview.mjs";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { createTurnResultFiles } from "./conversation-turn-relay-results.mjs";
@@ -99,6 +100,7 @@ export function createConversationTurnRelay({
       clientTurnId,
       conversationId,
       protocolId,
+      notificationTitle: typeof body.notificationTitle === "string" ? body.notificationTitle.slice(0, 256) : null,
       providerHost: endpoint.host,
       deviceId: device.deviceId,
       state: "accepted",
@@ -148,18 +150,23 @@ export function createConversationTurnRelay({
       turn.updatedAt = Date.now();
       saveState();
       await notifyTurnUpdated(turn);
+      const preview = createNotificationPreviewCollector(turn.protocolId, turn.providerContentType);
       if (response.body) {
         for await (const chunk of response.body) {
           if (!chunk?.byteLength) continue;
           results.append(temporaryFilename, chunk);
+          preview.append(chunk);
           turn.updatedAt = Date.now();
         }
       } else {
-        results.append(temporaryFilename, await response.arrayBuffer());
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        results.append(temporaryFilename, bytes);
+        preview.append(bytes);
       }
       results.finish(temporaryFilename, filename);
       turn.resultFilename = filename;
       turn.state = response.ok ? "succeeded" : "failed";
+      turn.notificationPreview = response.ok ? preview.finish() : null;
       if (!response.ok) {
         turn.failureCode = "conversation_turn.provider_http_error";
         turn.failureMessage = providerFailureMessage(finalPath, response.status);

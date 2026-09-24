@@ -33,6 +33,8 @@ const LOCAL_DRIVER_DEFINITIONS = [
       ]
       : [
         "codex",
+        "/Applications/ChatGPT.app/Contents/Resources/codex",
+        `${homedir()}/Applications/ChatGPT.app/Contents/Resources/codex`,
         "/Applications/Codex.app/Contents/Resources/codex",
         `${homedir()}/Applications/Codex.app/Contents/Resources/codex`,
         `${homedir()}/.local/bin/codex`,
@@ -74,6 +76,9 @@ const API_DRIVER_DEFINITION = {
   integrationGuide: null,
 };
 const DRIVER_DEFINITIONS = [...LOCAL_DRIVER_DEFINITIONS, API_DRIVER_DEFINITION];
+// Drivers that driverForCollaborator can run. Others are probed and listed so
+// the Console can show them, but a collaborator cannot be created on them.
+const TURN_EXECUTING_DRIVER_IDS = new Set(["codex", "api"]);
 
 export function createCollaboratorHost({
   dataDir,
@@ -267,6 +272,7 @@ export function createCollaboratorHost({
     const projection = collaboratorProjection();
     return {
       schema: HOSTED_COLLABORATOR_INVENTORY_SCHEMA,
+      compatibility: { revision: 1, minimumClientRevision: 1 },
       mobileIdentities: mobileIdentities.inventory(),
       collaborators: state.hostedCollaborators.map((collaborator) => publicCollaborator(collaborator, projection)),
     };
@@ -285,6 +291,8 @@ export function createCollaboratorHost({
       schema: HOSTED_COLLABORATOR_SCHEMA,
       collaboratorId: collaborator.collaboratorId,
       displayName: collaborator.displayName,
+      avatarDataURL: collaborator.avatarDataURL ?? null,
+      supportsAvatarEditing: true,
       driverId: collaborator.driverId,
       providerProfileId: collaborator.providerProfileId ?? null,
       driverDisplayName: providerProfile?.displayName ?? driver?.displayName ?? collaborator.driverId,
@@ -297,6 +305,7 @@ export function createCollaboratorHost({
       clientProjection: "read-only-replica",
       activationStatus,
       turnExecution,
+      approvalMode: collaborator.approvalMode ?? "confirm",
       toolAccess: publicToolAccess(collaborator.toolAccess),
       cognition: cognition.summary(collaborator.collaboratorId),
     };
@@ -352,15 +361,64 @@ export function createCollaboratorHost({
     if (!/^hostcol_[A-Fa-f0-9-]+$/.test(collaboratorId)) {
       throw new HttpError(400, "collaborator.id_invalid", "invalid hosted collaborator id");
     }
-    const collaborator = collaboratorForId(collaboratorId);
+    // Retrying a lost deletion receipt must be harmless. Other routes continue
+    // rejecting tombstoned identities before admitting any new work.
+    const collaborator = req.method === "DELETE"
+      ? state.hostedCollaborators.find(item => item.collaboratorId === collaboratorId)
+      : collaboratorForId(collaboratorId);
+    if (!collaborator) throw new HttpError(404, "collaborator.unknown", "unknown hosted collaborator");
     if (req.method === "GET") {
       requireDevice();
       sendJSON(res, 200, publicCollaborator(collaborator));
       return true;
     }
-    if (req.method === "PUT") {
+    if (req.method === "DELETE") {
       const device = requireDevice();
       const body = await readJSONBody(req, 64 * 1024);
+      if (collaborator.archivedAt) {
+        sendJSON(res, 200, publicCollaborator(collaborator));
+        return true;
+      }
+      if (body.expectedRevision !== collaborator.revision) {
+        throw new HttpError(409, "collaborator.revision_conflict", "hosted collaborator changed since it was read");
+      }
+      if (mobileReplicas.hasExecutionGrant(collaboratorId)) {
+        throw new HttpError(409, "collaborator.delegated", "Return mobile proactive execution to the phone before deleting this computer collaborator.");
+      }
+      // Includes proactive turns this face runs for a phone.
+      const hasActiveTurn = () => conversations.hasActiveTurns(collaboratorId);
+      if (hasActiveTurn()) {
+        if (body.stopActiveTurns !== true) {
+          throw new HttpError(409, "collaborator.busy", "Stop the current task before deleting this computer collaborator.");
+        }
+        await conversations.stopActiveTurns(collaboratorId, device);
+        // Stopping awaited drivers; the collaborator may have changed meanwhile.
+        if (collaborator.archivedAt) {
+          sendJSON(res, 200, publicCollaborator(collaborator));
+          return true;
+        }
+        if (body.expectedRevision !== collaborator.revision) {
+          throw new HttpError(409, "collaborator.revision_conflict", "hosted collaborator changed since it was read");
+        }
+        if (hasActiveTurn()) {
+          throw new HttpError(409, "collaborator.busy", "A new task started while stopping; try again.");
+        }
+      }
+      if (mobileReplicas.hasExecutionGrant(collaboratorId)) {
+        throw new HttpError(409, "collaborator.delegated", "Return mobile proactive execution to the phone before deleting this computer collaborator.");
+      }
+      const previous = { ...collaborator };
+      collaborator.archivedAt = now();
+      collaborator.revision += 1;
+      collaborator.updatedAt = now();
+      collaborator.updatedByDeviceId = device.deviceId;
+      try { saveState(); } catch (error) { Object.assign(collaborator, previous); throw error; }
+      sendJSON(res, 200, publicCollaborator(collaborator));
+      return true;
+    }
+    if (req.method === "PUT") {
+      const device = requireDevice();
+      const body = await readJSONBody(req, maximumReplicaBytes);
       sendJSON(res, 200, updateHostedCollaborator(collaborator, body, device));
       return true;
     }
@@ -375,7 +433,7 @@ export function createCollaboratorHost({
     const collaborator = state.hostedCollaborators.find(
       (candidate) => candidate.collaboratorId === collaboratorId,
     );
-    if (!collaborator) {
+    if (!collaborator || collaborator.archivedAt) {
       throw new HttpError(404, "collaborator.unknown", "unknown hosted collaborator");
     }
     return collaborator;
@@ -388,7 +446,10 @@ export function createCollaboratorHost({
     if (body.requestId) {
       const existing = state.hostedCollaborators.find((item) => item.createRequestId === body.requestId
         && item.createdByDeviceId === device.deviceId);
-      if (existing) return publicCollaborator(existing);
+      if (existing) {
+        if (existing.archivedAt) throw new HttpError(409, "collaborator.create_deleted", "This creation was already deleted; start a new creation");
+        return publicCollaborator(existing);
+      }
     }
     const timestamp = now();
     const collaborator = {
@@ -405,10 +466,13 @@ export function createCollaboratorHost({
       createdByDeviceId: device.deviceId,
       updatedByDeviceId: device.deviceId,
     };
-    state.hostedCollaborators.push(collaborator);
     cognition.initialize(collaborator.collaboratorId, "isolated");
     initiative.initialize(collaborator.collaboratorId);
-    saveState();
+    state.hostedCollaborators.push(collaborator);
+    try { saveState(); } catch (error) {
+      state.hostedCollaborators = state.hostedCollaborators.filter(item => item !== collaborator);
+      throw error;
+    }
     return publicCollaborator(collaborator);
   }
 
@@ -420,23 +484,44 @@ export function createCollaboratorHost({
       throw new HttpError(409, "collaborator.revision_conflict", "hosted collaborator changed since it was read");
     }
     if (body.displayName === undefined && body.driverId === undefined
-        && body.providerProfileId === undefined && body.toolAccess === undefined) {
+        && body.approvalMode === undefined && body.providerProfileId === undefined && body.toolAccess === undefined && body.avatarDataURL === undefined) {
       throw new HttpError(400, "collaborator.no_changes", "displayName, driverId, providerProfileId, or toolAccess required");
     }
-    if (body.displayName !== undefined) collaborator.displayName = validatedDisplayName(body.displayName);
-    if (body.driverId !== undefined || body.providerProfileId !== undefined) {
-      const driverId = body.driverId === undefined ? collaborator.driverId : validatedDriverId(body.driverId);
-      collaborator.driverId = driverId;
-      collaborator.providerProfileId = validatedProviderProfileId(
-        driverId,
-        body.providerProfileId === undefined ? collaborator.providerProfileId : body.providerProfileId,
-      );
+    const next = { ...collaborator };
+    if (body.displayName !== undefined) next.displayName = validatedDisplayName(body.displayName);
+    if (body.avatarDataURL !== undefined) {
+      const value = body.avatarDataURL;
+      if (value !== null && (typeof value !== "string" || !/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(value))) {
+        throw new HttpError(400, "collaborator.avatar_invalid", "Expected a PNG, JPEG or WebP avatar");
+      }
+      next.avatarDataURL = value;
     }
-    if (body.toolAccess !== undefined) collaborator.toolAccess = validatedToolAccess(body.toolAccess);
-    collaborator.revision += 1;
-    collaborator.updatedAt = now();
-    collaborator.updatedByDeviceId = device.deviceId;
-    saveState();
+    if (body.driverId !== undefined || body.providerProfileId !== undefined) {
+      const active = conversations.inventory(collaborator.collaboratorId).conversations.some(
+        (item) => ["queued", "starting", "streaming", "waitingApproval", "toolRunning"].includes(item.activeTurn?.state));
+      if (active) throw new HttpError(409, "collaborator.busy", "Stop the current task before changing its execution configuration.");
+      const driverId = body.driverId === undefined ? collaborator.driverId : validatedDriverId(body.driverId);
+      next.driverId = driverId;
+      next.providerProfileId = validatedProviderProfileId(driverId,
+        body.providerProfileId === undefined ? collaborator.providerProfileId : body.providerProfileId);
+    }
+    if (body.approvalMode !== undefined) {
+      if (!["confirm", "always_allow"].includes(body.approvalMode)) {
+        throw new HttpError(400, "collaborator.approval_mode_invalid", "approvalMode must be confirm or always_allow");
+      }
+      next.approvalMode = body.approvalMode;
+    }
+    if (body.toolAccess !== undefined) next.toolAccess = validatedToolAccess(body.toolAccess);
+    next.revision += 1;
+    next.updatedAt = now();
+    next.updatedByDeviceId = device.deviceId;
+    const previous = { ...collaborator };
+    Object.assign(collaborator, next);
+    try { saveState(); } catch (error) {
+      for (const key of Object.keys(next)) if (!(key in previous)) delete collaborator[key];
+      Object.assign(collaborator, previous);
+      throw error;
+    }
     return publicCollaborator(collaborator);
   }
 
@@ -455,6 +540,9 @@ export function createCollaboratorHost({
     const driverId = String(value ?? "").trim();
     if (!DRIVER_DEFINITIONS.some((driver) => driver.id === driverId)) {
       throw new HttpError(400, "agent_driver.unknown", "driverId must name a supported agent driver");
+    }
+    if (!TURN_EXECUTING_DRIVER_IDS.has(driverId)) {
+      throw new HttpError(400, "agent_driver.not_executable", "This agent driver cannot run collaborator turns on this Host yet");
     }
     return driverId;
   }
@@ -525,8 +613,9 @@ export function createCollaboratorHost({
         ...LOCAL_DRIVER_DEFINITIONS.map((definition) => ({
           ...publicDriverDefinition(definition),
           ...(probes.get(definition.id) ?? unavailableProbe(definition, null)),
+          executesTurns: TURN_EXECUTING_DRIVER_IDS.has(definition.id),
         })),
-        apiDriverInventory(providerInventory),
+        { ...apiDriverInventory(providerInventory), executesTurns: true },
       ],
     };
   }
