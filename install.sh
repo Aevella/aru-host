@@ -15,6 +15,7 @@ PORT="8787"
 SOURCE_DIR=""
 SOURCE_REF="main"
 BUNDLE_URL=""
+RELEASE_VERSION=""
 NODE_IMAGE="docker.io/library/node:22-alpine"
 PYTHON_IMAGE="docker.io/library/python:3.13-alpine"
 SHELL_IMAGE="docker.io/library/alpine:3.22"
@@ -94,6 +95,7 @@ while (($#)); do
     --profile) PROFILE="${2:?missing value for --profile}"; shift 2 ;;
     --port) PORT="${2:?missing value for --port}"; shift 2 ;;
     --source-dir) SOURCE_DIR="${2:?missing value for --source-dir}"; shift 2 ;;
+    --release-version) RELEASE_VERSION="${2:?missing version}"; shift 2 ;;
     --source-ref) SOURCE_REF="${2:?missing value for --source-ref}"; shift 2 ;;
     --bundle-url) BUNDLE_URL="${2:?missing value for --bundle-url}"; shift 2 ;;
     --node-image) NODE_IMAGE="${2:?missing value for --node-image}"; shift 2 ;;
@@ -332,7 +334,34 @@ prepare_workspace_runtime() {
 prepare_workspace_runtime
 
 SOURCE_TMP=""
+RECOVERY_TMP=""
+INSTALL_COMMITTED="false"
+RECOVERY_READY="false"
+recovery_paths=(/etc/aru-selfhost/node.env /etc/aru-selfhost/install.env /etc/systemd/system/aru-selfhost.service /usr/local/bin/aru-selfhost /etc/caddy/Caddyfile /etc/caddy/conf.d/aru-selfhost.caddy)
 cleanup() {
+  local result=$? index=0 path can_restore=true
+  if [[ "$result" != 0 && "$INSTALL_COMMITTED" != true && "$RECOVERY_READY" == true ]]; then
+    if [[ -n "${old_release:-}" ]]; then
+      if [[ -n "$INSTALL_ROOT" ]]; then
+        node "$(root_path /opt/aru-selfhost)/$old_release/server.mjs" --data-dir "$(root_path /var/lib/aru-selfhost/data)" --container-runtime none --check-state >/dev/null 2>&1 || can_restore=false
+      else
+        runuser -u "$SERVICE_USER" -- node "/opt/aru-selfhost/$old_release/server.mjs" --data-dir /var/lib/aru-selfhost/data --container-runtime none --check-state >/dev/null 2>&1 || can_restore=false
+      fi
+    fi
+    if [[ "$can_restore" == true ]]; then
+      for path in "${recovery_paths[@]}"; do
+        if [[ -f "$RECOVERY_TMP/$index" ]]; then cp -p "$RECOVERY_TMP/$index" "$(root_path "$path")"; else rm -f "$(root_path "$path")"; fi
+        index=$((index + 1))
+      done
+      if [[ -n "${old_release:-}" ]]; then ln -sfn "$old_release" "$(root_path /opt/aru-selfhost/current)"; else rm -f "$(root_path /opt/aru-selfhost/current)"; fi
+      if [[ -n "${old_previous:-}" ]]; then ln -sfn "$old_previous" "$(root_path /opt/aru-selfhost/previous)"; else rm -f "$(root_path /opt/aru-selfhost/previous)"; fi
+      if [[ -z "$INSTALL_ROOT" && -n "${old_release:-}" ]]; then systemctl daemon-reload; systemctl restart "$SERVICE_NAME" || true; fi
+      log "previous installation configuration restored; durable data retained"
+    else
+      log "previous program cannot read current data; retained current configuration for repair"
+    fi
+  fi
+  [[ -z "$RECOVERY_TMP" ]] || rm -rf "$RECOVERY_TMP"
   [[ -z "$SOURCE_TMP" ]] || rm -rf "$SOURCE_TMP"
 }
 trap cleanup EXIT
@@ -365,12 +394,13 @@ fetch_source_payload() {
       aru-selfhost-stub.mjs backup-settings.mjs conversation-turn-relay.mjs collaborator-host.mjs mobile-collaborator-replicas.mjs mobile-collaborator-identities.mjs container-runtime-setup.mjs collaborator-cognition.mjs collaborator-surface-bundles.mjs collaborator-surfaces.mjs collaborator-conversations.mjs collaborator-conversation-attachments.mjs collaborator-initiative.mjs collaborator-projects.mjs apns-push.mjs wake-bridge.mjs codex-app-server-driver.mjs direct-api-driver.mjs provider-profiles.mjs provider-secret-store.mjs node-control.mjs node-workspaces.mjs plugin-supervisor.mjs plugin-workshop.mjs source-plugin-runtime.mjs source-plugin-runner.mjs \
       aru-selfhost.service aru-selfhostctl install.sh run-node.sh \
       | LC_ALL=C sort)"
-    [[ "$entries" == "$expected_entries" ]] || die "release bundle contains an unexpected file set"
+    [[ "$entries" == "$expected_entries" || "$entries" == "$(printf '%s\n' "$expected_entries" release.json | LC_ALL=C sort)" ]] || die "release bundle contains an unexpected file set"
     mkdir -p "$SOURCE_TMP/payload"
     tar -xzf "$SOURCE_TMP/bundle.tar.gz" -C "$SOURCE_TMP/payload"
     SOURCE_DIR="$SOURCE_TMP/payload"
     return
   fi
+  if [[ "$SOURCE_REF" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then RELEASE_VERSION="${BASH_REMATCH[1]}"; fi
   local raw="$REPO_RAW_DEFAULT/$SOURCE_REF"
   log "downloading node payload from Aevella/aru-host@$SOURCE_REF"
   for file in aru-selfhost-stub.mjs backup-settings.mjs conversation-turn-relay.mjs collaborator-host.mjs mobile-collaborator-replicas.mjs mobile-collaborator-identities.mjs container-runtime-setup.mjs collaborator-cognition.mjs collaborator-surface-bundles.mjs collaborator-surfaces.mjs collaborator-conversations.mjs collaborator-conversation-attachments.mjs collaborator-initiative.mjs collaborator-projects.mjs apns-push.mjs wake-bridge.mjs codex-app-server-driver.mjs direct-api-driver.mjs provider-profiles.mjs provider-secret-store.mjs node-control.mjs node-workspaces.mjs plugin-supervisor.mjs plugin-workshop.mjs source-plugin-runtime.mjs source-plugin-runner.mjs run-node.sh aru-selfhost.service aru-selfhostctl install.sh; do
@@ -396,6 +426,15 @@ done
 release_dir="$(root_path /opt/aru-selfhost/releases/$release_id)"
 mkdir -p "$release_dir"
 install -m 0755 "$SOURCE_DIR/aru-selfhost-stub.mjs" "$release_dir/server.mjs"
+# Release metadata is installed alongside the executable on every channel.
+if [[ -f "$SOURCE_DIR/release.json" ]]; then
+  node -e 'const r=JSON.parse(require("fs").readFileSync(process.argv[1])); if(r.schema!=="aru.host.release.v1" || !/^\d+\.\d+\.\d+([+-][0-9A-Za-z.-]+)?$/.test(r.version))process.exit(1)' "$SOURCE_DIR/release.json" || die "invalid release metadata"
+  install -m 0644 "$SOURCE_DIR/release.json" "$release_dir/release.json"
+elif [[ -n "$RELEASE_VERSION" ]]; then
+  [[ "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]] || die "invalid release version"
+  printf '{"schema":"aru.host.release.v1","version":"%s"}\n' "$RELEASE_VERSION" > "$release_dir/release.json"
+fi
+
 install -m 0644 "$SOURCE_DIR/backup-settings.mjs" "$release_dir/backup-settings.mjs"
 install -m 0644 "$SOURCE_DIR/conversation-turn-relay.mjs" "$release_dir/conversation-turn-relay.mjs"
 install -m 0644 "$SOURCE_DIR/collaborator-host.mjs" "$release_dir/collaborator-host.mjs"
@@ -434,10 +473,6 @@ check_state() {
 }
 check_state
 old_release="$(readlink "$(root_path /opt/aru-selfhost/current)" 2>/dev/null || true)"
-if [[ -n "$old_release" ]]; then
-  ln -sfn "$old_release" "$(root_path /opt/aru-selfhost/previous)"
-fi
-ln -sfn "releases/$release_id" "$(root_path /opt/aru-selfhost/current)"
 
 mkdir -p \
   "$(root_path /etc/aru-selfhost)" \
@@ -455,6 +490,36 @@ write_env() {
     printf '%s=%q\n' "$name" "${!name}" >> "$destination"
   done
 }
+
+# Provision only once, outside exported data. Missing keys with existing sealed
+# files are a restore condition; never replace them during an upgrade.
+secret_root="$(root_path /var/lib/aru-selfhost/provider-secrets)"
+[[ ! -L "$secret_root" ]] || die "provider secret directory must not be a symlink"
+mkdir -p "$secret_root"
+chmod 0700 "$secret_root"
+if [[ ! -e "$secret_root/master.key" ]]; then
+  [[ -z "$(find "$secret_root" -name '*.sealed' -print -quit)" ]] || die "provider key missing; restore provider-secrets/master.key before upgrading"
+  node -e 'require("fs").writeFileSync(process.argv[1],require("crypto").randomBytes(32),{flag:"wx",mode:0o600})' "$secret_root/master.key"
+fi
+[[ ! -L "$secret_root/master.key" ]] || die "provider key must not be a symlink"
+node --input-type=module - "$SOURCE_DIR/provider-secret-store.mjs" "$secret_root" <<'NODE'
+import { pathToFileURL } from 'node:url';
+const module = await import(pathToFileURL(process.argv[2]));
+const store = module.createProviderSecretStore({platform:'linux',env:{ARU_PROVIDER_SECRET_ROOT:process.argv[3]}});
+if (store.availability().storage !== 'linux-service-encrypted-file') {
+  console.error('Host provider key needs repair; restore its original key and private permissions before upgrading.');
+  process.exit(1);
+}
+NODE
+ARU_PROVIDER_SECRET_ROOT="/var/lib/aru-selfhost/provider-secrets"
+RECOVERY_TMP="$(mktemp -d)"
+old_previous="$(readlink "$(root_path /opt/aru-selfhost/previous)" 2>/dev/null || true)"
+recovery_index=0
+for recovery_path in "${recovery_paths[@]}"; do
+  [[ ! -f "$(root_path "$recovery_path")" ]] || cp -p "$(root_path "$recovery_path")" "$RECOVERY_TMP/$recovery_index"
+  recovery_index=$((recovery_index + 1))
+done
+RECOVERY_READY="true"
 
 ARU_SERVER_ENTRY="/opt/aru-selfhost/current/server.mjs"
 ARU_NODE_BINARY="$(command -v node || printf '/usr/bin/node')"
@@ -480,7 +545,7 @@ ARU_NODE_IMAGE="$NODE_IMAGE"
 ARU_PYTHON_IMAGE="$PYTHON_IMAGE"
 ARU_SHELL_IMAGE="$SHELL_IMAGE"
 write_env "$(root_path /etc/aru-selfhost/node.env)" \
-  ARU_SERVER_ENTRY ARU_NODE_BINARY ARU_LISTEN_HOST ARU_PORT ARU_DATA_DIR ARU_BASE_URL ARU_WAKE_RELAY_URL \
+  ARU_PROVIDER_SECRET_ROOT ARU_SERVER_ENTRY ARU_NODE_BINARY ARU_LISTEN_HOST ARU_PORT ARU_DATA_DIR ARU_BASE_URL ARU_WAKE_RELAY_URL \
   ARU_TRANSPORT_KIND ARU_DISPLAY_NAME ARU_NODE_KIND ARU_CONTAINER_RUNTIME \
   ARU_MAX_PACKAGE_MB ARU_MAX_WORKSPACE_MB ARU_MAX_WORKSPACE_OUTPUT_MB \
   ARU_CONTAINER_MEMORY ARU_CONTAINER_CPUS ARU_NODE_IMAGE ARU_PYTHON_IMAGE ARU_SHELL_IMAGE
@@ -547,6 +612,11 @@ configure_firewall() {
 
 configure_firewall
 
+if [[ -n "$old_release" ]]; then
+  ln -sfn "$old_release" "$(root_path /opt/aru-selfhost/previous)"
+fi
+ln -sfn "releases/$release_id" "$(root_path /opt/aru-selfhost/current)"
+
 if [[ "$SKIP_START" != "true" ]]; then
   if [[ -n "$DOMAIN" && "$SKIP_CADDY" != "true" ]]; then
     if ! caddy validate --config /etc/caddy/Caddyfile; then
@@ -567,6 +637,7 @@ if [[ "$SKIP_START" != "true" ]]; then
   if ! curl -fsS "http://127.0.0.1:$PORT/.well-known/aru.json" >/dev/null; then
     check_state || die "state check failed; previous release was not restarted"
     if [[ -n "$old_release" ]]; then
+      runuser -u "$SERVICE_USER" -- node "/opt/aru-selfhost/$old_release/server.mjs" --data-dir /var/lib/aru-selfhost/data --container-runtime none --check-state || die "previous release cannot read current data; restore current release and run doctor"
       ln -sfn "$old_release" /opt/aru-selfhost/current
       systemctl restart "$SERVICE_NAME" || true
       die "new release failed its manifest health check and was rolled back"
@@ -575,6 +646,7 @@ if [[ "$SKIP_START" != "true" ]]; then
   fi
 fi
 
+INSTALL_COMMITTED="true"
 log "installed release $release_id"
 log "profile: $PROFILE (future upgrades add newly implemented capability bundles to this profile)"
 log "canonical URL: $BASE_URL"

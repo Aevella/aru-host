@@ -1,3 +1,5 @@
+import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { readFileSync, writeFileSync, renameSync, unlinkSync, lstatSync, constants, openSync, closeSync, fsyncSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -93,7 +95,13 @@ export function createProviderSecretStore({
   service = DEFAULT_SERVICE,
   run = spawnSync,
   now = Date.now,
+  env = process.env,
 } = {}) {
+  // The installer selects this backend explicitly; a desktop keyring outage
+  // must never silently create a second credential store.
+  if (platform === "linux" && env.ARU_PROVIDER_SECRET_ROOT) {
+    return createHeadlessProviderSecretStore(env.ARU_PROVIDER_SECRET_ROOT);
+  }
   let cachedAvailability;
   let availabilityCheckedAt = 0;
 
@@ -305,4 +313,92 @@ function validatedSecret(value) {
   if (typeof value !== "string" || !value.trim()) throw new Error("API key is required");
   if (/[\r\n\u0000]/.test(value)) throw new Error("API key contains unsupported characters");
   return value;
+}
+
+
+// VPS service-owned storage lives outside exported Host data. The installation
+// provisions a persistent 32-byte key; losing it is a repair condition, never
+// permission to generate a replacement and abandon existing ciphertext.
+export function createHeadlessProviderSecretStore(root) {
+  function checkedKey() {
+    const directory = lstatSync(root);
+    if (!directory.isDirectory() || directory.isSymbolicLink() || (directory.mode & 0o077)) {
+      throw new Error("Host secret directory must be private (0700)");
+    }
+    const path = join(root, "master.key");
+    const stat = lstatSync(path);
+    if (!stat.isFile() || stat.isSymbolicLink() || (stat.mode & 0o077)) {
+      throw new Error("Host secret key must be private (0600)");
+    }
+    const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+      const key = readFileSync(fd);
+      if (key.length !== 32) throw new Error("Host secret key is invalid; restore the original key");
+      return key;
+    } finally { closeSync(fd); }
+  }
+  function pathFor(id) { return join(root, `${account(id)}.sealed`); }
+  function read(id) {
+    const key = checkedKey();
+    let bytes;
+    try {
+      const fd = openSync(pathFor(id), constants.O_RDONLY | constants.O_NOFOLLOW);
+      try { bytes = readFileSync(fd); } finally { closeSync(fd); }
+    } catch (error) { if (error.code === "ENOENT") return null; throw error; }
+    if (bytes.length < 29 || bytes[0] !== 1) throw new Error("Invalid Host secret file");
+    const decipher = createDecipheriv("aes-256-gcm", key, bytes.subarray(1, 13));
+    decipher.setAAD(Buffer.from(account(id)));
+    decipher.setAuthTag(bytes.subarray(13, 29));
+    return Buffer.concat([decipher.update(bytes.subarray(29)), decipher.final()]).toString("utf8");
+  }
+  function write(id, value) {
+    const key = checkedKey();
+    const nonce = randomBytes(12);
+    const cipher = createCipheriv("aes-256-gcm", key, nonce);
+    cipher.setAAD(Buffer.from(account(id)));
+    const encrypted = Buffer.concat([cipher.update(validatedSecret(value), "utf8"), cipher.final()]);
+    const destination = pathFor(id);
+    const temporary = `${destination}.${randomBytes(8).toString("hex")}.tmp`;
+    try {
+      const fd = openSync(temporary, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600);
+      try { writeFileSync(fd, Buffer.concat([Buffer.from([1]), nonce, cipher.getAuthTag(), encrypted])); fsyncSync(fd); }
+      finally { closeSync(fd); }
+      renameSync(temporary, destination);
+      const dir = openSync(root, constants.O_RDONLY);
+      try { fsyncSync(dir); } finally { closeSync(dir); }
+    } finally { try { unlinkSync(temporary); } catch (e) { if (e.code !== "ENOENT") throw e; } }
+  }
+  return {
+    // A bounded, one-time import from the old desktop backend. Unknown/unreadable
+    // keys remain absent and are re-entered through the profile editor; no
+    // permanent read-old/read-new fallback participates in normal requests.
+    adoptLegacyProfiles(profiles) {
+      checkedKey();
+      const marker = join(root, "legacy-import-complete");
+      try { readFileSync(marker); return; } catch (e) { if (e.code !== "ENOENT") throw e; }
+      const legacy = createProviderSecretStore({ platform: "linux", env: {} });
+      if (legacy.availability().supported) {
+        for (const profile of profiles) {
+          if (profile.authMode === "none") continue;
+          try {
+            if (read(profile.profileId)) continue;
+            const value = legacy.read(profile.profileId);
+            if (value) {
+              write(profile.profileId, value);
+              if (read(profile.profileId) !== value) throw new Error("Secret import verification failed");
+              // Keep the old copy until a deliberate keyring cleanup; it is never
+              // read again by the service-file backend and preserves rollback evidence.
+            }
+          } catch { /* Missing key is exposed on its profile, not as data deletion. */ }
+        }
+      }
+      writeFileSync(marker, "1\n", { flag: "wx", mode: 0o600 });
+    },
+    availability() {
+      try { checkedKey(); return { supported: true, storage: "linux-service-encrypted-file", failure: null }; }
+      catch { return { supported: false, storage: "unavailable", failure: "linux-service-key-repair-required" }; }
+    },
+    read, write,
+    remove(id) { checkedKey(); try { unlinkSync(pathFor(id)); } catch (e) { if (e.code !== "ENOENT") throw e; } },
+  };
 }

@@ -17,6 +17,9 @@ export function createProviderProfileHost({
   now = Date.now,
 }) {
   state.providerProfiles ??= [];
+  if (secretStore.adoptLegacyProfiles && secretStore.availability().supported) {
+    secretStore.adoptLegacyProfiles(state.providerProfiles);
+  }
 
   async function route(req, res, path, requireDevice, requireLocalHostConsole) {
     if (path === "/aru/v1/provider-profiles") {
@@ -152,11 +155,19 @@ export function createProviderProfileHost({
 
   function publicProfile(profile) {
     const { hasSecret: _, ...metadata } = profile;
+    let availableSecret = false;
+    let secretFailure = null;
+    try { availableSecret = hasSecret(profile.profileId); }
+    catch { secretFailure = "模型密钥无法读取，请恢复 Host 密钥存储，或重新填写此配置的 API Key。配置和协作者仍保留。"; }
+    if (!availableSecret && profile.authMode !== "none" && !secretFailure) {
+      secretFailure = "此配置需要重新填写 API Key；原有配置、协作者和聊天记录仍保留。";
+    }
     return {
       schema: PROFILE_SCHEMA,
       ...metadata,
       maxToolRounds: profile.maxToolRounds ?? null,
-      hasSecret: hasSecret(profile.profileId),
+      hasSecret: availableSecret,
+      ...(secretFailure ? { health: "unhealthy", lastError: secretFailure } : {}),
     };
   }
 

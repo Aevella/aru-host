@@ -23,9 +23,15 @@ done
 chmod 0644 "$temp/aru-selfhost.service" "$temp/backup-settings.mjs" "$temp/conversation-turn-relay.mjs" "$temp/collaborator-host.mjs" "$temp/mobile-collaborator-replicas.mjs" "$temp/mobile-collaborator-identities.mjs" "$temp/container-runtime-setup.mjs" "$temp/collaborator-cognition.mjs" "$temp/collaborator-surface-bundles.mjs" "$temp/collaborator-surfaces.mjs" "$temp/collaborator-conversations.mjs" "$temp/collaborator-conversation-attachments.mjs" "$temp/collaborator-initiative.mjs" "$temp/collaborator-projects.mjs" "$temp/apns-push.mjs" "$temp/wake-bridge.mjs" "$temp/codex-app-server-driver.mjs" "$temp/direct-api-driver.mjs" "$temp/provider-profiles.mjs" "$temp/provider-secret-store.mjs" "$temp/node-control.mjs" "$temp/node-workspaces.mjs" "$temp/plugin-supervisor.mjs" "$temp/plugin-workshop.mjs" \
   "$temp/source-plugin-runtime.mjs" "$temp/source-plugin-runner.mjs"
 
+if [[ -n "${ARU_RELEASE_VERSION:-}" ]]; then
+  node -e 'const v=process.argv[2]; if(!/^\d+\.\d+\.\d+([+-][0-9A-Za-z.-]+)?$/.test(v))process.exit(1);require("fs").writeFileSync(process.argv[1],JSON.stringify({schema:"aru.host.release.v1",version:v}))' "$temp/release.json" "$ARU_RELEASE_VERSION"
+fi
+metadata=()
+[[ ! -f "$temp/release.json" ]] || metadata+=(release.json)
+
 tar -czf "$OUTPUT" -C "$temp" \
   aru-selfhost-stub.mjs backup-settings.mjs conversation-turn-relay.mjs collaborator-host.mjs mobile-collaborator-replicas.mjs mobile-collaborator-identities.mjs container-runtime-setup.mjs collaborator-cognition.mjs collaborator-surface-bundles.mjs collaborator-surfaces.mjs collaborator-conversations.mjs collaborator-conversation-attachments.mjs collaborator-initiative.mjs collaborator-projects.mjs apns-push.mjs wake-bridge.mjs codex-app-server-driver.mjs direct-api-driver.mjs provider-profiles.mjs provider-secret-store.mjs node-control.mjs node-workspaces.mjs plugin-supervisor.mjs plugin-workshop.mjs source-plugin-runtime.mjs source-plugin-runner.mjs \
-  run-node.sh aru-selfhost.service aru-selfhostctl install.sh
+  run-node.sh aru-selfhost.service aru-selfhostctl install.sh ${metadata[@]+"${metadata[@]}"}
 
 if command -v sha256sum >/dev/null 2>&1; then
   (cd "$(dirname "$OUTPUT")" && sha256sum "$(basename "$OUTPUT")") > "${OUTPUT}.sha256"
