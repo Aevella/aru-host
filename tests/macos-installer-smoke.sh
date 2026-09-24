@@ -98,6 +98,7 @@ grep -Fq 'ARU_PORT=18787' "$alpha/config/node.env"
 grep -Fq 'aru-alpha.local:18787' "$alpha/config/node.env"
 grep -Fq 'ARU_INSTALL_SOURCE_DIR=' "$alpha/config/install.env"
 grep -Fq 'ARU_INSTALL_RELEASE_VERSION=0.28.0-test' "$alpha/config/install.env"
+grep -Fq '"version":"0.28.0-test"' "$alpha/current/release.json"
 plutil -lint "$root/Library/LaunchAgents/cn.aelion.aru-selfhost.alpha.plist" >/dev/null
 "$root/Library/Application Support/Aru Self-Hosted/bin/aru-selfhost" \
   --base-root "$root/Library/Application Support/Aru Self-Hosted" \

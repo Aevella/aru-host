@@ -340,15 +340,18 @@ fetch_source_payload() {
 
 SOURCE_INPUT_DIR="$SOURCE_DIR"
 fetch_source_payload
-if [[ -z "$RELEASE_VERSION" && -f "$SOURCE_DIR/release.json" ]]; then
-  RELEASE_VERSION="$($NODE_BINARY -e '
+if [[ -f "$SOURCE_DIR/release.json" ]]; then
+  payload_release_version="$($NODE_BINARY -e '
     const fs = require("node:fs");
     const release = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
     if (release.schema !== "aru.host.release.v1" || typeof release.version !== "string") process.exit(2);
     process.stdout.write(release.version);
   ' "$SOURCE_DIR/release.json")" || die "payload release metadata is invalid"
-  [[ "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.]+)?$ ]] \
+  [[ "$payload_release_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.]+)?$ ]] \
     || die "payload release version must be a semantic version"
+  [[ -z "$RELEASE_VERSION" || "$RELEASE_VERSION" == "$payload_release_version" ]] \
+    || die "requested release version does not match payload release metadata"
+  RELEASE_VERSION="$payload_release_version"
 fi
 for file in aru-selfhost-stub.mjs backup-settings.mjs conversation-turn-relay.mjs collaborator-host.mjs mobile-collaborator-replicas.mjs mobile-collaborator-identities.mjs container-runtime-setup.mjs collaborator-cognition.mjs collaborator-surfaces.mjs collaborator-surface-bundles.mjs collaborator-conversations.mjs collaborator-conversation-attachments.mjs collaborator-initiative.mjs collaborator-projects.mjs apns-push.mjs wake-bridge.mjs codex-app-server-driver.mjs direct-api-driver.mjs provider-profiles.mjs provider-secret-store.mjs node-control.mjs node-workspaces.mjs plugin-supervisor.mjs plugin-workshop.mjs source-plugin-runtime.mjs source-plugin-runner.mjs run-node.sh install-macos.sh aru-selfhostctl-macos; do
   [[ -f "$SOURCE_DIR/$file" ]] || die "payload is missing $file"
@@ -405,6 +408,13 @@ install -m 0644 "$SOURCE_DIR/source-plugin-runner.mjs" "$RELEASES_DIR/$release_i
 install -m 0755 "$SOURCE_DIR/run-node.sh" "$RELEASES_DIR/$release_id/run-node.sh"
 install -m 0755 "$SOURCE_DIR/install-macos.sh" "$RELEASES_DIR/$release_id/install-macos.sh"
 install -m 0755 "$SOURCE_DIR/aru-selfhostctl-macos" "$RELEASES_DIR/$release_id/aru-selfhost"
+if [[ -f "$SOURCE_DIR/release.json" ]]; then
+  install -m 0644 "$SOURCE_DIR/release.json" "$RELEASES_DIR/$release_id/release.json"
+elif [[ -n "$RELEASE_VERSION" ]]; then
+  printf '{"schema":"aru.host.release.v1","version":"%s"}\n' "$RELEASE_VERSION" \
+    > "$RELEASES_DIR/$release_id/release.json"
+  chmod 0644 "$RELEASES_DIR/$release_id/release.json"
+fi
 
 old_release="$(readlink "$CURRENT_LINK" 2>/dev/null || true)"
 old_previous="$(readlink "$PREVIOUS_LINK" 2>/dev/null || true)"
