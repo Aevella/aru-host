@@ -3,7 +3,7 @@
 ## 0.33.1
 
 - Make `aru-selfhost upgrade` resolve the latest stable release instead of reinstalling the recorded ref or bundle; `--ref REF` applies to that run only. Add `upgrade.sh` so an installation whose old control script keeps reinstalling its recorded version can move to the stable release once, keeping its profile and data.
-- Leave the installation unchanged when release lookup or download fails, and restore the previous configuration files and release pointers when an install fails before committing.
+- Retry GitHub downloads during upgrade and give up on stalled transfers instead of hanging. Leave the installation unchanged when release lookup or download fails, and restore the previous configuration files and release pointers when an install fails before committing.
 - Write `release.json` on VPS and source installs too, so `releaseVersion` is reported instead of unknown.
 - Store headless Linux (VPS) provider keys in a service-owned encrypted store under `/var/lib/aru-selfhost/provider-secrets`, importing accessible Secret Service keys once and flagging the rest on their profiles for re-entry. Add `aru-selfhost reset-provider-keys` for a permanently lost master key. Desktop installs are unchanged.
 - Fix listing agent drivers on Node.js 18, which failed with `WebSocket is not defined` and left the phone's collaborator creation without execution methods. Reading the Codex driver status no longer needs a global `WebSocket`; running Codex still does.

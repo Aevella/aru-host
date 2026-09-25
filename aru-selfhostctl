@@ -11,6 +11,13 @@ die() {
   exit 1
 }
 
+# Retry, and abandon a stalled transfer rather than hang: GitHub can be
+# reachable but very slow from some networks.
+download() {
+  curl --fail --silent --show-error --location --connect-timeout 20 \
+    --speed-limit 1024 --speed-time 60 --retry 4 --retry-delay 2 --retry-all-errors "$@"
+}
+
 need_root() {
   [[ ${EUID:-$(id -u)} -eq 0 ]] || die "this command needs sudo"
 }
@@ -154,13 +161,13 @@ upgrade_command() {
   (($# == 0)) || die "unknown upgrade arguments: $*"
 
   if [[ "$explicit_ref" == "false" ]]; then
-    ref="$(curl --fail --silent --show-error --location https://api.github.com/repos/Aevella/aru-host/releases/latest | node -e 'let s="";process.stdin.on("data",x=>s+=x);process.stdin.on("end",()=>{const r=JSON.parse(s);if(r.draft||r.prerelease||!/^v[0-9]+\.[0-9]+\.[0-9]+$/.test(r.tag_name))process.exit(1);process.stdout.write(r.tag_name)})')" || die "could not resolve the latest stable release; installation unchanged"
+    ref="$(download https://api.github.com/repos/Aevella/aru-host/releases/latest | node -e 'let s="";process.stdin.on("data",x=>s+=x);process.stdin.on("end",()=>{const r=JSON.parse(s);if(r.draft||r.prerelease||!/^v[0-9]+\.[0-9]+\.[0-9]+$/.test(r.tag_name))process.exit(1);process.stdout.write(r.tag_name)})')" || die "could not resolve the latest stable release; installation unchanged"
   fi
   [[ "$ref" =~ ^[A-Za-z0-9._/-]+$ && "$ref" != *..* ]] || die "invalid source ref"
   local temporary installer
   temporary="$(mktemp -d)"
   installer="$temporary/install.sh"
-  curl --fail --silent --show-error --location "https://raw.githubusercontent.com/Aevella/aru-host/$ref/install.sh" -o "$installer" || { rm -rf "$temporary"; die "could not download target installer; installation unchanged"; }
+  download "https://raw.githubusercontent.com/Aevella/aru-host/$ref/install.sh" -o "$installer" || { rm -rf "$temporary"; die "could not download target installer; installation unchanged"; }
 
   local args=(
     --profile "${ARU_INSTALL_PROFILE:-full}"

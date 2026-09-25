@@ -74,8 +74,8 @@ log() {
 }
 
 download() {
-  curl --fail --silent --show-error --location \
-    --retry 4 --retry-delay 2 --retry-all-errors "$@"
+  curl --fail --silent --show-error --location --connect-timeout 20 \
+    --speed-limit 1024 --speed-time 60 --retry 4 --retry-delay 2 --retry-all-errors "$@"
 }
 
 root_path() {
