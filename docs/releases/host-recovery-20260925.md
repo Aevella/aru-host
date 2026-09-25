@@ -1,6 +1,14 @@
 # Host recovery work — 2026-09-25
 
-Status: released in Host 0.33.1 (2026-09-25). Local implementation and focused verification only; no real VPS systemd, physical Windows or iPhone acceptance before release.
+Status: released in Host 0.33.1 (2026-09-25). Before the tag, the branch ran on the
+maintainer's VPS (OpenCloudOS, systemd, Node 18.20.8, installed at 0.32.1): the
+new control script upgraded it with its profile and pairing intact, a phone-entered
+provider key was sealed in the service store and survived restarts, and a computer
+collaborator answered through it. That run found two defects fixed in 0.33.1:
+driver listing failed on Node 18, and upgrade downloads hung on a stalled network.
+After release, a plain `sudo aru-selfhost upgrade` resolved v0.33.1 and the Host
+reports `releaseVersion` 0.33.1. Physical Windows and the old-keyring import with a
+real stored key remain unexercised.
 
 The previous VPS upgrade replayed the saved source ref/bundle rather than resolving
 an update. Release reporting depended on a sidecar that the VPS installer did not
