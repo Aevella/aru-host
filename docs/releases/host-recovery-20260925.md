@@ -1,6 +1,6 @@
 # Host recovery work — 2026-09-25
 
-Status: local implementation and focused verification complete; not a published release.
+Status: released in Host 0.33.1 (2026-09-25). Local implementation and focused verification only; no real VPS systemd, physical Windows or iPhone acceptance before release.
 
 The previous VPS upgrade replayed the saved source ref/bundle rather than resolving
 an update. Release reporting depended on a sidecar that the VPS installer did not
