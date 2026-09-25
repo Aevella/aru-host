@@ -11,6 +11,13 @@ die() {
   exit 1
 }
 
+# Retry, and abandon a stalled transfer rather than hang: GitHub can be
+# reachable but very slow from some networks.
+download() {
+  curl --fail --silent --show-error --location --connect-timeout 20 \
+    --speed-limit 1024 --speed-time 60 --retry 4 --retry-delay 2 --retry-all-errors "$@"
+}
+
 need_root() {
   [[ ${EUID:-$(id -u)} -eq 0 ]] || die "this command needs sudo"
 }
@@ -37,7 +44,8 @@ Usage: aru-selfhost <command>
   pairing                Restart the node and print a fresh 10-minute pairing link.
   doctor                 Check service, container runtime, manifest, and capabilities.
   logs [journal args]    Follow service logs; secrets appear only in the fresh boot block.
-  upgrade [--ref REF]    Re-run the installer with the persisted full profile.
+  upgrade [--ref REF]    Install the latest stable release; --ref selects this run only.
+  reset-provider-keys    Retire saved VPS API keys; keep profiles and conversations.
   rollback               Switch to the previous installed release and restart.
   uninstall              Remove program files but preserve encrypted vault data.
   uninstall --purge-data Remove program files and durable server data.
@@ -143,7 +151,7 @@ doctor_command() {
 upgrade_command() {
   need_root
   load_install_config
-  local ref="${ARU_INSTALL_SOURCE_REF:-main}"
+  local ref=""
   local explicit_ref="false"
   if [[ "${1:-}" == "--ref" ]]; then
     ref="${2:?missing value for --ref}"
@@ -152,8 +160,15 @@ upgrade_command() {
   fi
   (($# == 0)) || die "unknown upgrade arguments: $*"
 
-  local installer="/opt/aru-selfhost/current/install.sh"
-  [[ -x "$installer" ]] || die "installed upgrader is missing"
+  if [[ "$explicit_ref" == "false" ]]; then
+    ref="$(download https://api.github.com/repos/Aevella/aru-host/releases/latest | node -e 'let s="";process.stdin.on("data",x=>s+=x);process.stdin.on("end",()=>{const r=JSON.parse(s);if(r.draft||r.prerelease||!/^v[0-9]+\.[0-9]+\.[0-9]+$/.test(r.tag_name))process.exit(1);process.stdout.write(r.tag_name)})')" || die "could not resolve the latest stable release; installation unchanged"
+  fi
+  [[ "$ref" =~ ^[A-Za-z0-9._/-]+$ && "$ref" != *..* ]] || die "invalid source ref"
+  local temporary installer
+  temporary="$(mktemp -d)"
+  installer="$temporary/install.sh"
+  download "https://raw.githubusercontent.com/Aevella/aru-host/$ref/install.sh" -o "$installer" || { rm -rf "$temporary"; die "could not download target installer; installation unchanged"; }
+
   local args=(
     --profile "${ARU_INSTALL_PROFILE:-full}"
     --display-name "${ARU_INSTALL_DISPLAY_NAME:-Aru Self-Hosted}"
@@ -169,12 +184,34 @@ upgrade_command() {
   fi
   [[ "${ARU_INSTALL_SKIP_CADDY:-false}" == "true" ]] && args+=(--skip-caddy)
   [[ "${ARU_INSTALL_SKIP_FIREWALL:-false}" == "true" ]] && args+=(--skip-firewall)
-  if [[ -n "${ARU_INSTALL_BUNDLE_URL:-}" && "$explicit_ref" == "false" ]]; then
-    args+=(--bundle-url "$ARU_INSTALL_BUNDLE_URL")
-  else
-    args+=(--source-ref "$ref")
-  fi
-  "$installer" "${args[@]}"
+  args+=(--source-ref "$ref")
+  local result=0
+  bash "$installer" "${args[@]}" || result=$?
+  rm -rf "$temporary"
+  return "$result"
+}
+
+reset_provider_keys_command() {
+  (($# == 0)) || die "unknown reset-provider-keys arguments: $*"
+  need_root
+  load_node_config
+  [[ -n "${ARU_PROVIDER_SECRET_ROOT:-}" ]] || die "this installation does not use the VPS service key store"
+  systemctl stop "$SERVICE"
+  runuser -u aru-selfhost -- "${ARU_NODE_BINARY:-node}" --input-type=module - "$ARU_PROVIDER_SECRET_ROOT" <<'NODE'
+import { mkdirSync, writeFileSync, renameSync, existsSync, lstatSync } from 'node:fs';
+import { randomBytes, randomUUID } from 'node:crypto';
+import { join } from 'node:path';
+const root = process.argv[2];
+if (existsSync(root) && lstatSync(root).isSymbolicLink()) throw Error('Secret directory cannot be a symlink');
+const next = root + '.new-' + randomUUID();
+mkdirSync(next, {mode:0o700});
+writeFileSync(join(next,'master.key'),randomBytes(32),{flag:'wx',mode:0o600});
+writeFileSync(join(next,'legacy-import-complete'),'1\n',{flag:'wx',mode:0o600});
+if(existsSync(root))renameSync(root,root + '.retired-' + Date.now());
+renameSync(next,root);
+NODE
+  systemctl restart "$SERVICE"
+  echo "Provider key storage reset. Re-enter keys in existing model profiles; collaborators and conversations were preserved. Retired encrypted storage remains beside the active directory for deliberate recovery/cleanup."
 }
 
 rollback_command() {
@@ -183,6 +220,19 @@ rollback_command() {
   current="$(readlink /opt/aru-selfhost/current 2>/dev/null || true)"
   previous="$(readlink /opt/aru-selfhost/previous 2>/dev/null || true)"
   [[ -n "$current" && -n "$previous" ]] || die "no previous release is installed"
+  load_node_config
+  runuser -u aru-selfhost -- "${ARU_NODE_BINARY:-node}" "/opt/aru-selfhost/$previous/server.mjs" --data-dir "$ARU_DATA_DIR" --container-runtime none --check-state || die "previous release cannot read current data; current release unchanged"
+  if [[ -n "${ARU_PROVIDER_SECRET_ROOT:-}" ]]; then
+    "${ARU_NODE_BINARY:-node}" --input-type=module - "/opt/aru-selfhost/$previous/provider-secret-store.mjs" "$ARU_PROVIDER_SECRET_ROOT" <<'NODE' || die "previous release cannot use current provider credentials; current release unchanged"
+import { pathToFileURL } from 'node:url';
+import { readdirSync } from 'node:fs';
+if (readdirSync(process.argv[3]).some(x=>x.endsWith('.sealed'))) {
+  const m = await import(pathToFileURL(process.argv[2]));
+  const s = m.createProviderSecretStore({platform:'linux',env:{ARU_PROVIDER_SECRET_ROOT:process.argv[3]}});
+  if(s.availability().storage!=='linux-service-encrypted-file')process.exit(1);
+}
+NODE
+  fi
   ln -sfn "$current" /opt/aru-selfhost/previous
   ln -sfn "$previous" /opt/aru-selfhost/current
   systemctl restart "$SERVICE"
@@ -198,6 +248,8 @@ uninstall_command() {
   /opt/aru-selfhost/current/install.sh "${args[@]}"
 }
 
+[[ "${BASH_SOURCE[0]}" == "$0" ]] || return 0
+
 command_name="${1:-}"
 [[ -n "$command_name" ]] || { usage; exit 1; }
 shift
@@ -207,6 +259,7 @@ case "$command_name" in
   doctor) doctor_command "$@" ;;
   logs) exec journalctl -u "$SERVICE" -f "$@" ;;
   upgrade) upgrade_command "$@" ;;
+  reset-provider-keys) reset_provider_keys_command "$@" ;;
   rollback) rollback_command "$@" ;;
   uninstall) uninstall_command "$@" ;;
   help|--help|-h) usage ;;

@@ -502,3 +502,45 @@ Each successful save retains the preceding admitted/saved state in `state.json.b
 When repairing, stop the service, preserve the damaged data directory, and validate the backup with the current reader before explicitly restoring it. The backup can be older than other artifacts and does not replace a full data backup. Startup rejection never overwrites the backup.
 
 Fatal state/configuration exit 78 stops the Windows supervisor (which completes successfully to avoid Scheduled Task failure retries) and is excluded from systemd restart. The macOS launcher requests a clean exit for fatal state admission and its launchd job restarts only unsuccessful exits. Repair followed by an explicit start remains available; transient failures still use the existing restart policy.
+
+## Recovering an older VPS installation
+
+After this change is published in a stable release, normal `sudo aru-selfhost
+upgrade` resolves that release rather than reusing a past `--ref` or bundle URL.
+For an old control script that keeps reinstalling its recorded version, use the
+new recovery entry with the existing installation record:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Aevella/aru-host/main/upgrade.sh -o /tmp/aru-host-upgrade.sh
+sudo bash /tmp/aru-host-upgrade.sh
+```
+
+This command is not a claim that an unreleased fix is available. `upgrade.sh`
+selects the published stable release. Addresses, runtime images and transport
+choices are retained. It does not uninstall the Host or clear its data. An
+explicit `upgrade --ref REF` selects only that operation; it does not pin future
+updates. If stable-release discovery fails, the current installation stays put.
+
+The VPS service stores provider credentials in
+`/var/lib/aru-selfhost/provider-secrets` (directory 0700, key/files 0600), outside
+`data`. Preserve this directory as a unit in a private machine backup; do not
+include it in an ordinary exported conversation/project. Restore the original
+`master.key` to recover existing ciphertext. Replacing the key is not recovery.
+Missing per-profile secrets can be re-entered through the existing phone model
+configuration editor; collaborator, profile and conversation identities remain.
+On first startup the service-file backend imports accessible existing profile keys
+from Secret Service once, verifying the copied value. Unavailable keys are reported
+on their existing profiles for re-entry. Old keyring copies are retained as recovery
+evidence but are never a normal read fallback; do not delete that keyring to troubleshoot. Desktop installations are not switched by this change.
+
+Release maintainers can produce metadata-bearing VPS bundles with
+`ARU_RELEASE_VERSION=X.Y.Z ./package-release.sh /tmp/aru-host-linux.tar.gz`.
+Local-source installations can pass `--release-version X.Y.Z` only when the
+source identity has actually been established; arbitrary branches remain unknown.
+
+If the original VPS master key is permanently unavailable, the operator can run
+`sudo aru-selfhost reset-provider-keys`. This deliberately retires all saved model
+API keys, restarts the service with an empty key store, and leaves profiles,
+collaborators and conversations intact. Re-enter keys in the existing profiles.
+The retired directory is retained privately beside the active directory for
+manual recovery/cleanup, never read by the service; it is not another runtime path.

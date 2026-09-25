@@ -1,6 +1,15 @@
 # Changelog
 
-## Unreleased
+## 0.33.1
+
+- Make `aru-selfhost upgrade` resolve the latest stable release instead of reinstalling the recorded ref or bundle; `--ref REF` applies to that run only. Add `upgrade.sh` so an installation whose old control script keeps reinstalling its recorded version can move to the stable release once, keeping its profile and data.
+- Retry GitHub downloads during upgrade and give up on stalled transfers instead of hanging. Leave the installation unchanged when release lookup or download fails, and restore the previous configuration files and release pointers when an install fails before committing.
+- Write `release.json` on VPS and source installs too, so `releaseVersion` is reported instead of unknown.
+- Store headless Linux (VPS) provider keys in a service-owned encrypted store under `/var/lib/aru-selfhost/provider-secrets`, importing accessible Secret Service keys once and flagging the rest on their profiles for re-entry. Add `aru-selfhost reset-provider-keys` for a permanently lost master key. Desktop installs are unchanged.
+- Fix listing agent drivers on Node.js 18, which failed with `WebSocket is not defined` and left the phone's collaborator creation without execution methods. Reading the Codex driver status no longer needs a global `WebSocket`; running Codex still does.
+- Protocol remains `stub-0.30`; no data migration. See [installation and upgrade details](docs/releases/0.33.1.md).
+
+## 0.33.0
 
 - Let a paired phone delete a computer collaborator (`DELETE /aru/v1/hosted-collaborators/:id`, revision-checked and replay-safe). The Host refuses with `collaborator.delegated` while the collaborator still runs a phone's proactive messages, and with `collaborator.busy` while a task runs unless the request sets `stopActiveTurns: true`; then it cancels those turns first and deletes only if no new task started meanwhile.
 - Persist a per-collaborator `approvalMode` (`confirm` or `always_allow`). `always_allow` answers driver approvals and non-read-only tool calls without waiting, including in unattended proactive turns; it is read again at each action, so switching back to `confirm` applies to the next one. Proactive turns the Host runs for a phone collaborator follow the setting of the computer collaborator that executes them.
@@ -15,6 +24,7 @@
 - Find the Codex bundled with the ChatGPT desktop app.
 - Bundle cognition sources into the fixed-name payloads so upgrades from installed 0.31.x keep working.
 - Add `POST /aru/v1/mobile-collaborator-replicas/:sourceCollaboratorId/revoke` so a paired phone can return proactive-message execution from the Host to itself. The Host records the revoked epoch in the replica ledger, stops scheduling that epoch, refuses stale re-syncs of it, and no longer records deliveries for tasks of that epoch that finish after the revocation; a newer grant with a higher epoch takes over again. Needs Aru with the "切回这台手机" control; older phones are unaffected.
+- Protocol remains `stub-0.30`. See [installation and upgrade details](docs/releases/0.33.0.md).
 
 ## 0.32.1
 

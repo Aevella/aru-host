@@ -359,6 +359,10 @@ try {
   Move-Item -LiteralPath (Join-Path $releaseDir "aru-selfhost-stub.mjs") -Destination (Join-Path $releaseDir "server.mjs") -Force
   if (Test-Path -LiteralPath $releaseMetadata) {
     Copy-Item -LiteralPath $releaseMetadata -Destination (Join-Path $releaseDir "release.json") -Force
+  } elseif ($ReleaseVersion) {
+    if ($ReleaseVersion -notmatch '^\d+\.\d+\.\d+([+-][0-9A-Za-z.-]+)?$') { Fail "invalid release version" }
+    $metadata = @{ schema = "aru.host.release.v1"; version = $ReleaseVersion } | ConvertTo-Json -Compress
+    [IO.File]::WriteAllText((Join-Path $releaseDir "release.json"), $metadata, (New-Object Text.UTF8Encoding($false)))
   }
 
   $oldRelease = ReadPointer $currentPointer

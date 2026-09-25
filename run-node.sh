@@ -29,6 +29,8 @@ for name in "${required[@]}"; do
   fi
 done
 
+export ARU_PROVIDER_SECRET_ROOT="${ARU_PROVIDER_SECRET_ROOT:-}"
+
 args=(
   "$ARU_SERVER_ENTRY"
   --listen-host "$ARU_LISTEN_HOST"

@@ -1,5 +1,9 @@
 import { spawn } from "node:child_process";
 
+// WebSocket.OPEN. A literal, because Node 18 has no global WebSocket and a
+// status read must not throw there; only connecting requires one.
+const SOCKET_OPEN = 1;
+
 const INITIALIZE_CLIENT = {
   name: "aru_host",
   title: "Aru Host",
@@ -16,13 +20,13 @@ export function createCodexAppServerDriver({ executable, resolveExecutable, log 
   const threadHandlers = new Map();
 
   function status() {
-    if (socket?.readyState === WebSocket.OPEN) return "running";
+    if (socket?.readyState === SOCKET_OPEN) return "running";
     if (connecting) return "starting";
     return knownExecutable ? "ready" : "unavailable";
   }
 
   async function ensureConnected() {
-    if (socket?.readyState === WebSocket.OPEN) return;
+    if (socket?.readyState === SOCKET_OPEN) return;
     const command = refreshExecutable();
     if (!command) throw new Error("codex executable is unavailable");
     if (typeof WebSocket !== "function") {
@@ -122,7 +126,7 @@ export function createCodexAppServerDriver({ executable, resolveExecutable, log 
   }
 
   function request(method, params) {
-    if (!socket || socket.readyState !== WebSocket.OPEN) {
+    if (!socket || socket.readyState !== SOCKET_OPEN) {
       return Promise.reject(new Error("Codex connection is not open"));
     }
     const id = ++requestSequence;
@@ -165,7 +169,7 @@ export function createCodexAppServerDriver({ executable, resolveExecutable, log 
 
   async function handleServerRequest(message, handler) {
     const respond = (result) => {
-      if (socket?.readyState === WebSocket.OPEN) {
+      if (socket?.readyState === SOCKET_OPEN) {
         socket.send(JSON.stringify({ id: message.id, result }));
       }
     };

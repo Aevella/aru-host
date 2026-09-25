@@ -86,3 +86,37 @@ execution snapshots remain owned by the separate delegation chain.
 2026-09-23 validation: residence reading and mobile replica suites pass (6 tests); cognition smoke and generated runtime checks pass. Host Core bundle loads with an isolated `--check-state` data directory; Linux release archive keeps the existing fixed filename set. These are local implementation/package checks, not a deployed-node or phone integration claim. Existing saved cognition remains unchanged; legacy memory-sync is retired with HTTP 410.
 
 The cognition source now lives in `src/cognition/`; the existing runtime generator assembles cognition and residence reading into the fixed `collaborator-cognition.mjs` deployment artifact. This preserves the already-shipped fixed-list installer contract without a runtime fallback. The old 0.31.4 installer fixture and reading/replica tests pass together (7 tests); the isolated macOS installer smoke also passes. Do not add a separate runtime dependency on residence-reading.mjs to deployed cognition.
+
+## Installation, identity and recovery (2026-09-25)
+
+A phone and a Host each own their durable content; pairing is a connection to
+those identities, not permission to recreate collaborators or conversations.
+Network addresses are routes, not identities. A repaired connection must either
+prove the same owner or ask the person to choose; a missing fact is not evidence
+of an old version or an empty data store.
+
+Installation source records describe what was installed. They are not an
+implicit update pin. `upgrade` resolves the latest stable release; `--ref` chooses
+only this invocation. The target installer runs the data admission checks before
+switching the executable. All release install paths put the same release metadata
+beside Core. Development source with no reliable version remains unknown.
+
+Internal data-shape changes use a one-time migration into one canonical form.
+Unidentifiable connections retain their content and expose an explicit reconnect
+or local-removal action. Platform-specific key stores and externally distributed
+sender bundles are actual interoperability boundaries, not temporary internal
+formats: changing the phone cannot update a script already copied elsewhere.
+
+For VPS installations the provider-secret owner uses a service-private directory
+outside exported Host data. AES-256-GCM ciphertext and a persistent local master
+key are protected by service-user filesystem permissions. This protects exported
+content and other OS users; it does not protect against root or compromise of the
+Host service user. It is not advertised as a hardware-backed keyring. Desktop
+Linux remains on Secret Service; a temporary keyring outage never selects another
+backend. A missing/corrupt master key requires restoration, never silent rotation.
+
+Recovery checks follow real transitions: old install -> upgrade -> restart,
+failed upgrade -> retry, reconnect -> retry, remove -> late response, and missing
+key -> restore. Tests of new installs or a single field are insufficient evidence
+for those transitions. Local tests, OS service proof, device proof and published
+availability must be reported separately.
