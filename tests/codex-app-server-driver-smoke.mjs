@@ -57,6 +57,13 @@ writeFileSync(executable, [
 chmodSync(executable, 0o755);
 
 const originalWebSocket = globalThis.WebSocket;
+
+// Node 18 has no global WebSocket: listing drivers must still work there.
+delete globalThis.WebSocket;
+const withoutWebSocket = createCodexAppServerDriver({ executable });
+assert.equal(withoutWebSocket.status(), "ready");
+await assert.rejects(() => withoutWebSocket.ensureConnected(), /requires Node\.js with WebSocket support/);
+
 globalThis.WebSocket = FakeWebSocket;
 
 let executableAvailable = false;
