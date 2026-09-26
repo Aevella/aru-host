@@ -237,6 +237,9 @@ export function createAPNsPushHost({
     const isHosted = event?.turn?.source === "proactive";
     const isMobileReplica = event?.turn?.source === "mobile-replica-proactive";
     if (event?.outcome !== "completed" || (!isHosted && !isMobileReplica)) return;
+    // A hosted rule with notifications off keeps its reply on the Host only.
+    // Replica deliveries are excluded: their push is also the delivery wake.
+    if (isHosted && event.turn?.notify === false) return;
     const body = String(event.mobileDelivery?.assistantContent ?? event.assistantMessage?.content ?? "").trim();
     if (!body) return;
     const registrations = activeRegistrations();

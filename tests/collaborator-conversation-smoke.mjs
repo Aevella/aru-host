@@ -210,17 +210,21 @@ const followed = host.runProactive(collaborator, {
   title: "Follow latest",
   conversationMode: "follow_latest",
   conversationId: null,
+  notificationsEnabled: false,
   seed: "follow latest",
 });
 assert.equal(followed.conversationId, newest.body.conversationId);
+assert.equal(followed.activeTurn.notify, false, "a rule with notifications off marks its turn silent");
 const fixed = host.runProactive(collaborator, {
   ruleId: "hostinitiative_fixed",
   title: "Fixed target",
   conversationMode: "fixed",
   conversationId,
+  notificationsEnabled: true,
   seed: "fixed target",
 });
 assert.equal(fixed.conversationId, conversationId);
+assert.equal(fixed.activeTurn.notify, true);
 assert.throws(
   () => host.runProactive(collaborator, {
     ruleId: "hostinitiative_missing",
