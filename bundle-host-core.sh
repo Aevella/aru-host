@@ -25,6 +25,9 @@ files=(
   apns-push.mjs
   wake-bridge.mjs
   codex-app-server-driver.mjs
+  claude-code-driver.mjs
+  claude-code-host-bridge.mjs
+  claude-code-mcp-bridge.mjs
   direct-api-driver.mjs
   provider-profiles.mjs
   provider-secret-store.mjs

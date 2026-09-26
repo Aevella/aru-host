@@ -31,7 +31,10 @@ test('the shipped 0.31.4 fixed-list installer admits and starts modularized Host
       });
       child.stderr.on('data', chunk => { text += chunk; });
     });
-    assert.equal(JSON.parse(readFileSync(join(data, 'state.json'), 'utf8')).serverId, 'upgrade-preserved');
+    const started = JSON.parse(readFileSync(join(data, 'state.json'), 'utf8'));
+    assert.equal(started.serverId, 'upgrade-preserved');
+    // The fixed list predates Claude Code: the Host starts without it and says why.
+    assert.equal(started.agentDriverProbes.find(probe => probe.id === 'claude-code')?.failure, 'driver-files-missing');
   } finally {
     if (child?.exitCode === null) {
       const ended = new Promise(resolve => child.once('exit', resolve)); child.kill(); await ended;

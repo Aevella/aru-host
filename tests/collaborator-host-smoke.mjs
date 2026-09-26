@@ -63,7 +63,7 @@ const host = createCollaboratorHost({
 
 const claudeOnly = host.driverInventory();
 assert.equal(claudeOnly.drivers.find((driver) => driver.id === "claude-code").status, "ready");
-assert.equal(claudeOnly.execution.enabled, false);
+assert.equal(claudeOnly.execution.enabled, true);
 
 state.providerProfiles.push({
   profileId,
@@ -263,10 +263,14 @@ assert.equal(firstCreate.body.collaboratorId, repeatedCreate.body.collaboratorId
 assert.equal(state.hostedCollaborators.filter((item) => item.createRequestId === createRequest.body.requestId).length, 1);
 console.log("ARU_HOST_CREATE_REPLAY_SMOKE_OK");
 
+const claudeCreate = {};
+await host.route({ method: "POST", body: { displayName: "Claude", driverId: "claude-code" } }, claudeCreate,
+  "/aru/v1/hosted-collaborators", () => ({ deviceId: "phone-create" }), () => {});
+assert.equal(claudeCreate.body.driverId, "claude-code");
+assert.equal(host.driverInventory().drivers.find((driver) => driver.id === "claude-code").executesTurns, true);
 await assert.rejects(
-  host.route({ method: "POST", body: { displayName: "Claude", driverId: "claude-code" } }, {},
+  host.route({ method: "POST", body: { displayName: "Unknown", driverId: "unknown-driver" } }, {},
     "/aru/v1/hosted-collaborators", () => ({ deviceId: "phone-create" }), () => {}),
-  (error) => error.code === "agent_driver.not_executable",
+  (error) => error.status === 400,
 );
-assert.equal(host.driverInventory().drivers.find((driver) => driver.id === "claude-code").executesTurns, false);
-console.log("ARU_HOST_NON_EXECUTING_DRIVER_SMOKE_OK");
+console.log("ARU_HOST_CLAUDE_CODE_DRIVER_SMOKE_OK");
