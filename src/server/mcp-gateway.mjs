@@ -98,9 +98,9 @@ async function executeMCPTool(name, args, device) {
         serverVersion: SERVER_VERSION,
         packageCount: state.packages.length,
         activeDeviceCount: state.devices.filter((entry) => !entry.revokedAt).length,
-        workspaceRuntimeAvailable: config.containerRuntime !== null,
+        workspaceRuntimeAvailable: config.containerReadiness?.ready() ?? config.containerRuntime !== null,
         workspaceRuntimeDescription: config.containerRuntime !== null
-          ? "Container runtime configured for isolated Node/Python/Shell jobs and OCI plugins. Job execution verifies actual readiness. Project files and page publication are independent."
+          ? `Host Core Node/Python/Shell verification: ${config.containerReadiness?.snapshot().status ?? "unknown"}. Project files and page publication are independent.`
           : "Optional containers are not configured. Isolated Node/Python/Shell jobs and OCI plugins need Podman or Docker. Project files, page publication, pairing, and model drivers are independent. Use Host Console > Runtime for installation and verification.",
       };
     } else if (name === "aru_node_settings") {

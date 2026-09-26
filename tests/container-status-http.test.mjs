@@ -30,7 +30,7 @@ for (const configured of [false, true]) {
     });
     let manifest;
     for (let attempt = 0; attempt < 100; attempt++) {
-      try { manifest = await (await fetch(`${base}/.well-known/aru.json`)).json(); break; } catch {}
+      try { manifest = await (await fetch(`${base}/.well-known/aru.json`)).json(); if (manifest.capabilities["workspace-runtime"].readiness?.status !== "checking") break; } catch {}
       await new Promise(resolve => setTimeout(resolve, 100));
     }
     assert.equal(manifest?.capabilities["workspace-runtime"].enabled, configured);

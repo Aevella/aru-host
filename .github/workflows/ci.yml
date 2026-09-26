@@ -19,6 +19,7 @@ jobs:
       - name: Host and installer smoke tests
         run: |
           node --test tests/container-runtime-setup.test.mjs tests/container-status-http.test.mjs
+          node --test tests/runtime-truth.test.mjs tests/turn-cancellation.test.mjs tests/codex-cancellation.test.mjs
           node tools/build-runtime.mjs --check
           node --test tests/project-async.test.mjs tests/legacy-installer-upgrade.test.mjs
           node --test tests/state-save.test.mjs

@@ -1,5 +1,5 @@
-// The setup command owns verification and persistence. This only waits for the
-// restarted service to expose its live capability, including response-body IO.
+// Core owns service-environment verification. Wait for its receipt after setup
+// or explicit retry, including response-body IO.
 export async function waitForContainerRuntime(readManifest, { timeoutMs = 90_000, intervalMs = 500 } = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -11,7 +11,13 @@ export async function waitForContainerRuntime(readManifest, { timeoutMs = 90_000
         if (controller.signal.aborted) break;
         lastManifest = manifest;
         if (manifest.capabilities?.["workspace-runtime"]?.enabled) return manifest;
-      } catch {
+        if (manifest.capabilities?.["workspace-runtime"]?.readiness?.status === "failed") {
+          const error = new Error(manifest.capabilities["workspace-runtime"].readiness.message);
+          error.code = "core_runtime_verification_failed";
+          throw error;
+        }
+      } catch (error) {
+        if (error.code === "core_runtime_verification_failed") throw error;
         // Connection refusal is expected while the service is restarting.
       }
       if (!controller.signal.aborted) {
@@ -30,7 +36,7 @@ export async function waitForContainerRuntime(readManifest, { timeoutMs = 90_000
     clearTimeout(timer);
   }
   if (!lastManifest) {
-    throw new Error("Containers passed verification, but Host Core did not respond before the readiness check timed out. The runtime setting is saved. Check the Host service status and logs, then refresh.");
+    throw new Error("Host Core did not respond before the readiness check timed out. The runtime setting is saved. Check the Host service status and logs, then refresh.");
   }
-  throw new Error(`Containers passed verification, but Host Core still reports the runtime as unavailable (version ${lastManifest.serverVersion ?? "unknown"}). The runtime setting is saved. Check the Host startup logs, then restart the Host service and refresh.`);
+  throw new Error(`Host Core still reports the runtime as unavailable (version ${lastManifest.releaseVersion ?? "unknown release"}). The runtime setting is saved. Check the Host startup logs, then restart the Host service and refresh.`);
 }

@@ -38,6 +38,9 @@ async function handleWorkspaceJobSubmit(req, res, device) {
   if (!config.containerRuntime) {
     throw new HttpError(503, "workspace.runtime_unavailable", "Docker or Podman is required");
   }
+  if (config.containerReadiness && !config.containerReadiness.ready()) {
+    throw new HttpError(503, "workspace.runtime_not_verified", "Host Core container verification is not ready; inspect runtime readiness and retry.");
+  }
   const body = await readJSONBody(req, config.maxWorkspaceBytes);
   const run = validateWorkspaceRun(body);
   const inputHash = sha256Hex(Buffer.from(JSON.stringify(run)));

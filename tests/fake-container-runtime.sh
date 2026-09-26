@@ -8,7 +8,7 @@ command="${1:-}"
 shift || true
 
 case "$command" in
-  --version)
+  info|--version)
     echo "fake-container-runtime 1"
     exit 0
     ;;
@@ -85,6 +85,15 @@ fi
 if [[ -z "$workspace" || ! -d "$workspace" ]]; then
   echo "fake runtime did not receive the workspace mount" >&2
   exit 2
+fi
+
+if [[ -f "$workspace/input.txt" ]] && [[ "$(cat "$workspace/input.txt")" == "aru-runtime-check" ]]; then
+  case " $* " in
+    *" node -e "*) printf ok > "$workspace/node.txt" ;;
+    *" python3 -c "*) printf ok > "$workspace/python.txt" ;;
+    *) printf ok > "$workspace/shell.txt" ;;
+  esac
+  exit 0
 fi
 
 if [[ -f "$workspace/slow.flag" ]]; then

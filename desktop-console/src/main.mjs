@@ -4,6 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import QRCode from "qrcode";
 import { parsePairingLink, readInstalledVersion, readPort, validateHostRequest } from "./runtime.mjs";
+import { waitForCoreRelease } from "./core-release.mjs";
 import { waitForContainerRuntime } from "./container-readiness.mjs";
 import { createDesktopPlatform } from "./platform/index.mjs";
 
@@ -66,11 +67,16 @@ function registerIPC() {
     if (containerSetupAttempt) return containerSetupAttempt;
     containerSetupAttempt = (async () => {
       await platform.setupContainerRuntime();
+      await waitForCoreRelease(signal => requestHost("GET", "/.well-known/aru.json", undefined, false, {}, signal), { version: app.getVersion() });
       return waitForContainerRuntime(signal =>
         requestHost("GET", "/.well-known/aru.json", undefined, false, {}, signal));
     })();
     try { return await containerSetupAttempt; }
     finally { containerSetupAttempt = undefined; }
+  });
+  ipcMain.handle("host:verify-core-runtime", async () => {
+    await requestHost("POST", "/aru/v1/container-runtime/verify", {});
+    return waitForContainerRuntime(signal => requestHost("GET", "/.well-known/aru.json", undefined, false, {}, signal));
   });
   ipcMain.handle("host:bootstrap", async () => {
     await ensureHostInstalled();
@@ -118,10 +124,12 @@ function registerIPC() {
     margin: 1, width: 360, color: { dark: "#4f4869", light: "#00000000" },
   }));
   ipcMain.handle("host:service", async (_event, action) => {
+    const previous = await requestHost("GET", "/.well-known/aru.json", undefined, false, {}, AbortSignal.timeout(3_000)).catch(() => null);
     if (action === "start" || action === "restart") await platform.validateState(hostCoreRoot);
     if (action === "start") await platform.startService();
     else if (action === "restart") await platform.restartService();
     else throw new Error("Unsupported service action");
+    await waitForCoreRelease(signal => requestHost("GET", "/.well-known/aru.json", undefined, false, {}, signal), { version: app.getVersion(), serverId: previous?.serverId });
     return true;
   });
   ipcMain.handle("host:uninstall", async () => {
@@ -142,14 +150,28 @@ async function ensureHostInstalled() {
   if (release.schema !== "aru.host.release.v1" || release.version !== app.getVersion()) {
     throw new Error("The bundled Host Core does not match this Console release");
   }
+  const previous = await requestHost("GET", "/.well-known/aru.json", undefined, false, {}, AbortSignal.timeout(3_000)).catch(() => null);
   let installedVersion = null;
   try { installedVersion = readInstalledVersion(await readFile(platform.installEnvPath, "utf8")); } catch {}
   if (installedVersion !== release.version || !platform.hostInstalled()) {
     await platform.runInstaller(hostCoreRoot, release.version);
-    return;
+  } else {
+    await platform.validateState(hostCoreRoot);
+    await platform.startService();
+    const running = await requestHost("GET", "/.well-known/aru.json", undefined, false, {}, AbortSignal.timeout(3_000)).catch(() => null);
+    if (running && running.releaseVersion !== release.version) await platform.restartService();
   }
-  await platform.validateState(hostCoreRoot);
-  await platform.startService();
+  const verify = () => waitForCoreRelease(signal => requestHost("GET", "/.well-known/aru.json", undefined, false, {}, signal),
+    { version: release.version, serverId: previous?.serverId });
+  try { await verify(); }
+  catch (error) {
+    // A same-version receipt can survive an incomplete old installation. Repair
+    // only a responding, wrong-release Core; identity and connection failures
+    // are not permission to reinstall or accept another Host.
+    if (error.code !== "core_release_mismatch" || installedVersion !== release.version) throw error;
+    await platform.runInstaller(hostCoreRoot, release.version);
+    await verify();
+  }
 }
 
 async function pairConsole() {

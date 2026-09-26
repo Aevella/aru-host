@@ -24,6 +24,7 @@ const SAFE_PATHS = [
   ["POST", /^\/aru\/v1\/plugins\/[A-Za-z0-9._~-]+\/(enable|disable|rollback)$/],
   ["POST", /^\/aru\/v1\/plugin-workshop\/drafts\/[A-Za-z0-9._~-]+\/apply$/],
   ["DELETE", /^\/aru\/v1\/node-workspaces\/[A-Za-z0-9_-]+$/],
+  ["POST", /^\/aru\/v1\/container-runtime\/verify$/],
   ["POST", /^\/aru\/v1\/jobs\/[A-Za-z0-9_-]+\/(cancel|retry)$/],
   ["DELETE", /^\/aru\/v1\/provider-profiles\/provider_[A-Fa-f0-9-]+$/],
   ["POST", /^\/aru\/v1\/provider-profiles\/provider_[A-Fa-f0-9-]+\/test$/],

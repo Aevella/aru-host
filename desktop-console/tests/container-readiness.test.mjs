@@ -21,6 +21,11 @@ test("aborts a hanging manifest request and allows a later independent attempt",
   assert.equal(await waitForContainerRuntime(async () => enabled), enabled);
 });
 test("an unavailable live capability is not reported as enabled or unreachable", async () => {
-  await assert.rejects(waitForContainerRuntime(async () => ({ serverVersion: "test-version" }),
+  await assert.rejects(waitForContainerRuntime(async () => ({ serverVersion: "stub-0.30", releaseVersion: "test-version" }),
     { timeoutMs: 20, intervalMs: 1 }), /still reports.*test-version/);
+});
+test("Core execution failure is surfaced immediately without calling it an old release", async () => {
+  await assert.rejects(waitForContainerRuntime(async () => ({ releaseVersion: "0.33.1", capabilities: {
+    "workspace-runtime": { enabled: false, readiness: { status: "failed", message: "Service user cannot access engine" } },
+  } })), /Service user cannot access engine/);
 });

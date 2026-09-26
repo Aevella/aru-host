@@ -42,6 +42,22 @@ export async function configureContainerRuntime(configPath, {
     } catch { /* An installed CLI with a stopped engine is not ready. */ }
   }
   if (!executable) throw new Error("No running container engine found. Install and start Podman Desktop or Docker Desktop, then try again. On Linux, configure rootless Podman for the Host user.");
+  await verifyContainerRuntime(executable, { run, setting, checkEngine: false });
+  // Do not overwrite settings changed during image preparation.
+  if (await readFile(configPath, "utf8") !== original) throw new Error("Host settings changed during preparation. Try again.");
+  const temporary = `${configPath}.runtime-${process.pid}`;
+  try {
+    await writeFile(temporary, replaceRuntime(original, executable, platform), { mode: 0o600, flag: "wx" });
+    await rename(temporary, configPath);
+  } finally { await unlink(temporary).catch(() => {}); }
+  return executable;
+}
+
+export async function verifyContainerRuntime(executable, { run = execute, setting = (_, fallback) => fallback, checkEngine = true, allowPull = true } = {}) {
+  if (checkEngine) {
+    try { await run(executable, ["info"], { timeout: 30_000, windowsHide: true, maxBuffer: 1024 * 1024 }); }
+    catch { throw Object.assign(new Error("Container engine is unavailable to the Host process"), { code: "engine-unavailable" }); }
+  }
   const directory = await mkdtemp(join(tmpdir(), "aru-container-check-"));
   try {
     await chmod(directory, 0o777);
@@ -54,7 +70,7 @@ export async function configureContainerRuntime(configPath, {
       const configured = setting(`${key}_IMAGE`, fallback);
       // Pulling images can take minutes; cancellation/engine errors are failures,
       // not a reason to save an unverified runtime. No fixed download deadline.
-      await run(executable, ["run", "--rm", "--init", "--network", "none", "--read-only", "--cap-drop", "ALL",
+      await run(executable, ["run", ...(allowPull ? [] : ["--pull", "never"]), "--rm", "--init", "--network", "none", "--read-only", "--cap-drop", "ALL",
         "--security-opt", "no-new-privileges", "--user", "65532:65532",
         "--pids-limit", "128", "--memory", setting("CONTAINER_MEMORY", "1g"),
         "--cpus", setting("CONTAINER_CPUS", "2"), "--tmpfs", "/tmp:rw,nosuid,nodev,size=64m", "--workdir", "/workspace",
@@ -64,14 +80,6 @@ export async function configureContainerRuntime(configPath, {
     for (const name of ["node", "python", "shell"]) {
       if (await readFile(join(directory, `${name}.txt`), "utf8") !== "ok") throw new Error("Container workspace write verification failed");
     }
-    // Do not overwrite settings changed during image preparation.
-    if (await readFile(configPath, "utf8") !== original) throw new Error("Host settings changed during preparation. Try again.");
-    const temporary = `${configPath}.runtime-${process.pid}`;
-    try {
-      await writeFile(temporary, replaceRuntime(original, executable, platform), { mode: 0o600, flag: "wx" });
-      await rename(temporary, configPath);
-    } finally { await unlink(temporary).catch(() => {}); }
-    return executable;
   } finally { await rm(directory, { recursive: true, force: true }); }
 }
 

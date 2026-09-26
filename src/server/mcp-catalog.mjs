@@ -13,7 +13,7 @@ const MCP_TOOLS = [
         serverVersion: { type: "string" },
         packageCount: { type: "integer" },
         activeDeviceCount: { type: "integer" },
-        workspaceRuntimeAvailable: { type: "boolean", description: "Whether a container runtime is configured for isolated Node/Python/Shell jobs and OCI plugins. Does not gate project files, page publication, pairing, or model drivers; not a live engine health probe." },
+        workspaceRuntimeAvailable: { type: "boolean", description: "Whether Host Core has verified isolated Node/Python/Shell execution in this process. Does not gate project files, page publication, pairing, or model drivers; not continuous health monitoring." },
         workspaceRuntimeDescription: { type: "string" },
       },
       required: [

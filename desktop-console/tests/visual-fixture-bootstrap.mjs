@@ -1,4 +1,5 @@
 const diagnostics = {
+  releaseVersion: "0.33.1",
   serverVersion: "stub-0.28",
   serverId: "home-linux-ae71",
   hostedCollaboratorCount: 3,
@@ -11,7 +12,9 @@ const diagnostics = {
     { id: "workspace-jobs", enabled: false },
   ],
 };
-const nodeSettings = { displayName: "示例 Linux Host", revision: 4 };
+const nodeSettings = { schema: "aru.selfhost.node-settings.v1", displayName: "示例 Host", revision: 4,
+  networkAddress: { mode: "fixed", url: "http://host-example.local:8787", status: "configured" } };
+const manifest = { serverVersion: "stub-0.30", releaseVersion: "0.33.1", transportProfiles: [{ kind: "lan" }], capabilities: { "workspace-runtime": { enabled: false, readiness: { status: "failed", reason: "engine-unavailable" } } } };
 const devices = {
   devices: [
     { deviceId: "console", label: "Aru Host Console", issuedAt: "2026-07-24T07:20:00Z", isCurrent: true, revokedAt: null },
@@ -46,11 +49,11 @@ window.aruHost = Object.freeze({
   bootstrap: async () => {
     if (failureMode) throw new Error("Linux Secret Service 暂时不可用，请先解锁当前桌面钥匙串。");
     return ({
-    manifest: { serverVersion: "stub-0.28" },
+    manifest,
     diagnostics,
     nodeSettings,
     deviceInventory: devices,
-    update: { version: "0.28.2", url: "https://github.com/Aevella/aru-host/releases/latest" },
+    update: { version: "0.34.0", url: "https://github.com/Aevella/aru-host/releases/latest" },
     secretStorage: "linux-secret-service",
     });
   },
@@ -59,13 +62,16 @@ window.aruHost = Object.freeze({
     return { capabilities: { "workspace-runtime": { enabled: true } } };
   },
   openContainerSetup: async () => true,
-  request: async (method, path) => {
+  verifyCoreRuntime: async () => ({ ...manifest, capabilities: { "workspace-runtime": { enabled: true, readiness: { status: "ready" } } } }),
+  request: async (method, path, body) => {
+    if (method === "GET" && path === "/.well-known/aru.json") return manifest;
+    if (method === "PUT" && path === "/aru/v1/node-settings") { nodeSettings.networkAddress.mode = body.addressMode ?? nodeSettings.networkAddress.mode; nodeSettings.revision++; return nodeSettings; }
     if (method === "GET" && path === "/aru/v1/jobs") return { jobs: [] };
     if (method === "GET" && path === "/aru/v1/jobs/policy") return { defaultMaximumRuntimeSeconds: null };
     if (method === "GET" && path === "/aru/v1/diagnostics") return diagnostics;
     if (method === "GET" && path === "/aru/v1/node-settings") return nodeSettings;
     if (method === "GET" && path === "/aru/v1/devices") return devices;
-    if (method === "GET" && path === "/aru/v1/agent-drivers") return { drivers: [{ id: "codex", displayName: "Codex", status: "ready" }, { id: "api", displayName: "模型 API", status: "ready" }] };
+    if (method === "GET" && path === "/aru/v1/agent-drivers") return { drivers: new URLSearchParams(window.location.search).has("empty-drivers") ? [] : [{ id: "codex", displayName: "Codex", status: "ready" }, { id: "api", displayName: "模型 API", status: "ready" }] };
     if (method === "GET" && path === "/aru/v1/hosted-collaborators") return { collaborators: [collaborator] };
     if (method === "GET" && path === "/aru/v1/provider-profiles") return { secretStorage: { supported: true }, profiles: [provider] };
     if (method === "GET" && path.endsWith("/conversations")) return { conversations: [{ conversationId: "conversation_1", title: "Linux 入住检查", lastMessagePreview: "Host 还在这里。", updatedAt: "2026-07-24T07:50:00Z" }] };

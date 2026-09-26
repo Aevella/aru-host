@@ -1,3 +1,5 @@
+import { createContainerReadiness } from "./container-readiness.mjs";
+import { resolveHostAddress } from "./network-address.mjs";
 import { createMCPGateway } from "./mcp-gateway.mjs";
 import { createWorkspaceJobs } from "./workspace-jobs.mjs";
 import { createArtifactVault } from "./artifact-vault.mjs";
@@ -95,7 +97,10 @@ const config = {
   managedWorkspaceRoot: expandHome(
     args["managed-workspace-root"] ?? join(configuredDataDir, "workspace"),
   ),
-  baseUrl: (args["base-url"] ?? `http://127.0.0.1:${Number(args["port"] ?? 8787)}`).replace(/\/+$/, ""),
+  addressMode: args["address-mode"] === "automatic-lan" ? "automatic-lan" : "fixed",
+  get baseUrl() { return this.networkAddress().url; },
+  networkAddress() { return resolveHostAddress({ mode: this.addressMode, fixedURL: this.fixedBaseUrl, port: this.port }); },
+  fixedBaseUrl: (args["base-url"] ?? `http://127.0.0.1:${Number(args["port"] ?? 8787)}`).replace(/\/+$/, ""),
   wakeRelayBaseURL: (args["wake-relay-url"] ?? "https://wake.aelion.cn").replace(/\/+$/, ""),
   transportKind: args["transport-kind"] ?? "lan",
   displayName: args["display-name"] ?? "Aru Stub Server",
@@ -117,6 +122,9 @@ const config = {
     shell: args["shell-image"] ?? "alpine:3.22",
   },
 };
+
+const containerReadiness = createContainerReadiness(config);
+config.containerReadiness = containerReadiness;
 
 function requestedContainerRuntime(value) {
   if (value === "none") return null;
@@ -348,24 +356,26 @@ const server = createServer(async (req, res) => {
 
 server.listen(config.port, config.listenHost, () => {
   collaboratorHost.start();
-  const manifestURL = `${config.baseUrl}/.well-known/aru.json`;
+  void containerReadiness.check();
+  const baseUrl = config.baseUrl;
+  const manifestURL = `${baseUrl}/.well-known/aru.json`;
   const pairingPayload = {
     schema: "aru.selfhost.pairing-envelope.v1",
-    canonicalUrl: config.baseUrl,
+    canonicalUrl: baseUrl,
     manifestUrl: manifestURL,
     serverId: state.serverId,
     pairingToken: state.pairing.token,
     installSessionLabel: "stub-boot",
   };
   const pairingURL =
-    `aru://pair?canonicalUrl=${encodeURIComponent(config.baseUrl)}` +
+    `aru://pair?canonicalUrl=${encodeURIComponent(baseUrl)}` +
     `&serverId=${encodeURIComponent(state.serverId)}` +
     `&pairingToken=${encodeURIComponent(state.pairing.token)}` +
     `&manifestUrl=${encodeURIComponent(manifestURL)}`;
 
   console.log("Aru self-hosted stub server");
   console.log("===========================");
-  console.log(`listening      ${config.listenHost}:${config.port} as ${config.baseUrl}`);
+  console.log(`listening      ${config.listenHost}:${config.port} as ${baseUrl}`);
   console.log(`data dir       ${config.dataDir}`);
   console.log(`server id      ${state.serverId}`);
   console.log(`manifest       ${manifestURL}`);
@@ -396,6 +406,11 @@ async function route(req, res) {
 
   if (req.method === "GET" && path === "/.well-known/aru.json") {
     return sendJSON(res, 200, manifest());
+  }
+  if (req.method === "POST" && path === "/aru/v1/container-runtime/verify") {
+    requireLocalHostConsole(req);
+    void containerReadiness.check();
+    return sendJSON(res, 202, containerReadiness.snapshot());
   }
   if (req.method === "POST" && path === "/aru/v1/pair") {
     return handlePair(req, res);
@@ -488,6 +503,7 @@ function manifest() {
     displayName: nodeControl.displayName(),
     serverVersion: SERVER_VERSION,
     releaseVersion: RELEASE_VERSION,
+    networkAddress: config.networkAddress(),
     minClientVersion: "1.0",
     transportProfiles: [
       {
@@ -520,7 +536,8 @@ function manifest() {
         restartPolicy: "interrupt-without-replay",
       },
       "workspace-runtime": {
-        enabled: config.containerRuntime !== null,
+        enabled: containerReadiness.ready(),
+        readiness: containerReadiness.snapshot(),
         endpoint: "/aru/v1/jobs",
         runtimes: WORKSPACE_RUNTIMES,
         isolation: "non-root-container",
@@ -528,7 +545,7 @@ function manifest() {
         execution: "durable-jobs-v1",
       },
       "job-runtime": {
-        enabled: config.containerRuntime !== null,
+        enabled: containerReadiness.ready(),
         endpoint: "/aru/v1/jobs",
         states: ["queued", "preparing", "running", "succeeded", "failed", "cancelled", "timed_out"],
         cancellation: "explicit",
@@ -744,14 +761,15 @@ function handleDiagnostics(req, res) {
     displayName: nodeControl.displayName(),
     serverVersion: SERVER_VERSION,
     releaseVersion: RELEASE_VERSION,
+    networkAddress: config.networkAddress(),
     serverTime: Date.now(),
     manifest: "ok",
     auth: authStatus,
     capabilities: [
       { id: "node-settings", enabled: true },
       { id: "backup-vault", enabled: true },
-      { id: "workspace-runtime", enabled: config.containerRuntime !== null },
-      { id: "job-runtime", enabled: config.containerRuntime !== null },
+      { id: "workspace-runtime", enabled: containerReadiness.ready() },
+      { id: "job-runtime", enabled: containerReadiness.ready() },
       { id: "mcp-gateway", enabled: true },
       { id: "artifact-vault", enabled: true },
       { id: "plugin-supervisor", enabled: config.containerRuntime !== null },

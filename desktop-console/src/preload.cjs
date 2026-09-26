@@ -2,6 +2,7 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("aruHost", Object.freeze({
   openContainerSetup: () => ipcRenderer.invoke("host:open-container-setup"),
+  verifyCoreRuntime: () => ipcRenderer.invoke("host:verify-core-runtime"),
   setupContainerRuntime: () => ipcRenderer.invoke("host:setup-container-runtime"),
   bootstrap: () => ipcRenderer.invoke("host:bootstrap"),
   request: (method, path, body) => ipcRenderer.invoke("host:request", method, path, body),

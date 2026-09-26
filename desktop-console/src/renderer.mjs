@@ -1,5 +1,7 @@
+import { hostReleaseLabel, turnActions, driverGuidance } from "./host-presentation.mjs";
 import { containerSetupPanel, bindContainerSetup } from "./container-setup.mjs";
 const api = window.aruHost;
+let currentConversationView;
 const locale = navigator.language.toLowerCase().startsWith("zh") ? "zh" : "en";
 const copy = {
   zh: {
@@ -81,12 +83,13 @@ function renderPreparing() {
 function renderNavigation() {
   navigation.setAttribute("aria-label", t("subtitle"));
   navigation.innerHTML = sections.map(([key, glyph]) => `<button class="nav-button ${state.section === key ? "active" : ""}" data-section="${key}"><span class="nav-glyph">${glyph}</span><span class="nav-label">${esc(t(key))}</span><span class="nav-badge" data-badge="${key}"></span></button>`).join("")
-    + `<div class="nav-footer"><div><span class="service-dot"></span>${esc(t("hostRunning"))}</div><div>${esc(state.bootstrap?.manifest?.serverVersion ?? "")}</div></div>`;
+    + `<div class="nav-footer"><div><span class="service-dot"></span>${esc(t("hostRunning"))}</div><div>${esc(hostReleaseLabel(state.bootstrap?.manifest, locale))}</div></div>`;
   navigation.querySelectorAll("[data-section]").forEach((button) => button.addEventListener("click", () => selectSection(button.dataset.section)));
   updateBadges();
 }
 
 async function selectSection(section) {
+  currentConversationView = null;
   state.section = section;
   renderNavigation();
   setBusy(true);
@@ -106,6 +109,7 @@ async function selectSection(section) {
 }
 
 async function renderOverview() {
+  state.bootstrap.manifest = await api.request("GET", "/.well-known/aru.json");
   const [diagnostics, settings, devices] = await Promise.all([
     api.request("GET", "/aru/v1/diagnostics"), api.request("GET", "/aru/v1/node-settings"), api.request("GET", "/aru/v1/devices"),
   ]);
@@ -116,13 +120,19 @@ async function renderOverview() {
     : state.bootstrap?.secretStorage === "linux-secret-service" ? "secureStorageLinux" : "secureStorageUnknown";
   const firewallBlocked = state.bootstrap?.firewall === "unconfigured";
   content.innerHTML = pageHead("overview", t("overviewTitle"), t("overviewDetail"), `<button class="quiet-button" data-action="rename">${esc(t("rename"))}</button><button class="primary-button" data-action="pair">${esc(t("mobilePair"))}</button>`)
-    + `<section class="hero">${state.bootstrap?.secretStorage === "windows-dpapi" ? `<p class="eyebrow">${esc(t("windowsPreview"))}</p>` : ""}<p class="eyebrow">Aru Host Core</p><h3>${esc(settings.displayName)}</h3><p>${esc(diagnostics.serverVersion)} · ${esc(diagnostics.serverId)}</p><div class="status-row"><span class="status-pill good">${esc(t("systemHealthy"))}</span><span class="status-pill good">${esc(t(storageKey))}</span>${firewallBlocked ? `<span class="status-pill warn">${esc(t("firewallBlocked"))}</span><button class="quiet-button" data-fix-firewall>${esc(t("firewallFix"))}</button>` : ""}</div></section>`
-    + (!state.bootstrap?.manifest?.capabilities?.["workspace-runtime"]?.enabled ? containerSetupPanel(locale, false) : "")
+    + `<section class="hero">${state.bootstrap?.secretStorage === "windows-dpapi" ? `<p class="eyebrow">${esc(t("windowsPreview"))}</p>` : ""}<p class="eyebrow">Aru Host Core</p><h3>${esc(settings.displayName)}</h3><p>${esc(hostReleaseLabel(diagnostics, locale))} · ${esc(diagnostics.serverId)}</p><div class="status-row"><span class="status-pill good">${esc(t("systemHealthy"))}</span><span class="status-pill good">${esc(t(storageKey))}</span>${firewallBlocked ? `<span class="status-pill warn">${esc(t("firewallBlocked"))}</span><button class="quiet-button" data-fix-firewall>${esc(t("firewallFix"))}</button>` : ""}</div></section>`
+    + (settings.networkAddress ? `<section class="hero"><p>${esc(settings.networkAddress.url)}</p><p>${esc(settings.networkAddress.status === "no-lan-interface" ? (locale === "zh" ? "未检测到局域网，连接 Wi-Fi 后重新读取。" : "No LAN interface. Connect to Wi-Fi and refresh.") : settings.networkAddress.mode === "automatic-lan" ? (locale === "zh" ? "自动跟随局域网地址" : "Automatic LAN address") : (locale === "zh" ? "固定地址（保留安装配置）" : "Fixed installation address"))}</p>${state.bootstrap?.manifest?.transportProfiles?.some(item => item.kind === "lan") ? `<button class="quiet-button" data-address-mode>${esc(locale === "zh" ? "地址设置" : "Address settings")}</button>` : ""}</section>` : "")
+    + (!state.bootstrap?.manifest?.capabilities?.["workspace-runtime"]?.enabled ? containerSetupPanel(locale, false, state.bootstrap?.manifest?.capabilities?.["workspace-runtime"]?.readiness) : "")
     + `<div class="metrics">${metric(diagnostics.hostedCollaboratorCount, t("collaborators"))}${metric(diagnostics.activeJobCount, t("runtime"))}${metric(diagnostics.artifactCount, t("artifacts"))}${metric(activeDevices.length, t("pairedDevices"))}</div>`
     + sectionBlock(t("capabilities"), "", `<div class="raised-list">${diagnostics.capabilities.map((capability) => row(capability.id, capability.enabled ? t("systemHealthy") : t("routeUnavailable"), `<span class="status-pill ${capability.enabled ? "good" : "warn"}">${esc(t(capability.enabled ? "enabled" : "disabled"))}</span>`)).join("")}</div>`)
     + sectionBlock(t("pairedDevices"), "", activeDevices.length ? `<div class="raised-list">${activeDevices.map((device) => row(device.label, formatDate(device.issuedAt), device.isCurrent ? `<span class="tag">${esc(t("thisConsole"))}</span>` : `<button class="danger-button" data-revoke="${escAttr(device.deviceId)}">${esc(t("revoke"))}</button>`)).join("")}</div>` : empty("◌", t("noDevices"), t("noDevicesDetail")))
     + sectionBlock(t("settings"), t("uninstallHostDetail"), `<button class="danger-button" data-uninstall-host>${esc(t("uninstallHost"))}</button>`);
   if (content.querySelector("[data-container-verify]")) bindContainerSetup(content, api, locale, manifest => { state.bootstrap.manifest = manifest; });
+  content.querySelector("[data-address-mode]")?.addEventListener("click", async () => {
+    const values = await openForm(locale === "zh" ? "地址设置" : "Address settings", [{ name: "addressMode", label: locale === "zh" ? "地址来源" : "Address source", type: "select", value: settings.networkAddress.mode,
+      options: [["automatic-lan", locale === "zh" ? "自动跟随局域网" : "Automatic LAN"], ["fixed", locale === "zh" ? "使用安装时指定的地址" : "Fixed installation address"]] }]);
+    if (values) await mutate(() => api.request("PUT", "/aru/v1/node-settings", { schema: settings.schema, expectedRevision: settings.revision, displayName: settings.displayName, addressMode: values.addressMode }), "overview");
+  });
   content.querySelector("[data-action=rename]").addEventListener("click", async () => {
     const values = await openForm(t("rename"), [{ name: "displayName", label: t("displayName"), value: settings.displayName, required: true }]);
     if (!values) return;
@@ -240,9 +250,10 @@ async function renderWorkspaces() {
 }
 
 async function renderRuntime() {
+  state.bootstrap.manifest = await api.request("GET", "/.well-known/aru.json");
   const [inventory, policy] = await Promise.all([api.request("GET", "/aru/v1/jobs"), api.request("GET", "/aru/v1/jobs/policy")]); state.data.runtime = inventory.jobs;
   content.innerHTML = pageHead("runtime", t("runtimeTitle"), t("runtimeDetail"), `<button class="quiet-button" data-policy>${esc(t("defaultTimeout"))}</button>`)
-    + containerSetupPanel(locale, state.bootstrap?.manifest?.capabilities?.["workspace-runtime"]?.enabled === true)
+    + containerSetupPanel(locale, state.bootstrap?.manifest?.capabilities?.["workspace-runtime"]?.enabled === true, state.bootstrap?.manifest?.capabilities?.["workspace-runtime"]?.readiness)
     + `<section class="hero"><p class="eyebrow">${esc(t("defaultTimeout"))}</p><h3>${policy.defaultMaximumRuntimeSeconds ?? t("unlimited")}</h3></section>`
     + sectionBlock(t("jobs"), "", inventory.jobs.length ? `<div class="raised-list">${inventory.jobs.map((job) => row(job.projectId, `${job.runtime} · ${job.state}${job.failureMessage ? ` · ${job.failureMessage}` : ""}`, `${["queued", "running"].includes(job.state) ? `<button class="danger-button" data-job="${escAttr(job.jobId)}" data-job-action="cancel">${esc(t("cancelJob"))}</button>` : ""}${["failed", "cancelled"].includes(job.state) ? `<button class="quiet-button" data-job="${escAttr(job.jobId)}" data-job-action="retry">${esc(t("retryJob"))}</button>` : ""}`)).join("")}</div>` : empty("⌁", t("noJobs"), t("runtimeDetail")));
   bindContainerSetup(content, api, locale, manifest => { state.bootstrap.manifest = manifest; });
@@ -267,11 +278,14 @@ async function renderCollaborators() {
   state.data.collaborators = roots.collaborators;
   content.innerHTML = pageHead("collaborators", t("collaboratorsTitle"), t("collaboratorsDetail"), `<button class="quiet-button" data-refresh-drivers>${esc(t("refreshDrivers"))}</button><button class="primary-button" data-new-collaborator>${esc(t("newCollaborator"))}</button>`)
     + (roots.collaborators.length ? `<div class="raised-list">${roots.collaborators.map((item) => row(item.displayName, `${item.driverId} · ${item.activationStatus} · ${item.toolAccess.mode === "all" ? t("allTools") : `${item.toolAccess.toolNames.length} ${t("selectedTools")}`}`, `<button class="quiet-button" data-collaborator-settings="${escAttr(item.collaboratorId)}">${esc(t("settings"))}</button><button class="primary-button" data-studio="${escAttr(item.collaboratorId)}">${esc(t("studio"))}</button>`)).join("")}</div>` : empty("◌", t("noCollaborators"), t("noCollaboratorsDetail")))
+    + (driverGuidance(drivers.drivers, locale) ? `<p role="status">${esc(driverGuidance(drivers.drivers, locale))}</p>` : "")
     + sectionBlock(t("mobileIdentities"), t("mobileIdentityDetail"), `<div class="raised-list">${(roots.mobileIdentities ?? []).map((item) => row(item.displayName, t("mobileIdentityDetail"), "")).join("")}</div>`)
     + sectionBlock(t("providerRoutes"), "", `<div class="section-title"><div></div><button class="quiet-button" data-new-provider>${esc(t("newProvider"))}</button></div>${providers.profiles?.length ? `<div class="raised-list">${providers.profiles.map((profile) => row(profile.displayName, `${profile.protocol} · ${profile.model} · ${profile.health}`, `<button class="quiet-button" data-edit-provider="${escAttr(profile.profileId)}">${esc(t("edit"))}</button><button class="quiet-button" data-test-provider="${escAttr(profile.profileId)}">${esc(t("test"))}</button><button class="danger-button" data-delete-provider="${escAttr(profile.profileId)}">${esc(t("delete"))}</button>`)).join("")}</div>` : empty("◇", t("providerRoutes"), providers.secretStorage?.supported ? t("newProvider") : t("routeUnavailable"))}`);
   content.querySelector("[data-refresh-drivers]").addEventListener("click", () => mutate(() => api.request("POST", "/aru/v1/agent-drivers/refresh"), "collaborators"));
   content.querySelector("[data-new-collaborator]").addEventListener("click", async () => {
     const ready = drivers.drivers.filter((driver) => driver.status === "ready");
+    const guidance = driverGuidance(drivers.drivers, locale);
+    if (guidance) { await messageDialog(t("driver"), `<p>${esc(guidance)}</p>`); return; }
     const values = await openForm(t("newCollaborator"), [
       { name: "displayName", label: t("displayName"), required: true },
       { name: "driverId", label: t("driver"), type: "select", options: ready.map((driver) => [driver.id, driver.displayName]) },
@@ -324,6 +338,7 @@ async function editProvider(profile = null) {
 }
 
 async function renderCollaboratorStudio(collaborator) {
+  currentConversationView = null;
   setBusy(true);
   try {
     const id = encodeURIComponent(collaborator.collaboratorId);
@@ -493,20 +508,34 @@ async function editCognitionRecord(collaborator, cognition, kind, recordId = nul
 }
 
 async function openConversation(collaborator, conversationId) {
+  const view = Symbol("conversation");
+  currentConversationView = view;
   setBusy(true);
   try {
     const path = `/aru/v1/hosted-collaborators/${encodeURIComponent(collaborator.collaboratorId)}/conversations/${encodeURIComponent(conversationId)}`;
     const conversation = await api.request("GET", path);
-    const active = ["queued", "starting", "streaming", "waitingApproval", "cancelling"].includes(conversation.activeTurn?.state);
+    if (currentConversationView !== view) return;
+    const active = turnActions(conversation.activeTurn).canCancel;
     content.innerHTML = pageHead("conversations", conversation.title, t("conversations"), `<button class="quiet-button" data-back-studio>${esc(t("studio"))}</button>${active ? `<button class="danger-button" data-stop-turn>${esc(t("stop"))}</button>` : ""}`)
+      + (conversation.activeTurn?.cancellation ? `<p role="status">${esc(conversation.activeTurn.cancellation.status === "pending" ? (locale === "zh" ? "正在停止…" : "Stopping…") : conversation.activeTurn.cancellation.message ?? "")}</p>` : "")
       + `<section class="conversation"><div class="messages">${(conversation.messages ?? []).map((message) => `<div class="message ${escAttr(message.role)}">${esc(message.content)}</div>`).join("") || empty("◌", t("noConversations"), t("conversations"))}</div>${(conversation.approvals ?? []).filter((approval) => approval.state === "pending").map((approval) => `<div class="approval"><strong>${esc(approval.title)}</strong><div class="row-actions"><button class="primary-button" data-approval="${escAttr(approval.approvalId)}" data-decision="allowOnce">${esc(t("approve"))}</button><button class="quiet-button" data-approval="${escAttr(approval.approvalId)}" data-decision="allowSession">${esc(t("approveSession"))}</button><button class="danger-button" data-approval="${escAttr(approval.approvalId)}" data-decision="deny">${esc(t("deny"))}</button></div></div>`).join("")}<div class="composer"><textarea id="composer"></textarea><button class="primary-button" data-send>${esc(t("send"))}</button></div></section>`;
     content.querySelector("[data-back-studio]").addEventListener("click", () => renderCollaboratorStudio(collaborator));
-    content.querySelector("[data-stop-turn]")?.addEventListener("click", () => mutate(() => api.request("POST", `${path}/turns/${encodeURIComponent(conversation.activeTurn.turnId)}/cancel`), null, () => openConversation(collaborator, conversationId)));
+    content.querySelector("[data-stop-turn]")?.addEventListener("click", async (event) => {
+      event.currentTarget.disabled = true;
+      try {
+        const value = await api.request("POST", `${path}/turns/${encodeURIComponent(conversation.activeTurn.turnId)}/cancel`);
+        if (currentConversationView !== view) return;
+        if (value.activeTurn?.cancellation?.status === "failed") showToast(value.activeTurn.cancellation.message, true);
+        await openConversation(collaborator, conversationId);
+      } catch (error) {
+        if (currentConversationView === view) { showToast(error.message, true); await openConversation(collaborator, conversationId); }
+      }
+    });
     content.querySelector("[data-send]").addEventListener("click", async () => {
       const text = document.querySelector("#composer").value.trim(); if (!text) return;
-      await mutate(() => api.request("POST", `${path}/messages`, { clientRequestId: crypto.randomUUID(), text }), null, () => openConversation(collaborator, conversationId));
+      await mutate(() => api.request("POST", `${path}/messages`, { clientRequestId: crypto.randomUUID(), text }), null, () => currentConversationView === view ? openConversation(collaborator, conversationId) : undefined);
     });
-    content.querySelectorAll("[data-approval]").forEach((button) => button.addEventListener("click", () => mutate(() => api.request("POST", `${path}/approvals/${encodeURIComponent(button.dataset.approval)}`, { decision: button.dataset.decision }), null, () => openConversation(collaborator, conversationId))));
+    content.querySelectorAll("[data-approval]").forEach((button) => button.addEventListener("click", () => mutate(() => api.request("POST", `${path}/approvals/${encodeURIComponent(button.dataset.approval)}`, { decision: button.dataset.decision }), null, () => currentConversationView === view ? openConversation(collaborator, conversationId) : undefined)));
   } catch (error) { renderSectionFailure(error); }
   finally { setBusy(false); }
 }

@@ -5,7 +5,8 @@ const copy = {
     steps: "1. 打开官方安装说明，安装 Podman Desktop（已有 Docker 也可以）。2. 完成引导并启动容器环境。3. 回到这里检测并启用。Mac / Windows 需要虚拟机，可能需要系统权限或重启电脑。",
     cost: "检测会下载任务镜像并验证三种脚本与文件读写，可能需要几分钟；成功后重启 Host，会中断正在运行的工作。",
     install: "打开官方安装说明", verify: "检测并启用", busy: "正在准备镜像并验证…",
-    configured: "已配置容器环境", missing: "尚未启用，可继续使用基础功能", success: "验证通过，Host 已启用容器任务。",
+    recheck: "重新验证 Host 运行环境", checking: "Host 正在验证脚本执行与文件读写…", failed: "准备配置已保存，但 Host 后台验证失败。请检查容器引擎和后台进程的文件访问，再重新验证。",
+    configured: "Host 已验证容器环境", missing: "尚未启用，可继续使用基础功能", success: "验证通过，Host 已启用容器任务。",
   },
   en: {
     title: "Scripts and container plugins · Optional",
@@ -13,13 +14,14 @@ const copy = {
     steps: "1. Open the official instructions and install Podman Desktop (existing Docker also works). 2. Complete onboarding and start the engine. 3. Return here to verify and enable. Mac / Windows require a virtual machine and may need system permissions or a reboot.",
     cost: "Verification downloads job images and checks all three runtimes and file access. This may take several minutes. Success restarts Host and interrupts running work.",
     install: "Open official installation guide", verify: "Verify and enable", busy: "Preparing images and verifying…",
-    configured: "Container runtime configured", missing: "Optional runtime not enabled; core features remain available", success: "Verified. Host has enabled container jobs.",
+    recheck: "Verify Host runtime again", checking: "Host is verifying script execution and file access…", failed: "Configuration is saved, but verification in the Host background process failed. Check the engine and service file access, then retry verification.",
+    configured: "Container runtime verified by Host", missing: "Optional runtime not enabled; core features remain available", success: "Verified. Host has enabled container jobs.",
   },
 };
 
-export function containerSetupPanel(locale, configured) {
+export function containerSetupPanel(locale, configured, readiness) {
   const c = copy[locale] ?? copy.en;
-  return `<section class="hero container-setup"><h3>${c.title}</h3><p>${c.detail}</p><p data-container-status role="status">${configured ? c.configured : c.missing}</p><p>${c.steps}</p><p>${c.cost}</p><button class="quiet-button" data-container-install>${c.install}</button> <button class="primary-button" data-container-verify>${c.verify}</button></section>`;
+  return `<section class="hero container-setup"><h3>${c.title}</h3><p>${c.detail}</p><p data-container-status role="status">${readiness?.status === "checking" ? c.checking : readiness?.status === "failed" ? c.failed : configured ? c.configured : c.missing}</p><p>${c.steps}</p><p>${c.cost}</p><button class="quiet-button" data-container-install>${c.install}</button> <button class="primary-button" data-container-verify>${c.verify}</button>${readiness && readiness.status !== "unconfigured" ? ` <button class="quiet-button" data-core-verify>${c.recheck}</button>` : ""}</section>`;
 }
 
 export function bindContainerSetup(root, api, locale, onEnabled) {
@@ -28,6 +30,13 @@ export function bindContainerSetup(root, api, locale, onEnabled) {
   root.querySelector("[data-container-install]").addEventListener("click", async () => {
     try { await api.openContainerSetup(); }
     catch (error) { status.textContent = error.message; }
+  });
+  root.querySelector("[data-core-verify]")?.addEventListener("click", async (event) => {
+    const control = event.currentTarget;
+    control.disabled = true; status.textContent = c.checking;
+    try { const manifest = await api.verifyCoreRuntime(); onEnabled(manifest); status.textContent = c.success; }
+    catch (error) { status.textContent = error.message; }
+    finally { control.disabled = false; }
   });
   const button = root.querySelector("[data-container-verify]");
   button.addEventListener("click", async () => {
