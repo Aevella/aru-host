@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Run computer collaborators with Claude Code. Host drives an installed Claude Code CLI under the same operating-system user through print mode, stream-json, session resume and a per-turn stdio MCP bridge for Host tools, approvals and attachments; the CLI owns login (`claude auth login`). `claude-code` now reports `executesTurns: true` and can be chosen for new and existing collaborators. Real-account acceptance is still pending; see the [integration record](docs/claude-code-integration.md).
+- Run computer collaborators with Claude Code. Host drives an installed Claude Code CLI under the same operating-system user through print mode, stream-json, session resume and a per-turn stdio MCP bridge for Host tools, approvals and attachments; the CLI owns login (`claude auth login`). `claude-code` now reports `executesTurns: true` and can be chosen for new and existing collaborators. Accepted with a real subscription login for replies, approvals, session resume and cancellation; see the [integration record](docs/claude-code-integration.md).
 - A Host upgraded by a pre-0.32 fixed-list upgrader starts without the Claude Code adapter files and reports the driver as `driver-files-missing` instead of failing to start; the next upgrade installs them.
 
 ## 0.33.1
