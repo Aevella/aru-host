@@ -34,12 +34,7 @@ ARU_SMOKE_SECRET="must-not-reach-plugin" ARU_SELFHOST_CONFIG_FILE="$config_file"
   "$SELFHOST_DIR/run-node.sh" >"$log_file" 2>&1 &
 pid=$!
 
-for _ in {1..40}; do
-  if curl -fsS "http://127.0.0.1:$port/.well-known/aru.json" >/dev/null 2>&1; then
-    break
-  fi
-  sleep 0.1
-done
+node "$SELFHOST_DIR/tests/wait-container-ready.mjs" "http://127.0.0.1:$port"
 curl -fsS "http://127.0.0.1:$port/.well-known/aru.json" \
   | node -e '
       let b="";process.stdin.on("data",c=>b+=c);process.stdin.on("end",()=>{
