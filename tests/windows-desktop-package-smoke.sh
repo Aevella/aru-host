@@ -39,6 +39,9 @@ required=(
   collaborator-surface-bundles.mjs collaborator-conversations.mjs collaborator-conversation-attachments.mjs
   collaborator-initiative.mjs collaborator-projects.mjs apns-push.mjs
   codex-app-server-driver.mjs
+  claude-code-driver.mjs
+  claude-code-host-bridge.mjs
+  claude-code-mcp-bridge.mjs
   direct-api-driver.mjs provider-profiles.mjs
   provider-secret-store.mjs node-control.mjs node-workspaces.mjs
   plugin-supervisor.mjs plugin-workshop.mjs source-plugin-runtime.mjs
