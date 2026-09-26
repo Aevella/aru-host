@@ -172,6 +172,7 @@ if ($Uninstall) {
 }
 if ($PurgeData) { Fail "-PurgeData requires -Uninstall" }
 
+$addressMode = if ($BaseUrl) { "fixed" } else { "automatic-lan" }
 if (Test-Path -LiteralPath $installEnv) {
   $persisted = @{}
   foreach ($line in [IO.File]::ReadAllLines($installEnv)) {
@@ -181,7 +182,11 @@ if (Test-Path -LiteralPath $installEnv) {
     }
   }
   if ($Port -eq 8787 -and $persisted["ARU_INSTALL_PORT"]) { $Port = [int]$persisted["ARU_INSTALL_PORT"] }
-  if (-not $BaseUrl -and $persisted["ARU_INSTALL_BASE_URL"]) { $BaseUrl = $persisted["ARU_INSTALL_BASE_URL"] }
+  if (-not $BaseUrl -and $persisted["ARU_INSTALL_BASE_URL"]) {
+    $BaseUrl = $persisted["ARU_INSTALL_BASE_URL"]
+    # Old receipts do not prove whether the address was typed or detected.
+    $addressMode = if ($persisted["ARU_INSTALL_ADDRESS_MODE"]) { $persisted["ARU_INSTALL_ADDRESS_MODE"] } else { "fixed" }
+  }
 } elseif (-not $Root) {
   $listener = Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue
   if ($listener) { Fail "port $Port is already in use" }
@@ -326,9 +331,10 @@ try {
     if (-not (Test-Path -LiteralPath (Join-Path $SourceDir $file))) { Fail "payload missing $file" }
   }
   $releaseMetadata = Join-Path $SourceDir "release.json"
-  if (-not $ReleaseVersion -and (Test-Path -LiteralPath $releaseMetadata)) {
+  if (Test-Path -LiteralPath $releaseMetadata) {
     $release = Get-Content -LiteralPath $releaseMetadata -Raw | ConvertFrom-Json
     if ($release.schema -ne "aru.host.release.v1") { Fail "invalid release metadata" }
+    if ($ReleaseVersion -and $ReleaseVersion -ne $release.version) { Fail "requested release does not match bundled Host Core" }
     $ReleaseVersion = $release.version
   }
 
@@ -338,6 +344,11 @@ try {
     if ($LASTEXITCODE -ne 0) { Fail "Host state check failed; previous release was not restarted." }
   }
   AssertStateReadable
+  $expectedServerId = $null
+  $statePath = Join-Path $dataDir "state.json"
+  if (Test-Path -LiteralPath $statePath) {
+    $expectedServerId = (Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json).serverId
+  }
 
   $releaseStamp = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
   if ($ReleaseVersion) { $releaseRef = "host-$ReleaseVersion" } else { $releaseRef = "host-source" }
@@ -388,6 +399,7 @@ try {
     "ARU_DATA_DIR=$dataDir",
     "ARU_MANAGED_WORKSPACE_ROOT=$managedWorkspaceRoot",
     "ARU_BASE_URL=$BaseUrl",
+    "ARU_ADDRESS_MODE=$addressMode",
     "ARU_TRANSPORT_KIND=lan",
     "ARU_DISPLAY_NAME=$DisplayName",
     "ARU_NODE_KIND=home-windows",
@@ -424,6 +436,7 @@ try {
     "ARU_INSTALL_INSTANCE=$Instance",
     "ARU_INSTALL_BASE_ROOT=$BaseRoot",
     "ARU_INSTALL_BASE_URL=$BaseUrl",
+    "ARU_INSTALL_ADDRESS_MODE=$addressMode",
     "ARU_INSTALL_DISPLAY_NAME=$DisplayName",
     "ARU_INSTALL_PORT=$Port",
     "ARU_INSTALL_BUNDLE_URL=$BundleUrl",
@@ -448,10 +461,21 @@ try {
   }
 
   function StartHostAndProbe {
+    $expectedVersion = $null
+    $activeMetadata = Join-Path $currentLink "release.json"
+    if (Test-Path -LiteralPath $activeMetadata) {
+      $expectedVersion = (Get-Content -LiteralPath $activeMetadata -Raw | ConvertFrom-Json).version
+    }
     Start-ScheduledTask -TaskName $taskName
     for ($attempt = 0; $attempt -lt 60; $attempt++) {
       try {
-        Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$Port/.well-known/aru.json" -TimeoutSec 2 | Out-Null
+        $live = Invoke-RestMethod -UseBasicParsing -Uri "http://127.0.0.1:$Port/.well-known/aru.json" -TimeoutSec 2
+        if ($live.schema -ne "aru.selfhost.manifest.v1" -or -not $live.serverId -or
+            ($expectedVersion -and $live.releaseVersion -ne $expectedVersion) -or
+            ($expectedServerId -and $live.serverId -ne $expectedServerId)) {
+          Start-Sleep -Milliseconds 250
+          continue
+        }
         return $true
       } catch {
         Start-Sleep -Milliseconds 250

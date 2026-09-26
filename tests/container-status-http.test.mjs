@@ -8,8 +8,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-for (const configured of [false, true]) {
-  test(`node status explains container scope when configured=${configured}`, async t => {
+for (const status of ["unconfigured", "ready", "failed"]) {
+  const configured = status !== "unconfigured";
+  const available = status === "ready";
+  test(`node status explains container scope when status=${status}`, async t => {
     const directory = await mkdtemp(join(tmpdir(), "aru-container-status-"));
     const reservation = createServer().listen(0, "127.0.0.1");
     await once(reservation, "listening");
@@ -19,8 +21,11 @@ for (const configured of [false, true]) {
     const child = spawn(process.execPath, [fileURLToPath(new URL("../aru-selfhost-stub.mjs", import.meta.url)),
       "--data-dir", directory, "--listen-host", "127.0.0.1", "--port", String(port),
       "--base-url", base, "--transport-kind", "lan", "--container-runtime",
-      configured ? fileURLToPath(new URL("./fake-container-runtime.sh", import.meta.url)) : "none"],
-    { stdio: ["ignore", "pipe", "pipe"] });
+      configured ? process.execPath : "none"],
+    { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env,
+      NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --require ${JSON.stringify(fileURLToPath(new URL("./fixtures/container-readiness-preload.cjs", import.meta.url)))}`,
+      ARU_TEST_ENGINE_FAILURE: status === "failed" ? "1" : "0",
+    } });
     let output = "";
     child.stdout.on("data", data => { output += data; });
     child.stderr.resume();
@@ -30,10 +35,11 @@ for (const configured of [false, true]) {
     });
     let manifest;
     for (let attempt = 0; attempt < 100; attempt++) {
-      try { manifest = await (await fetch(`${base}/.well-known/aru.json`)).json(); break; } catch {}
+      try { manifest = await (await fetch(`${base}/.well-known/aru.json`)).json(); if (manifest.capabilities["workspace-runtime"].readiness?.status !== "checking") break; } catch {}
       await new Promise(resolve => setTimeout(resolve, 100));
     }
-    assert.equal(manifest?.capabilities["workspace-runtime"].enabled, configured);
+    assert.equal(manifest?.capabilities["workspace-runtime"].enabled, available);
+    assert.equal(manifest.capabilities["workspace-runtime"].readiness.status, status);
     assert.equal(manifest.capabilities["node-workspaces"].enabled, true);
     const pairingURL = output.split(/\r?\n/).find(line => line.startsWith("aru://pair?"));
     assert.ok(pairingURL);
@@ -49,7 +55,7 @@ for (const configured of [false, true]) {
     await init.arrayBuffer();
     const result = await (await rpc("tools/call", { name: "aru_node_status", arguments: {} })).json();
     assert.equal(result.result.isError, false);
-    assert.equal(result.result.structuredContent.workspaceRuntimeAvailable, configured);
+    assert.equal(result.result.structuredContent.workspaceRuntimeAvailable, available);
     const description = result.result.structuredContent.workspaceRuntimeDescription;
     assert.match(description, /Node\/Python\/Shell/);
     assert.match(description, /[Pp]roject files/);

@@ -72,6 +72,7 @@ $arguments = @(
   "--port", $config["ARU_PORT"],
   "--data-dir", $config["ARU_DATA_DIR"],
   "--base-url", $config["ARU_BASE_URL"],
+  "--address-mode", (ConfigValue "ARU_ADDRESS_MODE" "fixed"),
   "--transport-kind", $config["ARU_TRANSPORT_KIND"],
   "--display-name", $config["ARU_DISPLAY_NAME"],
   "--node-kind", $config["ARU_NODE_KIND"],

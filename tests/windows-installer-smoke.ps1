@@ -47,6 +47,7 @@ try {
   Check "config/node.env exists" (Test-Path (Join-Path $instanceRoot "config\node.env"))
   $nodeEnv = [IO.File]::ReadAllText((Join-Path $instanceRoot "config\node.env"))
   Check "node kind is home-windows" ($nodeEnv -match "(?m)^ARU_NODE_KIND=home-windows$")
+  Check "fresh LAN install uses automatic address policy" ($nodeEnv -match "(?m)^ARU_ADDRESS_MODE=automatic-lan$")
   Check "current junction resolves" (Test-Path (Join-Path $instanceRoot "current\server.mjs"))
 
   $manifest = Invoke-RestMethod -UseBasicParsing -Uri "http://127.0.0.1:$Port/.well-known/aru.json" -TimeoutSec 5

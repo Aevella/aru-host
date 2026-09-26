@@ -10,7 +10,7 @@ const INITIALIZE_CLIENT = {
   version: "1",
 };
 
-export function createCodexAppServerDriver({ executable, resolveExecutable, log = () => {} }) {
+export function createCodexAppServerDriver({ executable, resolveExecutable, log = () => {}, interruptTimeoutMs = 10_000 }) {
   let process = null;
   let socket = null;
   let connecting = null;
@@ -18,6 +18,10 @@ export function createCodexAppServerDriver({ executable, resolveExecutable, log 
   let requestSequence = 0;
   const pendingRequests = new Map();
   const threadHandlers = new Map();
+  const threadTurnIds = new Map();
+  const retiredTurnIds = new Set();
+  const completedTurnIds = new Set();
+  const completionWaiters = new Map();
 
   function status() {
     if (socket?.readyState === SOCKET_OPEN) return "running";
@@ -112,26 +116,52 @@ export function createCodexAppServerDriver({ executable, resolveExecutable, log 
       resolvedThreadId = started.thread.id;
     }
     threadHandlers.set(resolvedThreadId, handler);
+    threadTurnIds.delete(resolvedThreadId);
     const startedTurn = await request("turn/start", {
       threadId: resolvedThreadId,
       input: codexUserInput(text, attachments),
       clientUserMessageId: userMessageId,
     });
+    threadTurnIds.set(resolvedThreadId, startedTurn.turn.id);
     return { threadId: resolvedThreadId, turnId: startedTurn.turn.id };
   }
 
   async function interrupt(threadId, turnId) {
     await ensureConnected();
-    await request("turn/interrupt", { threadId, turnId });
+    retiredTurnIds.add(turnId);
+    if (!completedTurnIds.has(turnId)) {
+      let timer;
+      const completed = new Promise((resolve, reject) => {
+        completionWaiters.set(turnId, { resolve, reject });
+        timer = setTimeout(() => reject(new Error("Codex has not confirmed this turn stopped; retry stopping it.")), interruptTimeoutMs);
+        // An RPC acknowledgement alone does not prove execution has ended.
+        request("turn/interrupt", { threadId, turnId }, interruptTimeoutMs).catch(error => {
+          if (!completedTurnIds.has(turnId)) reject(error);
+        });
+      });
+      try { await completed; }
+      finally { clearTimeout(timer); completionWaiters.delete(turnId); }
+    }
+    if (threadTurnIds.get(threadId) === turnId) {
+      threadHandlers.delete(threadId);
+      threadTurnIds.delete(threadId);
+    }
   }
 
-  function request(method, params) {
+  function request(method, params, timeoutMs = 0) {
     if (!socket || socket.readyState !== SOCKET_OPEN) {
       return Promise.reject(new Error("Codex connection is not open"));
     }
     const id = ++requestSequence;
     return new Promise((resolve, reject) => {
-      pendingRequests.set(id, { resolve, reject });
+      const timer = timeoutMs ? setTimeout(() => {
+        pendingRequests.delete(id);
+        reject(new Error("Codex did not acknowledge the stop request; retry stopping this turn."));
+      }, timeoutMs) : null;
+      pendingRequests.set(id, {
+        resolve: value => { clearTimeout(timer); resolve(value); },
+        reject: error => { clearTimeout(timer); reject(error); },
+      });
       socket.send(JSON.stringify({ id, method, params }));
     });
   }
@@ -155,6 +185,14 @@ export function createCodexAppServerDriver({ executable, resolveExecutable, log 
       else pending.resolve(message.result);
       return;
     }
+    const notificationTurnId = message.params?.turnId ?? message.params?.turn?.id;
+    if (message.method === "turn/completed" && notificationTurnId) {
+      completedTurnIds.add(notificationTurnId);
+      completionWaiters.get(notificationTurnId)?.resolve();
+    }
+    if (notificationTurnId && retiredTurnIds.has(notificationTurnId)) return;
+    const activeTurnId = threadTurnIds.get(message.params?.threadId);
+    if (notificationTurnId && activeTurnId && notificationTurnId !== activeTurnId) return;
     const handler = threadHandlers.get(message.params?.threadId);
     if (!handler) return;
     if (message.id !== undefined) {
@@ -162,8 +200,11 @@ export function createCodexAppServerDriver({ executable, resolveExecutable, log 
       return;
     }
     await handler.onNotification?.(message.method, message.params ?? {});
-    if (message.method === "turn/completed") {
+    if (message.method === "turn/completed" &&
+        threadHandlers.get(message.params.threadId) === handler &&
+        threadTurnIds.get(message.params.threadId) === notificationTurnId) {
       threadHandlers.delete(message.params.threadId);
+      threadTurnIds.delete(message.params.threadId);
     }
   }
 
@@ -215,6 +256,11 @@ export function createCodexAppServerDriver({ executable, resolveExecutable, log 
     pendingRequests.clear();
     for (const handler of threadHandlers.values()) handler.onDisconnect?.(error);
     threadHandlers.clear();
+    threadTurnIds.clear();
+    retiredTurnIds.clear();
+    completedTurnIds.clear();
+    for (const waiter of completionWaiters.values()) waiter.reject(error);
+    completionWaiters.clear();
   }
 
   function refreshExecutable() {

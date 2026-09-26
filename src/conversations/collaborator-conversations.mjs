@@ -1,3 +1,4 @@
+import { createTurnExecution, waitForTurnStop } from "./turn-execution.mjs";
 import { mutateConversationLifecycle } from "./collaborator-conversation-lifecycle.mjs";
 import { createHash, randomUUID } from "node:crypto";
 import {
@@ -47,6 +48,7 @@ export function createCollaboratorConversationHost({
   configurationRevision = () => null,
   onTurnSettled = () => {},
   now = Date.now,
+  cancellationWaitMs = 15_000,
   defer = setImmediate,
   attachmentHost = null,
 }) {
@@ -55,6 +57,7 @@ export function createCollaboratorConversationHost({
   const pendingApprovals = new Map();
   const activeConversations = new Map();
   const activeDrivers = new Map();
+  const executions = new Map();
   const sessionToolGrants = new Map();
   mkdirSync(root, { recursive: true, mode: 0o700 });
   mkdirSync(workspaceRoot, { recursive: true, mode: 0o700 });
@@ -272,7 +275,7 @@ export function createCollaboratorConversationHost({
     });
     saveConversation(conversation);
     attachments.commitMessageBindings(conversation, userMessage);
-    defer(() => runTurn(conversation.collaboratorId, conversation.conversationId, collaborator));
+    defer(() => runTurn(conversation.collaboratorId, conversation.conversationId, collaborator, turn.turnId));
     return publicConversation(conversation, true);
   }
 
@@ -352,11 +355,15 @@ export function createCollaboratorConversationHost({
     });
   }
 
-  async function runTurn(collaboratorId, conversationId, collaborator) {
+  async function runTurn(collaboratorId, conversationId, collaborator, expectedTurnId) {
     const conversation = loadConversation(collaboratorId, conversationId);
     const turn = conversation.activeTurn;
     if (!turn || turn.state !== "queued") return;
+    if (turn.turnId !== expectedTurnId || !ACTIVE_STATES.has(turn.state)) return;
     activeConversations.set(conversationKey(collaboratorId, conversationId), conversation);
+    const execution = createTurnExecution();
+    executions.set(conversationKey(collaboratorId, conversationId), execution);
+    const acceptsResult = () => conversation.activeTurn === turn && ACTIVE_STATES.has(turn.state) && !execution.signal.aborted;
     setTurnState(conversation, "starting");
     turn.startedAt = now();
     saveConversation(conversation);
@@ -375,7 +382,7 @@ export function createCollaboratorConversationHost({
       );
       const canResumeDriverThread = conversation.driverConfigurationFingerprint === configurationFingerprint;
       if (!canResumeDriverThread) sessionToolGrants.delete(conversationKey(collaboratorId, conversationId));
-      const started = await driver.startTurn({
+      const started = await execution.start(() => driver.startTurn({
         threadId: canResumeDriverThread ? conversation.driverThreadId : null,
         cwd: workspace,
         instructions: requestInstructions(collaborator),
@@ -386,12 +393,13 @@ export function createCollaboratorConversationHost({
         attachments: projectedAttachments,
         userMessageId: turn.userMessageId,
         handler: {
-          onNotification: (method, params) => handleNotification(conversation, method, params, workspace),
-          onApproval: (request) => requestDriverApproval(conversation, collaborator, request),
-          onToolCall: (params) => handleToolCall(conversation, collaborator, tools, params),
-          onDisconnect: (error) => interruptConversation(conversation, error.message),
+          onNotification: (method, params) => acceptsResult() && handleNotification(conversation, method, params, workspace),
+          onApproval: (request) => acceptsResult() ? requestDriverApproval(conversation, collaborator, request) : request.respond({ decision: "cancel" }),
+          onToolCall: (params) => execution.tool(() => handleToolCall(conversation, collaborator, tools, params, execution, turn)),
+          onDisconnect: (error) => acceptsResult() && interruptConversation(conversation, error.message),
         },
-      });
+      }));
+      if (!acceptsResult()) return;
       conversation.driverThreadId = started.threadId;
       conversation.driverConfigurationFingerprint = configurationFingerprint;
       turn.driverTurnId = started.turnId;
@@ -400,13 +408,14 @@ export function createCollaboratorConversationHost({
         saveConversation(conversation);
       }
     } catch (error) {
-      failConversation(conversation, safeFailure(error));
+      if (acceptsResult()) failConversation(conversation, safeFailure(error));
     }
   }
 
   function handleNotification(conversation, method, params, workspace) {
     const turn = conversation.activeTurn;
-    if (!turn || (turn.driverTurnId && params.turnId && turn.driverTurnId !== params.turnId)) return;
+    const notificationTurnId = params.turnId ?? params.turn?.id;
+    if (!turn || (turn.driverTurnId && notificationTurnId && turn.driverTurnId !== notificationTurnId)) return;
     if (method === "item/agentMessage/delta") {
       const assistant = message(conversation, turn.assistantMessageId);
       assistant.content += String(params.delta ?? "");
@@ -473,7 +482,12 @@ export function createCollaboratorConversationHost({
     saveConversation(conversation);
   }
 
-  async function handleToolCall(conversation, collaborator, tools, params) {
+  async function handleToolCall(conversation, collaborator, tools, params, execution, expectedTurn) {
+    const admitResult = () => {
+      execution.signal.throwIfAborted();
+      if (conversation.activeTurn !== expectedTurn) throw new Error("Turn is no longer active");
+    };
+    admitResult();
     const tool = tools.find((candidate) => candidate.name === params.tool);
     if (!tool) throw new Error(`工具 ${params.tool} 不属于这个协作者`);
     const toolCallId = `hosttoolcall_${randomUUID()}`;
@@ -484,6 +498,7 @@ export function createCollaboratorConversationHost({
         && !approvalAllowsAlways(collaborator)) {
       await waitForToolApproval(conversation, tool, params.arguments ?? {});
     }
+    admitResult();
     setTurnState(conversation, "toolRunning");
     appendEvent(conversation, "tool.started", {
       turnId: conversation.activeTurn.turnId,
@@ -512,8 +527,9 @@ export function createCollaboratorConversationHost({
       } else {
         value = await executeTool(tool.name, params.arguments ?? {}, {
           deviceId: `hosted-collaborator:${collaborator.collaboratorId}`,
-        }, collaborator, { conversationId: conversation.conversationId });
+        }, collaborator, { conversationId: conversation.conversationId, turnId: expectedTurn.turnId, signal: execution.signal });
       }
+      admitResult();
       appendEvent(conversation, "tool.completed", {
         turnId: conversation.activeTurn.turnId,
         toolCallId,
@@ -524,6 +540,7 @@ export function createCollaboratorConversationHost({
       saveConversation(conversation);
       return value;
     } catch (error) {
+      admitResult();
       appendEvent(conversation, "tool.failed", {
         turnId: conversation.activeTurn.turnId,
         toolCallId,
@@ -609,13 +626,28 @@ export function createCollaboratorConversationHost({
       });
       pending?.continuation("cancel");
     }
-    if (conversation.driverThreadId && turn.driverTurnId) {
-      const driver = activeDrivers.get(
-        conversationKey(conversation.collaboratorId, conversation.conversationId),
-      );
-      await driver.interrupt(conversation.driverThreadId, turn.driverTurnId);
+    const key = conversationKey(conversation.collaboratorId, conversation.conversationId);
+    const execution = executions.get(key);
+    turn.failure = null;
+    turn.cancellation = { status: "pending", requestedAt: now(), message: null };
+    appendEvent(conversation, "turn.cancellation", { turnId, ...turn.cancellation });
+    touch(conversation, device.deviceId);
+    saveConversation(conversation);
+    const stop = (execution ? execution.stop(activeDrivers.get(key)) : Promise.resolve()).then(() => {
+      if (conversation.activeTurn !== turn || !ACTIVE_STATES.has(turn.state)) return;
+      turn.cancellation.status = "confirmed";
+      interruptConversation(conversation, "用户取消了这次回合");
+    });
+    try { await waitForTurnStop(stop, cancellationWaitMs); }
+    catch (error) {
+      if (conversation.activeTurn === turn && ACTIVE_STATES.has(turn.state)) {
+        turn.cancellation = { ...turn.cancellation, status: "failed", message: safeFailure(error) };
+        turn.failure = "停止尚未确认，请重试。";
+        appendEvent(conversation, "turn.cancellation", { turnId, ...turn.cancellation });
+        touch(conversation, device.deviceId);
+        saveConversation(conversation);
+      }
     }
-    interruptConversation(conversation, "用户取消了这次回合");
     return publicConversation(conversation, true);
   }
 
@@ -647,6 +679,9 @@ export function createCollaboratorConversationHost({
       const turn = conversation.activeTurn;
       if (!ACTIVE_STATES.has(turn?.state)) continue;
       await cancelTurn(conversation, turn.turnId, device);
+      if (ACTIVE_STATES.has(turn.state)) {
+        throw new HttpError(409, "collaborator.stop_unconfirmed", "停止尚未确认，协作者及其对话保持原状，请重试停止。");
+      }
       stopped.push(conversation.conversationId);
     }
     return stopped;
@@ -790,6 +825,7 @@ export function createCollaboratorConversationHost({
     const key = conversationKey(conversation.collaboratorId, conversation.conversationId);
     activeConversations.delete(key);
     activeDrivers.delete(key);
+    executions.delete(key);
   }
 
   function setTurnState(conversation, state) {
@@ -843,7 +879,7 @@ export function createCollaboratorConversationHost({
 
   function publicTurn(turn) {
     const { driverTurnId: _, cancelledByDeviceId: __, ...value } = turn;
-    return value;
+    return { ...value, canCancel: ACTIVE_STATES.has(turn.state) && turn.cancellation?.status !== "pending" };
   }
 
   function loadConversations(collaboratorId) {

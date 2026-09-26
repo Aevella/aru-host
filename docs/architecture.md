@@ -120,3 +120,37 @@ failed upgrade -> retry, reconnect -> retry, remove -> late response, and missin
 key -> restore. Tests of new installs or a single field are insufficient evidence
 for those transitions. Local tests, OS service proof, device proof and published
 availability must be reported separately.
+
+## Live Host readiness and turn cancellation (2026-09-26)
+
+Installation receipts describe installed inputs. Core owns its current address,
+release manifest and runtime verification; Console renders those projections.
+`node-control.mjs` persists the revision-checked address policy. In automatic LAN
+mode `src/server/network-address.mjs` derives the advertised address from current
+interfaces on each read, without rewriting pairing identities or phone credentials.
+An explicit fixed address remains fixed. Old Windows receipts cannot distinguish
+manual addresses from detected ones, so they retain fixed mode until the user
+selects automatic LAN in Console. This is not automatic phone reconnection.
+
+Windows upgrade acceptance and Console startup compare the running Core release
+and retained Host identity with the intended installation. A protocol identifier
+such as `stub-0.30` is never an installed release label. A responding wrong release
+may trigger one bundled repair; an identity mismatch does not authorize replacement.
+
+`src/server/container-readiness.mjs` owns one coalesced verification attempt in
+Core's service environment. It uses the shared container verifier and exposes
+unconfigured, checking, ready or failed with the failure stage. Setup can prepare
+images; Core verification cannot pull images. Container job admission and capability
+advertisement require this receipt. A receipt is a completed check, not continuous
+proof that a runtime cannot subsequently fail. Console can explicitly retry it.
+
+The conversation owner persists cancellation state and publishes `canCancel`.
+`src/conversations/turn-execution.mjs` holds one turn's startup receipt, abort signal
+and outstanding tools. Cancellation waits for driver termination and admitted tools
+to settle. Codex RPC acknowledgement alone is not termination. A bounded control
+wait exposes an unconfirmed stop and retry while retaining occupancy; it never
+limits normal model generation or kills other conversations' shared driver.
+Callbacks remain bound to their original turn, and late results cannot change the
+next turn. Deletion remains blocked while stop is unconfirmed. Console and phone
+render this owner state; older distributed Hosts retain the phone's existing
+running-state cancellation affordance when `canCancel` is absent.

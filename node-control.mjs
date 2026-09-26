@@ -20,6 +20,7 @@ export function createNodeControl({
     updatedByDeviceId: null,
   };
   normalizeSettings();
+  config.addressMode = config.transportKind === "lan" ? state.nodeSettings.addressMode ?? config.addressMode : "fixed";
 
   function normalizeSettings() {
     state.nodeSettings.schema = NODE_SETTINGS_SCHEMA;
@@ -42,6 +43,7 @@ export function createNodeControl({
     return {
       schema: NODE_SETTINGS_SCHEMA,
       displayName: displayName(),
+      networkAddress: config.networkAddress?.(),
       revision: state.nodeSettings.revision,
       updatedAt: state.nodeSettings.updatedAt,
     };
@@ -117,15 +119,23 @@ export function createNodeControl({
       throw new HttpError(409, "node.revision_conflict", "node settings changed since they were read");
     }
     const nextDisplayName = validatedDisplayName(body.displayName);
-    if (nextDisplayName === state.nodeSettings.displayName) return publicSettings();
+    const addressMode = body.addressMode ?? config.addressMode ?? "fixed";
+    if (!["fixed", "automatic-lan"].includes(addressMode) ||
+        (addressMode === "automatic-lan" && config.transportKind !== "lan")) {
+      throw new HttpError(400, "node.address_mode_invalid", "Automatic LAN is only available for LAN transport");
+    }
+    if (nextDisplayName === state.nodeSettings.displayName && addressMode === (state.nodeSettings.addressMode ?? config.addressMode ?? "fixed")) return publicSettings();
+    const previous = state.nodeSettings;
     state.nodeSettings = {
       schema: NODE_SETTINGS_SCHEMA,
       displayName: nextDisplayName,
+      addressMode,
       revision: state.nodeSettings.revision + 1,
       updatedAt: now(),
       updatedByDeviceId: device.deviceId,
     };
-    saveState();
+    try { saveState(); } catch (error) { state.nodeSettings = previous; throw error; }
+    config.addressMode = addressMode;
     log(`node display name updated by ${device.deviceId}`);
     return publicSettings();
   }
