@@ -66,6 +66,9 @@ test -f "$root/opt/aru-selfhost/current/collaborator-initiative.mjs"
 test -f "$root/opt/aru-selfhost/current/collaborator-projects.mjs"
 test -f "$root/opt/aru-selfhost/current/apns-push.mjs"
 test -f "$root/opt/aru-selfhost/current/codex-app-server-driver.mjs"
+test -f "$root/opt/aru-selfhost/current/claude-code-driver.mjs"
+test -f "$root/opt/aru-selfhost/current/claude-code-host-bridge.mjs"
+test -f "$root/opt/aru-selfhost/current/claude-code-mcp-bridge.mjs"
 test -f "$root/opt/aru-selfhost/current/collaborator-cognition.mjs"
 test -f "$root/opt/aru-selfhost/current/direct-api-driver.mjs"
 test -f "$root/opt/aru-selfhost/current/provider-profiles.mjs"
@@ -144,7 +147,7 @@ test -s "$artifacts/aru-selfhost-linux.tar.gz"
 test -s "$artifacts/aru-selfhost-linux.tar.gz.sha256"
 archive_entries="$artifacts/linux-archive-entries.txt"
 tar -tzf "$artifacts/aru-selfhost-linux.tar.gz" > "$archive_entries"
-for file in install.sh aru-selfhost-stub.mjs collaborator-host.mjs mobile-collaborator-replicas.mjs mobile-collaborator-identities.mjs container-runtime-setup.mjs collaborator-surface-bundles.mjs collaborator-surfaces.mjs collaborator-conversations.mjs collaborator-conversation-attachments.mjs codex-app-server-driver.mjs collaborator-cognition.mjs direct-api-driver.mjs provider-profiles.mjs provider-secret-store.mjs backup-settings.mjs conversation-turn-relay.mjs wake-bridge.mjs node-control.mjs node-workspaces.mjs plugin-supervisor.mjs plugin-workshop.mjs source-plugin-runtime.mjs source-plugin-runner.mjs; do
+for file in install.sh aru-selfhost-stub.mjs collaborator-host.mjs mobile-collaborator-replicas.mjs mobile-collaborator-identities.mjs container-runtime-setup.mjs collaborator-surface-bundles.mjs collaborator-surfaces.mjs collaborator-conversations.mjs collaborator-conversation-attachments.mjs codex-app-server-driver.mjs claude-code-driver.mjs claude-code-host-bridge.mjs claude-code-mcp-bridge.mjs collaborator-cognition.mjs direct-api-driver.mjs provider-profiles.mjs provider-secret-store.mjs backup-settings.mjs conversation-turn-relay.mjs wake-bridge.mjs node-control.mjs node-workspaces.mjs plugin-supervisor.mjs plugin-workshop.mjs source-plugin-runtime.mjs source-plugin-runner.mjs; do
   grep -Fqx "$file" "$archive_entries"
 done
 
