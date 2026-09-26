@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Respect a computer collaborator's proactive rule `notificationsEnabled`: a rule with notifications off no longer alerts registered phones when its turn completes; the reply stays in the Host conversation. Each proactive turn records the choice as `notify`. Proactive turns run for a phone collaborator are unchanged, since their push also carries the delivery.
+
 ## 0.33.1
 
 - Make `aru-selfhost upgrade` resolve the latest stable release instead of reinstalling the recorded ref or bundle; `--ref REF` applies to that run only. Add `upgrade.sh` so an installation whose old control script keeps reinstalling its recorded version can move to the stable release once, keeping its profile and data.

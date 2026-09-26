@@ -76,6 +76,11 @@ assert.equal(deliveries.at(-1).registration.deviceId, "phone_one");
 await host.deliverHostedCollaboratorTurn({ ...completedEvent(), turn: { source: "client" } });
 assert.equal(deliveries.length, 3);
 
+await host.deliverHostedCollaboratorTurn({ ...completedEvent(), turn: { source: "proactive", notify: false } });
+assert.equal(deliveries.length, 3, "a rule with notifications off does not alert phones");
+await host.deliverHostedCollaboratorTurn({ ...completedEvent(), turn: { source: "proactive", notify: true } });
+assert.equal(deliveries.length, 4, "a rule with notifications on still alerts phones");
+
 const linuxSecretCalls = [];
 const linuxCredentialStore = createAPNsCredentialStore({
   platform: "linux",

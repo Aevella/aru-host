@@ -333,6 +333,9 @@ function createCollaboratorConversationHost({
       source: options.source ?? "client",
       ruleId: options.ruleId ?? null,
       ruleVersion: options.ruleVersion ?? null,
+      // Whether a completed turn may alert registered phones; null keeps the
+      // default for turns that no rule governs.
+      notify: typeof options.notify === "boolean" ? options.notify : null,
       deliveryId: options.deliveryId ?? null,
       sourceCollaboratorId: options.sourceCollaboratorId ?? null,
       sourceConversationId: options.sourceConversationId ?? null,
@@ -376,6 +379,7 @@ function createCollaboratorConversationHost({
       role: "system",
       source: "proactive",
       ruleId: rule.ruleId,
+      notify: rule.notificationsEnabled === true,
     });
   }
 
