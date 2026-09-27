@@ -44,14 +44,12 @@ Backup, artifact and job owners receive only their relevant state collections;
 still synchronous and writes a complete snapshot: this restructuring is not a
 storage migration or a claim of measured large-dataset performance.
 
-`collaborator-host.mjs` projects current driver availability separately from
-conversation statistics. Manifest and diagnostics use that availability projection
-without reading conversation history or attachment directories. The agent-driver
-inventory retains its existing conversation, active-turn and pending-approval
-counts, collected in one call to the conversation owner's status method. These
-are fresh projections, not a second cache or persisted source. Full inventory
-statistics still scan history; this separation does not remove those scans from
-endpoints that actually request the counts.
+`collaborator-host.mjs` projects current driver availability without conversation
+statistics. The public unauthenticated manifest, authenticated diagnostics and
+agent-driver inventory do not read conversation history or attachment directories.
+The unused aggregate conversation, active-turn and pending-approval counts and
+full-history status outlet have been removed. Per-conversation projections keep
+their own pending-approval counts for actual conversation UI consumers.
 
 Project Git and archive subprocesses are asynchronous. Checkpoint creation
 rechecks the project's revision after awaiting compression and before publishing

@@ -966,23 +966,6 @@ export function createCollaboratorConversationHost({
     hasConversation,
     runProactive,
     runReplicaProactive,
-    status() {
-      const conversations = [];
-      if (existsSync(root)) {
-        for (const collaboratorId of readdirSync(root)) {
-          if (ID.test(collaboratorId)) conversations.push(...loadConversations(collaboratorId));
-        }
-      }
-      return {
-        conversationCount: conversations.length,
-        activeTurnCount: conversations.filter((item) => ACTIVE_STATES.has(item.activeTurn?.state)).length,
-        pendingApprovalCount: conversations.reduce(
-          (count, item) => count + item.approvals.filter((approval) => approval.state === "pending").length,
-          0,
-        ),
-        ...attachments.status(),
-      };
-    },
   };
 }
 
@@ -1417,23 +1400,6 @@ export function createCollaboratorConversationAttachmentHost({
     return publicAttachment(record);
   }
 
-  function status() {
-    let attachmentCount = 0;
-    let unboundAttachmentCount = 0;
-    if (existsSync(root)) {
-      for (const collaboratorId of readdirSync(root)) {
-        if (!ID.test(collaboratorId)) continue;
-        for (const conversationId of readdirSync(join(root, collaboratorId))) {
-          if (!ID.test(conversationId)) continue;
-          for (const record of attachmentsForConversation(collaboratorId, conversationId)) {
-            attachmentCount += 1;
-            if (!record.messageId) unboundAttachmentCount += 1;
-          }
-        }
-      }
-    }
-    return { attachmentCount, unboundAttachmentCount };
-  }
 
   return {
     route,
@@ -1443,7 +1409,6 @@ export function createCollaboratorConversationAttachmentHost({
     projectForWorkspace,
     admitAssistantFile,
     cleanupUnbound,
-    status,
   };
 
   function sendContent(res, record) {

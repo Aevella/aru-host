@@ -137,7 +137,7 @@ curl -fsS "http://127.0.0.1:$port/aru/v1/agent-drivers" \
         if(!drivers.some(d=>d.id==="claude-code"&&d.adapter==="claude-code-cli"))process.exit(3);
         if(!drivers.some(d=>d.id==="api"&&d.adapter==="direct-provider-api"))process.exit(7);
         if(typeof p.execution?.enabled!=="boolean"||!["driver-unavailable","ready","starting","running"].includes(p.execution?.status))process.exit(4);
-        if(!Number.isInteger(p.execution?.conversationCount)||!Number.isInteger(p.execution?.activeTurnCount)||!Number.isInteger(p.execution?.pendingApprovalCount))process.exit(6);
+        if(["conversationCount","activeTurnCount","pendingApprovalCount"].some(k=>k in p.execution))process.exit(6);
         if(drivers.some(d=>d.executableCandidates!==undefined))process.exit(5);
       });'
 

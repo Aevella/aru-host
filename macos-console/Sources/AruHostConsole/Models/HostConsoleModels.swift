@@ -517,9 +517,6 @@ struct AgentDriver: Decodable, Equatable, Identifiable, Sendable {
 struct AgentDriverExecution: Decodable, Equatable, Sendable {
     let enabled: Bool
     let status: String
-    let conversationCount: Int?
-    let activeTurnCount: Int?
-    let pendingApprovalCount: Int?
 }
 
 struct AgentDriverInventory: Decodable, Equatable, Sendable {

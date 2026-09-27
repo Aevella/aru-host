@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-test('manifest and diagnostics never scan conversation history; inventory preserves statistics', { timeout: 30000 }, async t => {
+test('public manifest, diagnostics and driver inventory never scan conversation history', { timeout: 30000 }, async t => {
   const directory = await mkdtemp(join(tmpdir(), 'aru-status-history-'));
   const history = join(directory, 'collaborator-conversations', 'collaborator_test');
   await mkdir(history, { recursive: true });
@@ -60,7 +60,7 @@ test('manifest and diagnostics never scan conversation history; inventory preser
   const headers = { authorization: `Bearer ${grant.credentialSecret}` };
   await readCounts();
   for (const path of ['/.well-known/aru.json', '/aru/v1/diagnostics']) {
-    const response = await fetch(base + path, { headers });
+    const response = await fetch(base + path, path.endsWith('aru.json') ? {} : { headers });
     assert.equal(response.status, 200);
     const body = await response.json();
     if (path.endsWith('aru.json')) assert.equal(typeof body.capabilities['collaborator-host'].turnExecution, 'boolean');
@@ -72,7 +72,10 @@ test('manifest and diagnostics never scan conversation history; inventory preser
   const response = await fetch(`${base}/aru/v1/agent-drivers`, { headers });
   assert.equal(response.status, 200);
   const inventory = await response.json();
-  assert.equal(inventory.execution.conversationCount, 1);
-  assert.equal(inventory.execution.pendingApprovalCount, 1);
-  assert.equal((await readCounts()).reads, 1);
+  for (const key of ['conversationCount', 'activeTurnCount', 'pendingApprovalCount']) {
+    assert.equal(key in inventory.execution, false);
+  }
+  const counts = await readCounts();
+  assert.equal(counts.reads, 0);
+  assert.equal(counts.directoryReads, 0);
 });
