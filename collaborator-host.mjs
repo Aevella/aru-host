@@ -263,7 +263,8 @@ export function createCollaboratorHost({
     return driverInventory();
   }
 
-  function driverInventory() {
+  // Capability discovery must not scan durable conversations or attachments.
+  function driverAvailability() {
     const providerInventory = providerProfiles.inventory();
     const drivers = driverInventoryWithoutExecution(providerInventory).drivers;
     const execution = driverStatus(drivers, providerInventory);
@@ -274,12 +275,20 @@ export function createCollaboratorHost({
         0,
       ) || null,
       drivers,
+      execution,
+    };
+  }
+
+  function driverInventory() {
+    const availability = driverAvailability();
+    const counts = conversations.status();
+    return {
+      ...availability,
       execution: {
-        enabled: execution.enabled,
-        status: execution.status,
-        conversationCount: conversations.status().conversationCount,
-        activeTurnCount: conversations.status().activeTurnCount,
-        pendingApprovalCount: conversations.status().pendingApprovalCount,
+        ...availability.execution,
+        conversationCount: counts.conversationCount,
+        activeTurnCount: counts.activeTurnCount,
+        pendingApprovalCount: counts.pendingApprovalCount,
       },
     };
   }
@@ -684,6 +693,7 @@ export function createCollaboratorHost({
   return {
     route,
     driverInventory,
+    driverAvailability,
     collaboratorInventory,
     surfaceTools: surfaces.tools,
     projectTools: projects.tools,

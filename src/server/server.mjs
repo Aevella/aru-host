@@ -588,7 +588,7 @@ function manifest() {
         authority: "computer-host",
         clientProjection: "read-only-replica",
         phase: "computer-authoritative-conversations",
-        turnExecution: collaboratorHost.driverInventory().execution.enabled,
+        turnExecution: collaboratorHost.driverAvailability().execution.enabled,
         conversationEndpoint: "/aru/v1/hosted-collaborators/{collaboratorId}/conversations",
         messageInputKinds: ["text", "image", "file", "audio", "video"],
         attachmentProtocol: "aru.selfhost.collaborator-conversation-attachment.v1",
@@ -786,7 +786,7 @@ function handleDiagnostics(req, res) {
     activePluginCount: state.plugins.filter((plugin) => plugin.desiredState === "enabled").length,
     hostedCollaboratorCount: state.hostedCollaborators.length,
     nodeWorkspaceCount: nodeWorkspaceHost.count(),
-    readyAgentDriverCount: collaboratorHost.driverInventory().drivers.filter((driver) => driver.status === "ready").length,
+    readyAgentDriverCount: collaboratorHost.driverAvailability().drivers.filter((driver) => driver.status === "ready").length,
     deviceCount: state.devices.filter((d) => !d.revokedAt).length,
   });
 }
