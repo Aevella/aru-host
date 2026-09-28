@@ -5,6 +5,7 @@ import Observation
 @Observable
 final class HostConsoleRuntime {
     private(set) var phase: HostConsolePhase = .loading
+    private(set) var corePreparation: HostCorePreparation?
     private(set) var manifest: HostManifest?
     private(set) var diagnostics: HostDiagnostics?
     private(set) var nodeSettings: HostNodeSettings?
@@ -91,12 +92,36 @@ final class HostConsoleRuntime {
         manifest?.capabilities[id]
     }
 
-    func start() async {
+    func selectLocalInstance(_ name: String) async {
+        do {
+            try LocalHostInstance.select(name, homeDirectory: FileManager.default.homeDirectoryForCurrentUser)
+            await start()
+        } catch { phase = .failure(error.localizedDescription) }
+    }
+
+    func updateLocalCore() async {
+        guard managesLocalHost, let preparation = corePreparation, preparation.updateVersion != nil else { return }
         phase = .preparingHost
         do {
-            try await hostCoreInstaller.prepare()
+            try await hostCoreInstaller.update(expected: preparation)
+            await start()
+        } catch { phase = .failure(error.localizedDescription) }
+    }
+
+    func start() async {
+        phase = .preparingHost
+        corePreparation = nil
+        do {
+            if managesLocalHost { corePreparation = try await hostCoreInstaller.prepare() }
+        } catch HostCoreInstallationError.chooseInstance(let names) {
+            phase = .selectingHost(names)
+            return
         } catch {
             phase = .failure(error.localizedDescription)
+            return
+        }
+        if corePreparation?.operation == .repair {
+            phase = .failure(L10n.hostRepairDetail)
             return
         }
         phase = .loading

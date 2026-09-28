@@ -5,9 +5,9 @@ import Testing
 @testable import AruHostConsole
 
 @Test func readsBundledHostReleaseVersionFromInstallerState() {
-    #expect(BundledHostCoreInstaller.installedReleaseVersion(in: "ARU_INSTALL_RELEASE_VERSION=0.28.0\n") == "0.28.0")
-    #expect(BundledHostCoreInstaller.installedReleaseVersion(in: "ARU_INSTALL_RELEASE_VERSION='0.28.1'\n") == "0.28.1")
-    #expect(BundledHostCoreInstaller.installedReleaseVersion(in: "ARU_INSTALL_SOURCE_REF=main\n") == nil)
+    #expect(HostCoreInstallationRecord(contents: "ARU_INSTALL_RELEASE_VERSION=0.28.0\n").version == "0.28.0")
+    #expect(HostCoreInstallationRecord(contents: "ARU_INSTALL_RELEASE_VERSION='0.28.1'\n").version == "0.28.1")
+    #expect(HostCoreInstallationRecord(contents: "ARU_INSTALL_SOURCE_REF=main\n").version == nil)
 }
 
 @Test func comparesStableAndPrereleaseHostVersions() {

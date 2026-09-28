@@ -493,3 +493,15 @@
 "container.setup.restartpending" = "Containers passed verification, but Host has not reported the enabled capability. Check the service and refresh.";
 
 "error.host.state.unreadable" = "Local Host state could not be read. Startup stopped and the original file was preserved. Check permissions or restore a verified backup, then retry. Do not delete the data directory.";
+
+"host.install.choose" = "Choose a Host to connect";
+"host.install.choose.detail" = "Several installed instances were found. Your choice is remembered without reinstalling or moving data.";
+"host.install.changed" = "The Host installation changed. Please select it again.";
+"host.install.independent.repair" = "This independently installed Host has missing program files. Repair it using its original installer; the desktop app will not replace it.";
+"host.install.managed.repair" = "This Host cannot be safely replaced. Install a matching or newer desktop release and retry.";
+"host.install.desktop" = "Core managed by the desktop app";
+"host.install.independent" = "Independently managed Core; desktop connects without replacing it";
+"host.install.update" = "Update and restart Host";
+"host.install.update.detail" = "A newer bundled Core is available. Updating restarts Host briefly; apply it after your current tasks finish.";
+"host.install.repair" = "Repair and restart Host";
+"host.install.repair.detail" = "Host program files are missing. Repair preserves your data and restarts the service. Apply it after current tasks finish.";

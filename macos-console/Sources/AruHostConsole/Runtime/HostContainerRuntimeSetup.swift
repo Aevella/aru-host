@@ -8,7 +8,8 @@ actor HostContainerRuntimeSetup {
         if let attempt { return try await attempt.value }
         let task = Task.detached {
             let home = FileManager.default.homeDirectoryForCurrentUser
-            let control = home.appending(path: "Library/Application Support/Aru Self-Hosted/instances/home/current/aru-selfhostctl-macos")
+            let instance = LocalHostInstance(homeDirectory: home)
+            let control = instance.controlTool
             let errorURL = FileManager.default.temporaryDirectory.appending(path: "aru-container-\(UUID().uuidString).log")
             FileManager.default.createFile(atPath: errorURL.path, contents: nil)
             defer { try? FileManager.default.removeItem(at: errorURL) }
@@ -16,7 +17,7 @@ actor HostContainerRuntimeSetup {
             defer { try? errors.close() }
             let process = Process()
             process.executableURL = URL(filePath: "/bin/bash")
-            process.arguments = [control.path, "--instance", "home", "setup-runtime"]
+            process.arguments = [control.path, "--instance", instance.name, "setup-runtime"]
             process.standardOutput = FileHandle.nullDevice
             process.standardError = errors
             try process.run()

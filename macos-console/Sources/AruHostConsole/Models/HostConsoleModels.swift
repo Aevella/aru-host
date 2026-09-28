@@ -1071,6 +1071,7 @@ struct UpdateHostedCollaboratorToolAccessBody: Encodable, Sendable {
 }
 
 enum HostConsolePhase: Equatable {
+    case selectingHost([String])
     case preparingHost
     case loading
     case ready

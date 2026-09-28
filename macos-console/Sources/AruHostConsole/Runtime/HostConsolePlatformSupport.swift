@@ -19,7 +19,7 @@ enum HostConsoleHTTPError: LocalizedError {
 enum LocalHostLocator {
     static func baseURL() -> URL {
         let home = FileManager.default.homeDirectoryForCurrentUser
-        let envURL = home.appending(path: "Library/Application Support/Aru Self-Hosted/instances/home/config/node.env")
+        let envURL = LocalHostInstance(homeDirectory: home).root.appending(path: "config/node.env")
         guard let contents = try? String(contentsOf: envURL, encoding: .utf8),
               let portLine = contents.split(separator: "\n").first(where: { $0.hasPrefix("ARU_PORT=") }),
               let port = Int(portLine.dropFirst("ARU_PORT=".count)),
@@ -33,7 +33,7 @@ enum LocalHostLocator {
 enum LocalPairingIssuer {
     static func issueLink() throws -> String {
         let home = FileManager.default.homeDirectoryForCurrentUser
-        let executable = home.appending(path: ".local/bin/aru-selfhost")
+        let executable = LocalHostInstance(homeDirectory: home).controlTool
         guard FileManager.default.isExecutableFile(atPath: executable.path) else {
             throw LocalPairingError.controlToolMissing
         }
@@ -41,7 +41,7 @@ enum LocalPairingIssuer {
         let output = Pipe()
         let error = Pipe()
         process.executableURL = executable
-        process.arguments = ["--instance", "home", "pairing"]
+        process.arguments = ["--instance", LocalHostInstance(homeDirectory: home).name, "pairing"]
         process.standardOutput = output
         process.standardError = error
         try process.run()

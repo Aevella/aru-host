@@ -110,7 +110,17 @@ enum HostSemanticVersion {
             switch (lhs.prerelease, rhs.prerelease) {
             case (.some, .none): return true
             case (.none, .some): return false
-            case (.some(let left), .some(let right)): return left < right
+            case (.some(let left), .some(let right)):
+                let lhs = left.split(separator: "."), rhs = right.split(separator: ".")
+                for (a, b) in zip(lhs, rhs) where a != b {
+                    switch (Int(a), Int(b)) {
+                    case (.some(let x), .some(let y)): return x < y
+                    case (.some, .none): return true
+                    case (.none, .some): return false
+                    case (.none, .none): return a < b
+                    }
+                }
+                return lhs.count < rhs.count
             case (.none, .none): return false
             }
         }
@@ -122,11 +132,16 @@ enum HostSemanticVersion {
     }
 
     private static func parse(_ input: String) -> Value? {
-        let parts = input.split(separator: "-", maxSplits: 1, omittingEmptySubsequences: false)
+        guard input.range(of: #"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$"#, options: .regularExpression) != nil else { return nil }
+        let version = input.split(separator: "+", maxSplits: 1)[0]
+        let parts = version.split(separator: "-", maxSplits: 1, omittingEmptySubsequences: false)
         let numbers = parts[0].split(separator: ".").compactMap { Int($0) }
         guard numbers.count == parts[0].split(separator: ".").count,
-              numbers.count >= 3 else { return nil }
+              numbers.count == 3 else { return nil }
         let prerelease = parts.count == 2 && !parts[1].isEmpty ? String(parts[1]) : nil
+        if let prerelease, prerelease.split(separator: ".").contains(where: {
+            $0.allSatisfy(\.isNumber) && $0.count > 1 && $0.first == "0"
+        }) { return nil }
         return Value(numbers: numbers, prerelease: prerelease)
     }
 }
