@@ -38,24 +38,42 @@ export function createMobileCollaboratorReplicaHost({
   const statePath = join(root, "ledger.json");
   mkdirSync(root, { recursive: true, mode: 0o700 });
   const ledger = loadLedger();
+  ledger.executions ??= [];
+  if (!Array.isArray(ledger.executions)) throw new Error("mobile execution ledger is unreadable");
   ledger.revokedExecutions ??= [];
   let timer = null;
   let started = false;
   // Complete results are reconciled before old in-flight markers are cleared.
   // No model/tool action is retried during recovery.
   const recoveryEvents = [];
+  // Migrate outstanding legacy rule markers once into independent attempts.
   for (const replica of ledger.replicas) {
     for (const rule of replica.rules ?? []) {
-      if (!rule.inFlightDeliveryId) continue;
-      const event = recoverDelivery(replica.sourceCollaboratorId, rule.inFlightDeliveryId, replica.epoch);
-      if (event) recoveryEvents.push(event);
-      else {
-        rule.inFlightDeliveryId = null;
-        rule.inFlightRuleVersion = null;
+      if (rule.inFlightDeliveryId && !ledger.executions.some((item) => item.deliveryId === rule.inFlightDeliveryId)) {
+        ledger.executions.push(executionRecord(replica, rule, rule.inFlightDeliveryId));
       }
     }
   }
+  for (const execution of ledger.executions) {
+    if (execution.state !== "running") continue;
+    const event = recoverDelivery(execution.sourceCollaboratorId, execution.deliveryId, execution.epoch);
+    if (event) recoveryEvents.push(event);
+    else {
+      execution.state = "uncertain";
+      execution.updatedAt = now();
+      const replica = replicaForId(execution.sourceCollaboratorId, false);
+      const rule = replica?.epoch === execution.epoch
+        ? replica.rules.find((item) => item.inFlightDeliveryId === execution.deliveryId) : null;
+      if (rule) { rule.inFlightDeliveryId = null; rule.inFlightRuleVersion = null; }
+    }
+  }
   saveLedger();
+
+  function executionRecord(replica, rule, deliveryId) {
+    return { deliveryId, sourceCollaboratorId: replica.sourceCollaboratorId, epoch: replica.epoch,
+      ruleId: rule.ruleId, ruleVersion: rule.sourceVersion, title: rule.title, state: "running", createdAt: now(), updatedAt: now(),
+      content: null, failure: null };
+  }
 
   async function route(req, res, path, requireDevice) {
     const match = path.match(/^\/aru\/v1\/mobile-collaborator-replicas\/([^/]+)(.*)$/);
@@ -85,6 +103,22 @@ export function createMobileCollaboratorReplicaHost({
       catch (error) { ledger.revokedExecutions = previous; throw error; }
       schedule();
       sendJSON(res, 200, { schema: "aru.selfhost.mobile-collaborator-revoke-receipt.v1", sourceCollaboratorId, epoch });
+      return true;
+    }
+    if (suffix === "/executions" && req.method === "GET") {
+      const epoch = requestEpoch(req.url);
+      const replica = replicaForId(sourceCollaboratorId, true);
+      if (replica.epoch !== epoch) throw new HttpError(409, "mobile_replica.epoch_stale", "execution epoch is stale");
+      const ordered = ledger.executions.filter((item) => item.sourceCollaboratorId === sourceCollaboratorId && item.epoch === epoch)
+        .sort((a, b) => b.createdAt - a.createdAt || a.deliveryId.localeCompare(b.deliveryId));
+      const cursor = new URL(req.url, "http://aru.local").searchParams.get("after");
+      const cursorIndex = cursor ? ordered.findIndex((item) => item.deliveryId === cursor) : -1;
+      if (cursor && cursorIndex < 0) throw new HttpError(409, "mobile_execution.cursor_stale", "refresh execution history");
+      const start = cursorIndex + 1;
+      const executions = ordered.slice(start, start + 50);
+      sendJSON(res, 200, { schema: "aru.selfhost.mobile-collaborator-execution-inventory.v1",
+        sourceCollaboratorId, epoch, executions,
+        nextCursor: start + executions.length < ordered.length ? executions.at(-1).deliveryId : null });
       return true;
     }
     if (suffix === "/deliveries" && req.method === "GET") {
@@ -266,6 +300,7 @@ export function createMobileCollaboratorReplicaHost({
       rule.inFlightDeliveryId = deliveryId;
       rule.inFlightRuleVersion = rule.sourceVersion;
       rule.lastFiredAt = rule.nextFireAt;
+      ledger.executions.push(executionRecord(replica, rule, deliveryId));
       advanceRule(rule, timestamp);
       saveLedger();
       try {
@@ -273,6 +308,10 @@ export function createMobileCollaboratorReplicaHost({
         trigger(executor, replicaContinuingOwnDeliveries(replica, rule), rule, deliveryId);
       } catch (error) {
         rule.inFlightDeliveryId = null;
+        const execution = ledger.executions.find((item) => item.deliveryId === deliveryId);
+        execution.state = "uncertain";
+        execution.failure = String(error?.message ?? error);
+        execution.updatedAt = now();
         log(`mobile collaborator proactive trigger failed: ${error?.message ?? error}`);
         saveLedger();
       }
@@ -326,11 +365,23 @@ export function createMobileCollaboratorReplicaHost({
     if (event?.turn?.source !== "mobile-replica-proactive") return false;
     const replica = replicaForId(event.turn.sourceCollaboratorId, false);
     const rule = replica?.rules?.find((candidate) => candidate.ruleId === event.turn.ruleId);
-    if (!replica || !rule || executionRevoked(replica.sourceCollaboratorId, replica.epoch) || replica.epoch !== event.turn.executionEpoch
-        || rule.inFlightDeliveryId !== event.turn.deliveryId) return true;
-    const executedRuleVersion = rule.inFlightRuleVersion ?? event.turn.ruleVersion ?? rule.sourceVersion;
-    rule.inFlightDeliveryId = null;
-    rule.inFlightRuleVersion = null;
+    if (!replica || replica.epoch !== event.turn.executionEpoch || executionRevoked(replica.sourceCollaboratorId, replica.epoch)) return true;
+    const execution = ledger.executions.find((item) => item.deliveryId === event.turn.deliveryId
+      && item.sourceCollaboratorId === replica.sourceCollaboratorId && item.epoch === replica.epoch);
+    if (execution) {
+      if (execution.state !== "running" && !(notify === false && execution.state === "uncertain")) return true;
+    } else if (!rule || rule.inFlightDeliveryId !== event.turn.deliveryId) return true;
+    if (execution) {
+      execution.state = event.outcome === "completed" ? "completed" : event.outcome === "failed" ? "failed" : "uncertain";
+      execution.content = String(event.assistantMessage?.content ?? "").trim() || null;
+      execution.failure = event.failure ?? null;
+      execution.updatedAt = now();
+    }
+    const executedRuleVersion = execution?.ruleVersion ?? event.turn.ruleVersion ?? rule?.inFlightRuleVersion ?? rule?.sourceVersion;
+    if (rule?.inFlightDeliveryId === event.turn.deliveryId) {
+      rule.inFlightDeliveryId = null;
+      rule.inFlightRuleVersion = null;
+    }
     if (event.outcome === "completed") {
       const assistantContent = String(event.assistantMessage?.content ?? "").trim();
       if (assistantContent) {
@@ -339,7 +390,7 @@ export function createMobileCollaboratorReplicaHost({
           deliveryId: event.turn.deliveryId,
           sourceCollaboratorId: replica.sourceCollaboratorId,
           epoch: replica.epoch,
-          ruleId: rule.ruleId,
+          ruleId: event.turn.ruleId,
           ruleVersion: executedRuleVersion,
           sourceConversationId: event.turn.sourceConversationId ?? null,
           baseMessageId: event.turn.baseMessageId ?? null,

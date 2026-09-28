@@ -508,7 +508,8 @@ test("saved delivery survives notification failure, restart and duplicate acknow
   host.stop();
 });
 
-test("restart reconciles completed conversation before clearing pending delivery", async (context) => {
+for (const outcome of ["completed", "failed", "interrupted"]) {
+test(`restart reconciles ${outcome} conversation before clearing pending delivery`, async (context) => {
   const directory = mkdtempSync(join(tmpdir(), "aru-mobile-replica-"));
   context.after(() => rmSync(directory, { recursive: true, force: true }));
   let clock = 1_000;
@@ -597,7 +598,7 @@ test("restart reconciles completed conversation before clearing pending delivery
   const turn = { source: "mobile-replica-proactive", sourceCollaboratorId: "phone_aru",
     executionEpoch: 1, ruleId: "rule_one", ruleVersion: "rule-version-1",
     deliveryId: triggered[0].deliveryId, sourceConversationId: "phone_conversation",
-    basisMessages: [], state: "completed", turnId: "turn", assistantMessageId: "reply" };
+    basisMessages: [], state: outcome, turnId: "turn", assistantMessageId: "reply" };
   const owner = "mobilereplica_phone_aru";
   const folder = join(directory, "collaborator-conversations", owner);
   mkdirSync(folder, { recursive: true });
@@ -619,22 +620,32 @@ test("restart reconciles completed conversation before clearing pending delivery
   rmSync(join(folder, "hostconv_broken.json"));
   const recoveryOptions = { ...options, recoverDelivery: conversations.recoverReplicaDelivery };
   host = createMobileCollaboratorReplicaHost(recoveryOptions);
+  // A second crash after loading evidence but before start must not consume it.
+  host.stop();
+  host = createMobileCollaboratorReplicaHost(recoveryOptions);
   await host.start();
   const path = "/aru/v1/mobile-collaborator-replicas/phone_aru/deliveries";
   const fetch = () => host.route({ method: "GET", url: `${path}?epoch=1` }, {}, path, () => ({}));
   await fetch();
-  assert.equal(response.value.deliveries.length, 1);
-  assert.equal(response.value.deliveries[0].deliveryId, turn.deliveryId);
-  assert.equal(response.value.deliveries[0].assistantContent, "saved before crash");
+  assert.equal(response.value.deliveries.length, outcome === "completed" ? 1 : 0);
+  if (outcome === "completed") {
+    assert.equal(response.value.deliveries[0].deliveryId, turn.deliveryId);
+    assert.equal(response.value.deliveries[0].assistantContent, "saved before crash");
+  }
+  await host.route({ method: "GET", url: "/aru/v1/mobile-collaborator-replicas/phone_aru/executions?epoch=1" }, {},
+    "/aru/v1/mobile-collaborator-replicas/phone_aru/executions", () => ({}));
+  assert.equal(response.value.executions[0].state, outcome === "interrupted" ? "uncertain" : outcome);
+  assert.equal(response.value.executions[0].content, "saved before crash");
   assert.equal(triggered.length, 1);
   host.stop();
   host = createMobileCollaboratorReplicaHost(recoveryOptions);
   await host.start();
   await fetch();
-  assert.equal(response.value.deliveries.length, 1);
+  assert.equal(response.value.deliveries.length, outcome === "completed" ? 1 : 0);
   assert.equal(triggered.length, 1);
   host.stop();
 });
+}
 
 for (const recurrenceMinutes of [null, 1]) {
  for (const editInFlight of [false, true]) {
@@ -697,3 +708,170 @@ for (const recurrenceMinutes of [null, 1]) {
   });
 }
 }
+
+test("interrupted execution remains visible after restart without replay and rejects late completion", async (context) => {
+  const directory = mkdtempSync(join(tmpdir(), "aru-execution-state-"));
+  context.after(() => rmSync(directory, { recursive: true, force: true }));
+  let calls = 0;
+  let response;
+  let deliveryId;
+  const options = { dataDir: directory, readJSONBody: async req => req.body,
+    sendJSON: (_res, _status, body) => { response = body; }, HttpError,
+    collaboratorForId: () => ({ collaboratorId: "executor" }), maximumRequestBytes: 100000,
+    trigger: (_executor, _replica, _rule, id) => { calls++; deliveryId = id; },
+    now: () => 1000, setTimer: () => 1, clearTimer: () => {} };
+  let host = createMobileCollaboratorReplicaHost(options);
+  const path = "/aru/v1/mobile-collaborator-replicas/phone";
+  await host.route({ method: "PUT", url: path, body: {
+    schema: "aru.selfhost.mobile-collaborator-replica.v1", sourceCollaboratorId: "phone",
+    displayName: "Aru", memories: [], references: [], conversations: [],
+    readerHostCollaboratorIds: ["executor"], executorHostCollaboratorId: "executor",
+    epoch: 1, revision: 1, generatedAt: 1000,
+    rules: [{ ruleId: "rule", title: "Check in", goal: "hello", instructions: "",
+      nextFireAt: 1000, enabled: true, updatedAt: 1000, sourceVersion: "v1" }],
+  } }, {}, path, () => ({}));
+  await host.runDue();
+  const check = () => host.route({ method: "GET", url: `${path}/executions?epoch=1` }, {}, `${path}/executions`, () => ({}));
+  await check();
+  assert.equal(response.executions[0].state, "running");
+  host.stop();
+  host = createMobileCollaboratorReplicaHost(options);
+  await host.start();
+  await check();
+  assert.equal(response.executions[0].state, "uncertain");
+  assert.equal(response.executions[0].deliveryId, deliveryId);
+  await host.settle({ outcome: "completed", assistantMessage: { content: "late" }, turn: {
+    source: "mobile-replica-proactive", sourceCollaboratorId: "phone", executionEpoch: 1,
+    ruleId: "rule", deliveryId, basisMessages: [] } });
+  await check();
+  assert.equal(response.executions[0].state, "uncertain");
+  await host.runDue();
+  assert.equal(calls, 1);
+  await assert.rejects(host.route({ method: "GET", url: `${path}/executions?epoch=2` }, {}, `${path}/executions`, () => ({})));
+  host.stop();
+});
+
+test("removing a rule does not discard its already admitted result", async (context) => {
+  const directory = mkdtempSync(join(tmpdir(), "aru-mobile-replica-"));
+  context.after(() => rmSync(directory, { recursive: true, force: true }));
+  let clock = 1_000;
+  const triggered = [];
+  let response = null;
+  const collaborators = new Map([
+    ["hostcol_reader", { collaboratorId: "hostcol_reader", displayName: "Computer Aru", driverId: "codex" }],
+    ["hostcol_other", { collaboratorId: "hostcol_other", displayName: "Other", driverId: "codex" }],
+  ]);
+  const options = {
+    dataDir: directory,
+    readJSONBody: async (request) => request.body,
+    sendJSON: (_response, status, value) => { response = { status, value }; },
+    HttpError,
+    collaboratorForId(id) {
+      const collaborator = collaborators.get(id);
+      if (!collaborator) throw new HttpError(404, "unknown", "unknown collaborator");
+      return collaborator;
+    },
+    maximumRequestBytes: 64 * 1024 * 1024,
+    trigger(executor, replica, rule, deliveryId) {
+      triggered.push({ executor, replica, rule, deliveryId });
+    },
+    now: () => clock,
+    setTimer: () => 1,
+    clearTimer: () => {},
+    onDelivery: async () => { throw new Error("offline"); },
+  };
+  let host = createMobileCollaboratorReplicaHost(options);
+  const replica = {
+    schema: "aru.selfhost.mobile-collaborator-replica.v1",
+    sourceCollaboratorId: "phone_aru",
+    displayName: "Aru",
+    systemPrompt: "Stay close.",
+    memories: [{ title: "Memory", content: "AA likes clarity." }],
+    references: [],
+    conversations: [{
+      conversationId: "phone_conversation",
+      title: "Us",
+      baseMessageId: "phone_message",
+      messages: [{
+        messageId: "phone_message",
+        role: "user",
+        content: "hello",
+        createdAt: 900,
+        updatedAt: 900,
+      }],
+    }],
+    rules: [{
+      ruleId: "rule_one",
+      conversationId: "phone_conversation",
+      title: "Check in",
+      goal: "Say something useful",
+      instructions: "Be direct",
+      nextFireAt: 1_000,
+      recurrenceMinutes: 1,
+      notificationsEnabled: true,
+      enabled: true,
+      updatedAt: 940,
+      sourceVersion: "rule-version-1",
+    }],
+    readerHostCollaboratorIds: ["hostcol_reader"],
+    executorHostCollaboratorId: "hostcol_reader",
+    epoch: 1,
+    revision: 1,
+    generatedAt: 950,
+  };
+
+  await host.route(
+    { method: "PUT", body: replica, url: "/aru/v1/mobile-collaborator-replicas/phone_aru" },
+    {},
+    "/aru/v1/mobile-collaborator-replicas/phone_aru",
+    () => ({ deviceId: "phone" }),
+  );
+  assert.equal(response.status, 200);
+  assert.equal(response.value.sourceCollaboratorId, "phone_aru");
+
+  host.start();
+  await host.runDue();
+  assert.equal(triggered[0].executor.collaboratorId, "hostcol_reader");
+  assert.equal(triggered[0].replica.sourceCollaboratorId, "phone_aru");
+  assert.match(triggered[0].deliveryId, /^mobiledelivery_/);
+
+
+
+  const path = "/aru/v1/mobile-collaborator-replicas/phone_aru";
+  await host.route({ method: "PUT", url: path, body: { ...replica, revision: 2, rules: [] } }, {}, path, () => ({}));
+  await host.settle({ outcome: "completed", assistantMessage: { content: "finished original attempt" },
+    turn: { source: "mobile-replica-proactive", sourceCollaboratorId: "phone_aru", executionEpoch: 1,
+      ruleId: "rule_one", deliveryId: triggered[0].deliveryId, basisMessages: [] } });
+  await host.route({ method: "GET", url: `${path}/deliveries?epoch=1` }, {}, `${path}/deliveries`, () => ({}));
+  assert.equal(response.value.deliveries.length, 1);
+  assert.equal(response.value.deliveries[0].ruleVersion, "rule-version-1");
+  await host.route({ method: "GET", url: `${path}/executions?epoch=1` }, {}, `${path}/executions`, () => ({}));
+  assert.equal(response.value.executions[0].state, "completed");
+  host.stop();
+});
+
+test("execution history pages preserve identity and exclude unrelated grants", async (context) => {
+  const directory = mkdtempSync(join(tmpdir(), "aru-execution-page-"));
+  context.after(() => rmSync(directory, { recursive: true, force: true }));
+  const folder = join(directory, "mobile-collaborator-replicas");
+  mkdirSync(folder, { recursive: true });
+  const executions = Array.from({ length: 51 }, (_, index) => ({ deliveryId: `delivery_${index}`,
+    sourceCollaboratorId: "phone", epoch: 1, ruleId: "rule", title: "Check in", state: "failed",
+    createdAt: index + 1000, updatedAt: index + 1000 }));
+  writeFileSync(join(folder, "ledger.json"), JSON.stringify({ replicas: [{ sourceCollaboratorId: "phone", epoch: 1, rules: [] }],
+    deliveries: [], executions: [...executions, { ...executions[0], sourceCollaboratorId: "other" }] }));
+  let body;
+  const host = createMobileCollaboratorReplicaHost({ dataDir: directory, HttpError,
+    sendJSON: (_res, _status, value) => { body = value; }, now: () => 2000 });
+  const path = "/aru/v1/mobile-collaborator-replicas/phone/executions";
+  const read = after => host.route({ method: "GET", url: `${path}?epoch=1${after ? `&after=${after}` : ""}` }, {}, path, () => ({}));
+  await read();
+  assert.equal(body.executions.length, 50);
+  const ids = new Set(body.executions.map(item => item.deliveryId));
+  await read(body.nextCursor);
+  assert.equal(body.executions.length, 1);
+  assert.equal(ids.has(body.executions[0].deliveryId), false);
+  assert.equal(body.nextCursor, null);
+  await assert.rejects(read("missing"));
+  host.stop();
+});

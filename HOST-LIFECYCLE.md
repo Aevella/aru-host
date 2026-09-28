@@ -99,11 +99,25 @@ Host daily scheduling and revocation behavior are preserved.
 Focused restart fixtures cover the crash window after conversation completion but
 before delivery settlement, wrong epoch/owner rejection and repeated restart without
 duplicate delivery. This does not prove resumption of unfinished external actions.
-Still open: unknown/interrupted execution needs richer phone-visible reconciliation;
-revocation and other unrelated source differences are not fully mirrored. Existing
-recovery does not replay uncertain actions. No universal source parity or real-device
-acceptance is claimed.
+Phone-visible recovery now includes a durable execution record independent of rule
+configuration: running, completed, failed, or uncertain. Recovery preserves partial
+text and failure evidence. The paired phone reads paged records by collaborator and
+epoch in proactive settings and residence delegation, can expand saved content and
+check status again. Missing older-Host support is unavailable, not an empty history.
+A foreground session rejects late responses after replacement or dismissal. No
+background polling or automatic replay is added.
+
+Unknown external side effects have no generic driver reconciliation/idempotency API.
+The phone explains this and asks the person to inspect actual results before starting
+new work; a status refresh only reads Host evidence. Failed execution does not imply
+rollback of prior side effects. Revocation and unrelated source differences are not
+fully mirrored; no universal source parity or real-device acceptance is claimed.
 
 Validation for this continuation: Aru 9 focused tests and public Host 11 focused
 tests passed, plus both conversation smoke programs and generated-runtime checks.
 No published package or installed Host was changed.
+
+Execution-history verification: native Host 13 tests and public Host 15 tests passed;
+phone projection 3 tests and runtime protocol 4 parameter cases passed. The Polaris
+arm64 iOS Simulator build passed with CODE_SIGNING_ALLOWED=NO. Source and simulator
+proof only; installed phones and published Host packages have not been exercised.

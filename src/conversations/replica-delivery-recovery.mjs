@@ -7,15 +7,14 @@ export function createReplicaDeliveryRecovery({ loadConversations, publicConvers
     const conversation = loadConversations(ownerId, true).find((item) =>
       item.activeTurn?.source === "mobile-replica-proactive"
       && item.activeTurn.deliveryId === deliveryId
-      && item.activeTurn.executionEpoch === epoch
-      && item.activeTurn.state === "completed");
+      && item.activeTurn.executionEpoch === epoch);
     if (!conversation) return null;
     const turn = conversation.activeTurn;
     const assistant = message(conversation, turn.assistantMessageId);
-    if (!assistant || assistant.status !== "completed") return null;
-    return { outcome: "completed", failure: null,
+    if (turn.state === "completed" && (!assistant || assistant.status !== "completed")) return null;
+    return { outcome: turn.state === "completed" ? "completed" : turn.state === "failed" ? "failed" : "interrupted", failure: turn.failure ?? null,
       conversation: publicConversation(conversation, true),
-      turn: publicTurn(turn), assistantMessage: { ...assistant } };
+      turn: publicTurn(turn), assistantMessage: assistant ? { ...assistant } : null };
   }
 
 }
