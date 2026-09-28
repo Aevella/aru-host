@@ -4,8 +4,34 @@ import * as node1 from 'node:fs';
 import * as node2 from 'node:path';
 import * as node3 from 'node:events';
 
-// src/conversations/turn-execution.mjs
+// src/conversations/replica-delivery-recovery.mjs
 const module1 = (() => {
+function createReplicaDeliveryRecovery({ loadConversations, publicConversation, publicTurn, message }) {
+  // Startup-only reconciliation of the delivery owner's outstanding attempts.
+  // Conversation storage owns completion evidence; callers never read its files.
+  return function recoverReplicaDelivery(sourceCollaboratorId, deliveryId, epoch) {
+    const ownerId = `mobilereplica_${sourceCollaboratorId}`;
+    if (!/^[A-Za-z0-9_-]+$/.test(ownerId)) throw new Error("invalid replica recovery identity");
+    const conversation = loadConversations(ownerId, true).find((item) =>
+      item.activeTurn?.source === "mobile-replica-proactive"
+      && item.activeTurn.deliveryId === deliveryId
+      && item.activeTurn.executionEpoch === epoch
+      && item.activeTurn.state === "completed");
+    if (!conversation) return null;
+    const turn = conversation.activeTurn;
+    const assistant = message(conversation, turn.assistantMessageId);
+    if (!assistant || assistant.status !== "completed") return null;
+    return { outcome: "completed", failure: null,
+      conversation: publicConversation(conversation, true),
+      turn: publicTurn(turn), assistantMessage: { ...assistant } };
+  }
+
+}
+return { createReplicaDeliveryRecovery };
+})();
+
+// src/conversations/turn-execution.mjs
+const module2 = (() => {
 // Runtime of one admitted turn. Durable state and projection stay in the
 // conversation owner; this object only holds cancellable work and its receipts.
 function createTurnExecution() {
@@ -49,7 +75,7 @@ return { createTurnExecution, waitForTurnStop };
 })();
 
 // src/conversations/collaborator-conversation-lifecycle.mjs
-const module2 = (() => {
+const module3 = (() => {
 // Metadata lifecycle, independent of message execution. A running turn must be
 // stopped through its owner before its conversation can leave the live list.
 function mutateConversationLifecycle({ conversation, body, deleting, deviceId, now, save, HttpError }) {
@@ -74,8 +100,9 @@ return { mutateConversationLifecycle };
 
 // src/conversations/collaborator-conversations.mjs
 const module0 = (() => {
-const { createTurnExecution, waitForTurnStop } = module1;
-const { mutateConversationLifecycle } = module2;
+const { createReplicaDeliveryRecovery } = module1;
+const { createTurnExecution, waitForTurnStop } = module2;
+const { mutateConversationLifecycle } = module3;
 const { createHash, randomUUID } = node0;
 const {
   chmodSync,
@@ -962,14 +989,14 @@ function createCollaboratorConversationHost({
     return { ...value, canCancel: ACTIVE_STATES.has(turn.state) && turn.cancellation?.status !== "pending" };
   }
 
-  function loadConversations(collaboratorId) {
+  function loadConversations(collaboratorId, requireReadable = false) {
     const directory = collaboratorDirectory(collaboratorId);
     if (!existsSync(directory)) return [];
     return readdirSync(directory)
       .filter((name) => name.endsWith(".json") && ID.test(name.slice(0, -5)))
       .map((name) => {
         try { return JSON.parse(readFileSync(join(directory, name), "utf8")); }
-        catch { return null; }
+        catch (error) { if (requireReadable) throw error; return null; }
       })
       .filter(Boolean);
   }
@@ -1042,6 +1069,7 @@ function createCollaboratorConversationHost({
     hasConversation,
     runProactive,
     runReplicaProactive,
+    recoverReplicaDelivery: createReplicaDeliveryRecovery({ loadConversations, publicConversation, publicTurn, message }),
   };
 }
 
@@ -1508,7 +1536,7 @@ function createCollaboratorConversationAttachmentHost({
       .filter((name) => ID.test(name))
       .map((attachmentId) => {
         try { return loadAttachment(collaboratorId, conversationId, attachmentId); }
-        catch { return null; }
+        catch (error) { if (requireReadable) throw error; return null; }
       })
       .filter(Boolean);
   }

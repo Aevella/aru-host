@@ -88,9 +88,22 @@ completion and finalize scheduling before waiting on notification. Focused tests
 reopen saved state after notification failure and check stable delivery identity,
 duplicate completion, repeated acknowledgement and a second restart.
 
-Still open: the two trees differ in offline continuation, revocation and occurrence
-progress. Existing startup clears in-flight replica markers; reconciliation with
-conversation execution receipts needs a complete owner-to-phone design and proof.
-Do not mark overall restart recovery or source parity complete from this document.
-No new attempt schema, automatic uncertain-task retry or data migration is introduced
-by the notification fix.
+2026-09-28 continuation: conversation recovery now exposes completed mobile-turn
+receipts to the delivery owner before it clears in-flight markers. Recovery uses
+source collaborator, epoch and delivery identity, writes the existing delivery shape
+and does not call drivers or tools. Malformed recovery source files are errors, not
+absence. The startup-only lookup is scoped to owners with pending deliveries.
+Both trees include offline continuation and consumed-occurrence protection; public
+Host daily scheduling and revocation behavior are preserved.
+
+Focused restart fixtures cover the crash window after conversation completion but
+before delivery settlement, wrong epoch/owner rejection and repeated restart without
+duplicate delivery. This does not prove resumption of unfinished external actions.
+Still open: unknown/interrupted execution needs richer phone-visible reconciliation;
+revocation and other unrelated source differences are not fully mirrored. Existing
+recovery does not replay uncertain actions. No universal source parity or real-device
+acceptance is claimed.
+
+Validation for this continuation: Aru 9 focused tests and public Host 11 focused
+tests passed, plus both conversation smoke programs and generated-runtime checks.
+No published package or installed Host was changed.

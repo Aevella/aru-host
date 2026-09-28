@@ -203,6 +203,8 @@ export function createCollaboratorHost({
     maximumRequestBytes: maximumReplicaBytes,
     trigger: (executor, replica, rule, deliveryId) =>
       conversations.runReplicaProactive(executor, replica, rule, deliveryId),
+    recoverDelivery: (sourceId, deliveryId, epoch) =>
+      conversations.recoverReplicaDelivery(sourceId, deliveryId, epoch),
     onDelivery: onTurnSettled,
     now,
     log,

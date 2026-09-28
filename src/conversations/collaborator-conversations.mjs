@@ -1,3 +1,4 @@
+import { createReplicaDeliveryRecovery } from "./replica-delivery-recovery.mjs";
 import { createTurnExecution, waitForTurnStop } from "./turn-execution.mjs";
 import { mutateConversationLifecycle } from "./collaborator-conversation-lifecycle.mjs";
 import { createHash, randomUUID } from "node:crypto";
@@ -886,14 +887,14 @@ export function createCollaboratorConversationHost({
     return { ...value, canCancel: ACTIVE_STATES.has(turn.state) && turn.cancellation?.status !== "pending" };
   }
 
-  function loadConversations(collaboratorId) {
+  function loadConversations(collaboratorId, requireReadable = false) {
     const directory = collaboratorDirectory(collaboratorId);
     if (!existsSync(directory)) return [];
     return readdirSync(directory)
       .filter((name) => name.endsWith(".json") && ID.test(name.slice(0, -5)))
       .map((name) => {
         try { return JSON.parse(readFileSync(join(directory, name), "utf8")); }
-        catch { return null; }
+        catch (error) { if (requireReadable) throw error; return null; }
       })
       .filter(Boolean);
   }
@@ -966,6 +967,7 @@ export function createCollaboratorConversationHost({
     hasConversation,
     runProactive,
     runReplicaProactive,
+    recoverReplicaDelivery: createReplicaDeliveryRecovery({ loadConversations, publicConversation, publicTurn, message }),
   };
 }
 
@@ -1432,7 +1434,7 @@ export function createCollaboratorConversationAttachmentHost({
       .filter((name) => ID.test(name))
       .map((attachmentId) => {
         try { return loadAttachment(collaboratorId, conversationId, attachmentId); }
-        catch { return null; }
+        catch (error) { if (requireReadable) throw error; return null; }
       })
       .filter(Boolean);
   }

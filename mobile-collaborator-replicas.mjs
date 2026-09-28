@@ -28,6 +28,7 @@ export function createMobileCollaboratorReplicaHost({
   trigger,
   maximumRequestBytes,
   onDelivery = async () => {},
+  recoverDelivery = () => null,
   now = Date.now,
   log = () => {},
   setTimer = setTimeout,
@@ -40,8 +41,19 @@ export function createMobileCollaboratorReplicaHost({
   ledger.revokedExecutions ??= [];
   let timer = null;
   let started = false;
+  // Complete results are reconciled before old in-flight markers are cleared.
+  // No model/tool action is retried during recovery.
+  const recoveryEvents = [];
   for (const replica of ledger.replicas) {
-    for (const rule of replica.rules ?? []) rule.inFlightDeliveryId = null;
+    for (const rule of replica.rules ?? []) {
+      if (!rule.inFlightDeliveryId) continue;
+      const event = recoverDelivery(replica.sourceCollaboratorId, rule.inFlightDeliveryId, replica.epoch);
+      if (event) recoveryEvents.push(event);
+      else {
+        rule.inFlightDeliveryId = null;
+        rule.inFlightRuleVersion = null;
+      }
+    }
   }
   saveLedger();
 
@@ -212,8 +224,11 @@ export function createMobileCollaboratorReplicaHost({
     return { matched: false, value: null };
   }
 
-  function start() {
+  async function start() {
+    // Settle without notification: the persisted result is fetched normally.
+    // Keep start/stop identity so a late startup cannot restart a stopped owner.
     started = true;
+    for (const event of recoveryEvents.splice(0)) await settle(event, false);
     schedule();
   }
 
@@ -249,6 +264,8 @@ export function createMobileCollaboratorReplicaHost({
     for (const { replica, rule } of due) {
       const deliveryId = `mobiledelivery_${randomUUID()}`;
       rule.inFlightDeliveryId = deliveryId;
+      rule.inFlightRuleVersion = rule.sourceVersion;
+      rule.lastFiredAt = rule.nextFireAt;
       advanceRule(rule, timestamp);
       saveLedger();
       try {
@@ -305,13 +322,15 @@ export function createMobileCollaboratorReplicaHost({
     return Boolean(delivery.acknowledgedAt);
   }
 
-  async function settle(event) {
+  async function settle(event, notify = true) {
     if (event?.turn?.source !== "mobile-replica-proactive") return false;
     const replica = replicaForId(event.turn.sourceCollaboratorId, false);
     const rule = replica?.rules?.find((candidate) => candidate.ruleId === event.turn.ruleId);
     if (!replica || !rule || executionRevoked(replica.sourceCollaboratorId, replica.epoch) || replica.epoch !== event.turn.executionEpoch
         || rule.inFlightDeliveryId !== event.turn.deliveryId) return true;
+    const executedRuleVersion = rule.inFlightRuleVersion ?? event.turn.ruleVersion ?? rule.sourceVersion;
     rule.inFlightDeliveryId = null;
+    rule.inFlightRuleVersion = null;
     if (event.outcome === "completed") {
       const assistantContent = String(event.assistantMessage?.content ?? "").trim();
       if (assistantContent) {
@@ -321,7 +340,7 @@ export function createMobileCollaboratorReplicaHost({
           sourceCollaboratorId: replica.sourceCollaboratorId,
           epoch: replica.epoch,
           ruleId: rule.ruleId,
-          ruleVersion: rule.sourceVersion,
+          ruleVersion: executedRuleVersion,
           sourceConversationId: event.turn.sourceConversationId ?? null,
           baseMessageId: event.turn.baseMessageId ?? null,
           basisMessages: validatedContextMessages(event.turn.basisMessages),
@@ -338,7 +357,7 @@ export function createMobileCollaboratorReplicaHost({
         // Finish scheduling before waiting on a transport that may be offline.
         schedule();
         try {
-          await onDelivery({ ...event, mobileDelivery: publicDelivery(delivery), mobileReplica: replica });
+          if (notify) await onDelivery({ ...event, mobileDelivery: publicDelivery(delivery), mobileReplica: replica });
         } catch {
           log("mobile collaborator delivery saved; notification failed, phone can fetch it later");
         }
@@ -537,6 +556,14 @@ function validatedRules(value, current, epoch) {
     if (scheduleKind === "daily" && (dailyTimeMinutes == null || !scheduleTimeZoneIdentifier)) {
       throw new Error("daily schedule requires local time and time zone");
     }
+    let nextFireAt = item?.nextFireAt == null ? null : positiveInteger(item.nextFireAt, "nextFireAt");
+    if (nextFireAt != null && previous?.lastFiredAt != null && nextFireAt <= previous.lastFiredAt) {
+      if (scheduleKind === "daily") nextFireAt = nextDailyFireAt(dailyTimeMinutes, scheduleTimeZoneIdentifier, previous.lastFiredAt);
+      else if (scheduleKind === "interval") {
+        const interval = recurrenceMinutes * 60_000;
+        nextFireAt += (Math.floor((previous.lastFiredAt - nextFireAt) / interval) + 1) * interval;
+      } else nextFireAt = null;
+    }
     return {
       ruleId,
       conversationMode,
@@ -546,15 +573,17 @@ function validatedRules(value, current, epoch) {
       instructions: String(item?.instructions ?? ""),
       nextFireAt: preservesHostSettlement
         ? previous.nextFireAt
-        : (item?.nextFireAt == null ? null : positiveInteger(item.nextFireAt, "nextFireAt")),
+        : nextFireAt,
       scheduleKind,
       recurrenceMinutes,
       dailyTimeMinutes,
       scheduleTimeZoneIdentifier,
       notificationsEnabled: item?.notificationsEnabled === true,
-      enabled: preservesHostSettlement ? previous.enabled : item?.enabled === true,
+      enabled: preservesHostSettlement ? previous.enabled : item?.enabled === true && !(item?.nextFireAt != null && nextFireAt == null),
       sourceUpdatedAt,
       sourceVersion,
+      lastFiredAt: previous?.lastFiredAt ?? null,
+      inFlightRuleVersion: previous?.inFlightRuleVersion ?? (previous?.inFlightDeliveryId ? previous.sourceVersion : null),
       inFlightDeliveryId: previous?.inFlightDeliveryId ?? null,
     };
   });
