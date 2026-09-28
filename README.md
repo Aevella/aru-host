@@ -1,4 +1,6 @@
 <p align="center">
+
+Engineering: read [Host lifecycle contract](HOST-LIFECYCLE.md) before changing installation, execution, recovery or phone delivery.
   <img src="docs/assets/aru-is-here.jpg" width="420" alt="虹彩的波浪里躲着三只毛茸茸的小家伙，画面下方写着 Aru is here.">
 </p>
 

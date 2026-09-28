@@ -393,3 +393,115 @@ test("a recurring phone rule continues from the Host's own unsynced deliveries w
   assert.equal(new Set(ids).size, ids.length, "synced deliveries are not added twice");
   assert.equal(ids.length, 4);
 });
+
+test("saved delivery survives notification failure, restart and duplicate acknowledgement", async (context) => {
+  const directory = mkdtempSync(join(tmpdir(), "aru-mobile-replica-"));
+  context.after(() => rmSync(directory, { recursive: true, force: true }));
+  let clock = 1_000;
+  const triggered = [];
+  let response = null;
+  const collaborators = new Map([
+    ["hostcol_reader", { collaboratorId: "hostcol_reader", displayName: "Computer Aru", driverId: "codex" }],
+    ["hostcol_other", { collaboratorId: "hostcol_other", displayName: "Other", driverId: "codex" }],
+  ]);
+  const options = {
+    dataDir: directory,
+    readJSONBody: async (request) => request.body,
+    sendJSON: (_response, status, value) => { response = { status, value }; },
+    HttpError,
+    collaboratorForId(id) {
+      const collaborator = collaborators.get(id);
+      if (!collaborator) throw new HttpError(404, "unknown", "unknown collaborator");
+      return collaborator;
+    },
+    maximumRequestBytes: 64 * 1024 * 1024,
+    trigger(executor, replica, rule, deliveryId) {
+      triggered.push({ executor, replica, rule, deliveryId });
+    },
+    now: () => clock,
+    setTimer: () => 1,
+    clearTimer: () => {},
+    onDelivery: async () => { throw new Error("offline"); },
+  };
+  let host = createMobileCollaboratorReplicaHost(options);
+  const replica = {
+    schema: "aru.selfhost.mobile-collaborator-replica.v1",
+    sourceCollaboratorId: "phone_aru",
+    displayName: "Aru",
+    systemPrompt: "Stay close.",
+    memories: [{ title: "Memory", content: "AA likes clarity." }],
+    references: [],
+    conversations: [{
+      conversationId: "phone_conversation",
+      title: "Us",
+      baseMessageId: "phone_message",
+      messages: [{
+        messageId: "phone_message",
+        role: "user",
+        content: "hello",
+        createdAt: 900,
+        updatedAt: 900,
+      }],
+    }],
+    rules: [{
+      ruleId: "rule_one",
+      conversationId: "phone_conversation",
+      title: "Check in",
+      goal: "Say something useful",
+      instructions: "Be direct",
+      nextFireAt: 1_000,
+      recurrenceMinutes: 1,
+      notificationsEnabled: true,
+      enabled: true,
+      updatedAt: 940,
+      sourceVersion: "rule-version-1",
+    }],
+    readerHostCollaboratorIds: ["hostcol_reader"],
+    executorHostCollaboratorId: "hostcol_reader",
+    epoch: 1,
+    revision: 1,
+    generatedAt: 950,
+  };
+
+  await host.route(
+    { method: "PUT", body: replica, url: "/aru/v1/mobile-collaborator-replicas/phone_aru" },
+    {},
+    "/aru/v1/mobile-collaborator-replicas/phone_aru",
+    () => ({ deviceId: "phone" }),
+  );
+  assert.equal(response.status, 200);
+  assert.equal(response.value.sourceCollaboratorId, "phone_aru");
+
+  host.start();
+  await host.runDue();
+  assert.equal(triggered[0].executor.collaboratorId, "hostcol_reader");
+  assert.equal(triggered[0].replica.sourceCollaboratorId, "phone_aru");
+  assert.match(triggered[0].deliveryId, /^mobiledelivery_/);
+
+
+  const event = { outcome: "completed", assistantMessage: { content: "durable reply" },
+    turn: { source: "mobile-replica-proactive", sourceCollaboratorId: "phone_aru",
+      executionEpoch: 1, ruleId: "rule_one", deliveryId: triggered[0].deliveryId,
+      sourceConversationId: "phone_conversation", basisMessages: [] } };
+  await assert.doesNotReject(host.settle(event));
+  host.stop();
+  host = createMobileCollaboratorReplicaHost(options);
+  const path = "/aru/v1/mobile-collaborator-replicas/phone_aru/deliveries";
+  const fetch = () => host.route({ method: "GET", url: `${path}?epoch=1` }, {}, path, () => ({}));
+  await fetch();
+  assert.equal(response.value.deliveries.length, 1);
+  assert.equal(response.value.deliveries[0].deliveryId, event.turn.deliveryId);
+  assert.equal(response.value.deliveries[0].assistantContent, "durable reply");
+  await host.settle(event); // A duplicate completion cannot create another delivery.
+  await fetch();
+  assert.equal(response.value.deliveries.length, 1);
+  const ack = `${path}/acknowledge`;
+  for (let index = 0; index < 2; index++) {
+    await host.route({ method: "POST", url: ack, body: { epoch: 1, deliveryId: event.turn.deliveryId } }, {}, ack, () => ({}));
+  }
+  host.stop();
+  host = createMobileCollaboratorReplicaHost(options);
+  await fetch();
+  assert.equal(response.value.deliveries.length, 0);
+  host.stop();
+});

@@ -1,0 +1,96 @@
+# Host lifecycle contract
+
+This is the maintained engineering contract for Host installation, execution,
+recovery and phone delivery. Read it before changing those boundaries. It defines
+required semantics, not evidence that every existing path already satisfies them.
+
+## Product intent
+
+A Host keeps doing accepted work while its clients disconnect. Reopening a Console,
+reconnecting a phone or restarting a process must not silently replace identity,
+erase saved results or replay an external action. Recovery belongs to the owner of
+the operation, rather than an assortment of client-side guesses.
+
+## Responsibility and authority
+
+| Owner | Durable facts and permitted transitions | Consumers |
+| --- | --- | --- |
+| Installation | instance identity, installation owner, selected release; prepare, verify, activate or preserve previous release | Console and service launcher |
+| Execution | admitted attempt identity, execution evidence, terminal outcome; cancellation requests are distinct from confirmed stop | scheduler, conversation projection, drivers |
+| Delivery | saved result identity and receipt acknowledgement; fetch and repeated acknowledgement are idempotent | phone sync and notification transport |
+| Connection | authenticated Host identity and current route; an address is not identity | paired phone and Console |
+
+A phone owns its rule configuration. The Host owns progress of each admitted
+occurrence. Updating configuration must not reset consumed occurrences. An attempt
+keeps its admitted configuration identity even when a later configuration arrives.
+Revocation rejects late results under the old grant without harming unrelated work.
+
+Drivers report evidence to execution owners. Clients submit intents and render
+owner projections. A command existing, an installer exiting, or an interrupt being
+acknowledged does not prove runtime readiness, successful activation or actual stop.
+Shared helpers may implement storage or transport mechanics; do not add a global
+mutable lifecycle manager or copy domain state into Console.
+
+## Interruptions are ordinary transitions
+
+Persist admission before starting external work. Persist a result before notifying
+clients. A failed or delayed notification must not undo completion or hold up
+scheduler finalization. A phone can fetch durable results after reconnecting.
+Acknowledgement changes delivery state only; it is not execution success.
+
+On restart, distinguish never admitted, admitted with unknown outcome, and durably
+completed. Recover using the existing attempt identity and available execution
+receipts. Do not automatically retry an uncertain external side effect. When the
+external service supports idempotency, reuse its stable key; otherwise retain and
+project uncertainty and provide an owner-specific reconciliation path. This contract
+does not promise exactly-once execution across arbitrary external services.
+
+An unreadable state file is not a fresh installation. Missing optional fields from
+released schemas require explicit migration/default semantics; malformed existing
+state must not be overwritten with an empty state. Upgrade preserves identity and
+data, validates the candidate under the service identity, and keeps a recoverable
+previous installation when activation fails. Internal migrations should converge;
+external older clients require explicit versioned interoperability.
+
+## Admission for future changes
+
+For the responsibility actually changed, identify its entry point, durable owner,
+unique mutation API, external side effect and consuming projections. Name the real
+states and interruption boundaries, including how a late result is rejected. Do not
+invent states for a pure presentation change. An owner change must update the
+responsibility index and producer-to-consumer wiring in the same change.
+
+Add focused fault-injection proof at relevant handoffs: before/after durable
+admission, after effect but before receipt, after durable completion but before
+notification/acknowledgement, during cancellation, or during release activation.
+Reopen from disk rather than only reusing in-memory objects. Assert stable identity,
+retained results, no inappropriate duplicate effect, and isolation of unrelated work.
+Use released old fixtures for migration/upgrade proof when that boundary changes.
+A happy-path test alone does not prove recovery.
+
+## Source and release closure
+
+Aru integration source and the public Host distribution checkout may contain
+independent changes. Compare affected owners and tests before mirroring; never
+replace a whole file just because one checkout looks newer. Record what was synced
+and what remains divergent. Verify generated runtime and installer payloads when
+changing module dependencies. Source, local tests, packaged payload, published
+release and installed-device acceptance are separate claims.
+
+## Implementation evidence and open work
+
+2026-09-28: installation ownership is implemented in the macOS Console repair;
+public Host has per-turn cancellation and Core readiness owners. These are scoped
+source/test proofs, not universal platform acceptance.
+
+Both source trees now isolate mobile delivery notification failure from durable
+completion and finalize scheduling before waiting on notification. Focused tests
+reopen saved state after notification failure and check stable delivery identity,
+duplicate completion, repeated acknowledgement and a second restart.
+
+Still open: the two trees differ in offline continuation, revocation and occurrence
+progress. Existing startup clears in-flight replica markers; reconciliation with
+conversation execution receipts needs a complete owner-to-phone design and proof.
+Do not mark overall restart recovery or source parity complete from this document.
+No new attempt schema, automatic uncertain-task retry or data migration is introduced
+by the notification fix.

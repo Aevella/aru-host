@@ -1,5 +1,7 @@
 # Architecture boundary
 
+Installation and execution lifecycle changes follow [HOST-LIFECYCLE.md](../HOST-LIFECYCLE.md).
+
 Aru Host has three one-way responsibilities:
 
 1. **Host Core** owns paired identities, computer-hosted collaborators, durable conversations, cognition, approvals, proactive rules, page projects, pages, jobs, plugins and artifacts.

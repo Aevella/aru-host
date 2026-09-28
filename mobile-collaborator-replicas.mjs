@@ -334,7 +334,14 @@ export function createMobileCollaboratorReplicaHost({
           ledger.deliveries.push(delivery);
         }
         saveLedger();
-        await onDelivery({ ...event, mobileDelivery: publicDelivery(delivery), mobileReplica: replica });
+        // The durable delivery is authoritative; notification is only a hint.
+        // Finish scheduling before waiting on a transport that may be offline.
+        schedule();
+        try {
+          await onDelivery({ ...event, mobileDelivery: publicDelivery(delivery), mobileReplica: replica });
+        } catch {
+          log("mobile collaborator delivery saved; notification failed, phone can fetch it later");
+        }
       }
     }
     saveLedger();
