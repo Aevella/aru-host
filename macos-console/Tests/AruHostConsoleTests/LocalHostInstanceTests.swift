@@ -3,6 +3,22 @@ import Testing
 @testable import AruHostConsole
 
 struct LocalHostInstanceTests {
+    @Test func credentialsFollowSelectedInstanceWithoutInvalidatingHome() throws {
+        let home = FileManager.default.temporaryDirectory.appending(path: "host credentials \(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: home) }
+        for name in ["home", "desktop-test"] {
+            let config = home.appending(path: "Library/Application Support/Aru Self-Hosted/instances/\(name)/config")
+            try FileManager.default.createDirectory(at: config, withIntermediateDirectories: true)
+            try "ARU_INSTALL_RELEASE_VERSION=0.33.0\n".write(to: config.appending(path: "install.env"), atomically: true, encoding: .utf8)
+        }
+        try LocalHostInstance.select("home", homeDirectory: home)
+        #expect(HostCredentialVault.account(homeDirectory: home) == "home")
+        try LocalHostInstance.select("desktop-test", homeDirectory: home)
+        #expect(HostCredentialVault.account(homeDirectory: home) == "desktop-test")
+        try LocalHostInstance.select("home", homeDirectory: home)
+        #expect(HostCredentialVault.account(homeDirectory: home) == "home")
+    }
+
     @Test(arguments: [false, true], [false, true])
     func selectsExistingIdentity(hasHome: Bool, hasDefault: Bool) throws {
         let home = FileManager.default.temporaryDirectory.appending(path: "host instance \(UUID().uuidString)")
