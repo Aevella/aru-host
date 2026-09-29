@@ -1,4 +1,4 @@
-import { createMobileCollaboratorIdentityHost } from "./mobile-collaborator-identities.mjs";
+import { createMobileCollaboratorIdentityHost } from "./mobile-collaborator-replicas.mjs";
 import { randomUUID } from "node:crypto";
 import { execFile, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
