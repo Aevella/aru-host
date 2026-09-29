@@ -53,7 +53,7 @@ struct HostConsoleSidebar: View {
                     Text(L10n.hostCoreRunning)
                         .font(.system(size: 11, weight: .semibold, design: .rounded))
                 }
-                Text(runtime.manifest?.serverVersion ?? "—")
+                Text(runtime.manifest?.releaseVersion ?? runtime.manifest?.serverVersion ?? "—")
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(HostPalette.secondaryInk.opacity(0.55))
             }

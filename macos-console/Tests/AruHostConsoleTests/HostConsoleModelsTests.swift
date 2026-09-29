@@ -623,3 +623,13 @@ private final class StableOverviewURLProtocol: URLProtocol, @unchecked Sendable 
     #expect(error.errorDescription == L10n.hostStateUnreadable)
     #expect(HostCoreInstallationError.commandFailed("unrelated").errorDescription != L10n.hostStateUnreadable)
 }
+
+@Test func manifestPreservesReleaseVersionSeparatelyFromServerProtocolVersion() throws {
+    let base = #"{"schema":"test","serverId":"test","nodeKind":"home-mac","displayName":"Test","serverVersion":"stub-0.30","capabilities":{}}"#
+    let old = try JSONDecoder().decode(HostManifest.self, from: Data(base.utf8))
+    #expect(old.releaseVersion == nil)
+    let current = base.replacingOccurrences(of: "\"capabilities\"", with: "\"releaseVersion\":\"0.33.2-dev.20260929.2\",\"capabilities\"")
+    let manifest = try JSONDecoder().decode(HostManifest.self, from: Data(current.utf8))
+    #expect(manifest.releaseVersion == "0.33.2-dev.20260929.2")
+    #expect(manifest.serverVersion == "stub-0.30")
+}

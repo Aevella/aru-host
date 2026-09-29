@@ -20,6 +20,7 @@ struct HostManifest: Decodable, Equatable, Sendable {
     let nodeKind: String
     let displayName: String
     let serverVersion: String
+    let releaseVersion: String?
     let capabilities: [String: Capability]
 
     var collaboratorHost: Capability? { capabilities["collaborator-host"] }
