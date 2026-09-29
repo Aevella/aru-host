@@ -114,3 +114,26 @@ and initiative smoke pass. This is source/local verification, not a distribution
 | `tests/provider-profiles-smoke.mjs` | three-way base b4d084ac7e |
 | `tests/windows-desktop-package-smoke.sh` | different; reviewed independently |
 | `tests/windows-installer-smoke.ps1` | three-way base fcc0b43a7b |
+
+## Closure
+
+All runtime entrypoints now have a `src/` source and generated-file check. Aru uses
+an exact Git submodule pin at the former `scripts/selfhost` path; native CI initializes
+it. Fixed-file legacy startup was explicitly retested after preserving the identity
+owner import from the replica payload.
+
+Replica storage uses a redo-transaction record layout rather than rewriting all
+execution and delivery bodies. Node 18 migration/recovery tests pass. A copy of the
+real Mac acceptance instance's two executions and one delivery migrated with every
+record identical and the exact legacy file preserved; the live instance was untouched.
+Final Node suite: 100 pass, 1 platform skip. Mac Console: 42 pass. Linux/macOS installer,
+HTTP/local operator, conversation, legacy payload, Linux packaging and a signed arm64
+Mac app build pass. No production service or phone was upgraded by this consolidation.
+
+Eight old clean worktrees were removed only after preserving archive refs and a local
+Git bundle; their commits remain recoverable. The experimental whole-Host state branch
+`codex/host-durable-state` at `22ec0ba` remains separate: it requires Node 22.13 and has
+not been accepted as the runtime floor. The source-plugin permission repair `5163097`
+was integrated and its five focused tests passed. Other older candidates' runtime,
+platform and modularization changes are represented by the current public baseline;
+their development/release-note commits remain archived rather than replayed as releases.

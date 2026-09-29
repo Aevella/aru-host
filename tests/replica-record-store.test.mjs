@@ -54,3 +54,18 @@ test('history bodies are paged and scheduler saves do not rewrite old records', 
   assert.equal(existsSync(join(root, 'records-v2/transaction.json')), false);
   assert.equal('executions' in store.ledger, false);
 });
+test('acknowledgement retains continuation until a newer replica reflects the result', t => {
+  const root = fixture(t); const store = createReplicaRecordStore(root);
+  const item = { ...record(1), sourceConversationId: 'conversation', replicaRevision: 2, assistantContent: 'keep me', acknowledgedAt: null };
+  store.put('deliveries', item); store.commit(store.ledger);
+  store.put('deliveries', { ...item, acknowledgedAt: 3 });
+  store.retireContinuation('phone', 1, 2); store.commit(store.ledger);
+  assert.equal(store.pending('deliveries', 'phone', 1).length, 0);
+  assert.equal(store.continuation('phone', 1, 'conversation', 24).length, 1);
+  store.retireContinuation('phone', 1, 3); store.commit(store.ledger);
+  assert.equal(store.continuation('phone', 1, 'conversation', 24).length, 0);
+  store.put('deliveries', { ...item, acknowledgedAt: 3 });
+  store.retireContinuation('phone', 1, 3); store.commit(store.ledger);
+  assert.equal(store.continuation('phone', 1, 'conversation', 24).length, 0);
+  assert.equal(store.get('deliveries', 'phone', 1, item.deliveryId).assistantContent, 'keep me');
+});
