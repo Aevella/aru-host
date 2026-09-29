@@ -1,3 +1,4 @@
+export const replicaStorageVersion = 2;
 import { createReplicaRecordStore } from "./replica-record-store.mjs";
 import { randomUUID } from "node:crypto";
 import {

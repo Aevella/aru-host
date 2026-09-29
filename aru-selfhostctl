@@ -237,6 +237,13 @@ rollback_command() {
   previous="$(readlink /opt/aru-selfhost/previous 2>/dev/null || true)"
   [[ -n "$current" && -n "$previous" ]] || die "no previous release is installed"
   load_node_config
+  if [[ -d "$ARU_DATA_DIR/mobile-collaborator-replicas/records-v2" ]]; then
+    "${ARU_NODE_BINARY:-node}" --input-type=module - "/opt/aru-selfhost/$previous/mobile-collaborator-replicas.mjs" <<'NODE' || die "previous release cannot read migrated execution records; current release unchanged"
+import { pathToFileURL } from 'node:url';
+const module = await import(pathToFileURL(process.argv[2]));
+if (module.replicaStorageVersion !== 2) process.exit(1);
+NODE
+  fi
   runuser -u aru-selfhost -- "${ARU_NODE_BINARY:-node}" "/opt/aru-selfhost/$previous/server.mjs" --data-dir "$ARU_DATA_DIR" --container-runtime none --check-state || die "previous release cannot read current data; current release unchanged"
   if [[ -n "${ARU_PROVIDER_SECRET_ROOT:-}" ]]; then
     "${ARU_NODE_BINARY:-node}" --input-type=module - "/opt/aru-selfhost/$previous/provider-secret-store.mjs" "$ARU_PROVIDER_SECRET_ROOT" <<'NODE' || die "previous release cannot use current provider credentials; current release unchanged"

@@ -139,3 +139,18 @@ not been accepted as the runtime floor. The source-plugin permission repair `516
 was integrated and its five focused tests passed. Other older candidates' runtime,
 platform and modularization changes are represented by the current public baseline;
 their development/release-note commits remain archived rather than replayed as releases.
+
+## Post-review verification
+
+The provider-profile smoke fixture still provisioned the retired native vault only,
+so canonical availability correctly failed. It now provisions the canonical master
+key and checks sealed-file read/write/delete; its POSIX-specific block runs on Unix,
+while Windows has separate DPAPI checks. This failure did not establish production
+key loss. Public Linux installations already using sealed files need no key-format
+conversion; native `.secret` installations require the one-time verified import.
+
+Manual rollback now checks record-format compatibility before changing the active
+release on Linux and macOS. Mac command tests verify both rejection without service
+stop and successful same-format switching. This is not a v2-to-v1 downgrade tool.
+A release still requires controlled installed-upgrade acceptance for the final source;
+earlier physical acceptance is not reused as proof of the new record migration.

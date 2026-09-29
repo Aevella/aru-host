@@ -172,6 +172,7 @@ return { createReplicaRecordStore };
 
 // src/host/mobile-collaborator-replicas.mjs
 const module0 = (() => {
+const replicaStorageVersion = 2;
 const { createReplicaRecordStore } = module1;
 const { randomUUID } = node2;
 const {
@@ -896,7 +897,7 @@ function createMobileCollaboratorIdentityHost({ state, saveState, readJSONBody, 
   }
   return { route, inventory, ownerForId };
 }
-return { createMobileCollaboratorReplicaHost, createMobileCollaboratorIdentityHost };
+return { replicaStorageVersion, createMobileCollaboratorReplicaHost, createMobileCollaboratorIdentityHost };
 })();
 
 export const { createMobileCollaboratorReplicaHost, createMobileCollaboratorIdentityHost } = module0;

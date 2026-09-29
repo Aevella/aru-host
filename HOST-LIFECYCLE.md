@@ -144,3 +144,10 @@ to a pre-record-store Host requires explicit recovery planning: do not restore a
 old snapshot over work admitted since migration. Tests cover interrupted activation,
 post-journal and post-publication restart, acknowledgement, no replay and scoped
 history. This remains source/local test evidence until a new release is installed.
+
+Rollback admission: the Linux and macOS manual rollback commands check the target
+replica storage version before replacing the running release when records-v2 exists.
+A pre-record-store release is rejected without stopping the current instance.
+Same-format rollback remains available. The old ledger backup is recovery evidence,
+not a safe replacement for new executions admitted after migration. No automatic
+lossless downgrade to the v1 ledger is claimed.
