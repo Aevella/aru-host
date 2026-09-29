@@ -441,8 +441,6 @@ install -m 0644 "$SOURCE_DIR/collaborator-host.mjs" "$release_dir/collaborator-h
 install -m 0644 "$SOURCE_DIR/mobile-collaborator-identities.mjs" "$release_dir/mobile-collaborator-identities.mjs"
 install -m 0644 "$SOURCE_DIR/container-runtime-setup.mjs" "$release_dir/container-runtime-setup.mjs"
 install -m 0644 "$SOURCE_DIR/mobile-collaborator-replicas.mjs" "$release_dir/mobile-collaborator-replicas.mjs"
-install -m 0644 "$SOURCE_DIR/mobile-collaborator-identities.mjs" "$release_dir/mobile-collaborator-identities.mjs"
-install -m 0644 "$SOURCE_DIR/container-runtime-setup.mjs" "$release_dir/container-runtime-setup.mjs"
 install -m 0644 "$SOURCE_DIR/collaborator-cognition.mjs" "$release_dir/collaborator-cognition.mjs"
 install -m 0644 "$SOURCE_DIR/collaborator-surface-bundles.mjs" "$release_dir/collaborator-surface-bundles.mjs"
 install -m 0644 "$SOURCE_DIR/collaborator-surfaces.mjs" "$release_dir/collaborator-surfaces.mjs"
@@ -493,21 +491,6 @@ provider_secret_credential="$credential_dir/provider-secrets.key.cred"
 operator_credential="$credential_dir/local-operator.credential"
 install -d -m 0700 "$credential_dir"
 install -d -m 0700 "$provider_secret_dir"
-if [[ -n "$INSTALL_ROOT" ]]; then
-  if [[ ! -f "$provider_secret_key" ]]; then
-    node -e 'require("node:fs").writeFileSync(process.argv[1], require("node:crypto").randomBytes(32), { mode: 0o640, flag: "wx" })' \
-      "$provider_secret_key"
-  fi
-  chmod 0640 "$provider_secret_key"
-else
-  command -v systemd-creds >/dev/null 2>&1 \
-    || die "systemd-creds is required to protect the headless provider vault key"
-  if [[ ! -f "$provider_secret_credential" ]]; then
-    node -e 'process.stdout.write(require("node:crypto").randomBytes(32))' \
-      | systemd-creds encrypt --name=aru-provider-vault-key - "$provider_secret_credential" >/dev/null
-  fi
-  chmod 0600 "$provider_secret_credential"
-fi
 if [[ ! -f "$operator_credential" ]]; then
   node -e 'require("node:fs").writeFileSync(process.argv[1], require("node:crypto").randomBytes(32).toString("base64url"), { mode: 0o600, flag: "wx" })' \
     "$operator_credential"
@@ -571,12 +554,11 @@ ARU_TRANSPORT_KIND="$TRANSPORT_KIND"
 ARU_DISPLAY_NAME="$DISPLAY_NAME"
 ARU_NODE_KIND="vps"
 ARU_LOCAL_OPERATOR_CREDENTIAL_FILE="/var/lib/aru-selfhost/credentials/local-operator.credential"
-ARU_PROVIDER_SECRET_CREDENTIAL_ID="aru-provider-vault-key"
-if [[ -n "$INSTALL_ROOT" ]]; then
-  ARU_PROVIDER_SECRET_KEY_FILE="/var/lib/aru-selfhost/credentials/provider-secrets.key"
-else
-  ARU_PROVIDER_SECRET_KEY_FILE=""
-fi
+ARU_PROVIDER_SECRET_CREDENTIAL_ID=""
+ARU_PROVIDER_SECRET_KEY_FILE=""
+# Preserve the previous native key only for verified, one-time import.
+if [[ -f "$provider_secret_credential" ]]; then ARU_PROVIDER_SECRET_CREDENTIAL_ID="aru-provider-vault-key"; fi
+if [[ -f "$provider_secret_key" ]]; then ARU_PROVIDER_SECRET_KEY_FILE="/var/lib/aru-selfhost/credentials/provider-secrets.key"; fi
 ARU_PROVIDER_SECRET_ROOT="/var/lib/aru-selfhost/provider-secrets"
 ARU_CONTAINER_RUNTIME="podman"
 ARU_MAX_PACKAGE_MB="2048"
@@ -616,17 +598,20 @@ write_env "$(root_path /etc/aru-selfhost/install.env)" \
   ARU_INSTALL_SKIP_CADDY ARU_INSTALL_SKIP_FIREWALL
 
 install -m 0644 "$SOURCE_DIR/aru-selfhost.service" "$(root_path /etc/systemd/system/$SERVICE_NAME)"
+if [[ -f "$provider_secret_credential" ]]; then
+  node -e 'const fs=require("fs"),p=process.argv[1];fs.writeFileSync(p,fs.readFileSync(p,"utf8").replace("[Service]", "[Service]\nLoadCredentialEncrypted=aru-provider-vault-key:/var/lib/aru-selfhost/credentials/provider-secrets.key.cred"))' "$(root_path /etc/systemd/system/$SERVICE_NAME)"
+fi
 install -m 0755 "$SOURCE_DIR/aru-selfhostctl" "$(root_path /usr/local/bin/aru-selfhost)"
 
 if [[ -z "$INSTALL_ROOT" ]]; then
   mkdir -p /var/lib/aru-selfhost/data /var/lib/aru-selfhost/tmp
   chown -R "$SERVICE_USER:$SERVICE_USER" /var/lib/aru-selfhost
   chown root:root /var/lib/aru-selfhost/credentials
-  chown root:root /var/lib/aru-selfhost/credentials/provider-secrets.key.cred
+  [[ ! -f "$provider_secret_credential" ]] || chown root:root "$provider_secret_credential"
   chown root:root /var/lib/aru-selfhost/credentials/local-operator.credential
   chown -R "$SERVICE_USER:$SERVICE_USER" /var/lib/aru-selfhost/provider-secrets
   chmod 0700 /var/lib/aru-selfhost/credentials
-  chmod 0600 /var/lib/aru-selfhost/credentials/provider-secrets.key.cred
+  [[ ! -f "$provider_secret_credential" ]] || chmod 0600 "$provider_secret_credential"
   chmod 0600 /var/lib/aru-selfhost/credentials/local-operator.credential
   chmod 0700 /var/lib/aru-selfhost/provider-secrets
   chown "root:$SERVICE_USER" /etc/aru-selfhost/node.env

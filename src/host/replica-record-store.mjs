@@ -50,6 +50,7 @@ export function createReplicaRecordStore(root, { fault = () => {}, onRead = () =
       const text = readFileSync(legacy, 'utf8');
       old = text === guard && existsSync(backup) ? read(backup) : JSON.parse(text);
     }
+    if (!old || typeof old !== 'object' || Array.isArray(old) || (old.schema && old.schema !== 'aru.selfhost.mobile-collaborator-ledger.v1')) throw new Error('unsupported or unreadable mobile replica ledger');
     for (const key of ['replicas', 'deliveries', 'executions', 'revokedExecutions']) {
       old[key] ??= [];
       if (!Array.isArray(old[key])) throw new Error(`mobile replica ${key} is unreadable`);
@@ -73,6 +74,8 @@ export function createReplicaRecordStore(root, { fault = () => {}, onRead = () =
   }
   const pendingTransaction = join(directory, 'transaction.json');
   if (existsSync(pendingTransaction)) { apply(directory, read(pendingTransaction)); unlinkSync(pendingTransaction); }
+  const ledger = read(join(directory, 'scheduler.json'));
+  if (ledger.schema !== 'aru.selfhost.mobile-collaborator-ledger.v2' || !Array.isArray(ledger.replicas)) throw new Error('unreadable replica scheduler state');
   let failed = false;
   let operations = [];
   const staged = new Map();
@@ -113,7 +116,7 @@ export function createReplicaRecordStore(root, { fault = () => {}, onRead = () =
       .map(name => get(kind, source, epoch, name.slice(0, -5)));
   }
   return {
-    ledger: read(join(directory, 'scheduler.json')), get, put, indexed, pending,
+    ledger, get, put, indexed, pending,
     continuation(source, epoch, conversationId, limit) {
       assertHealthy();
       const files = names(join(directory, 'continuation', scope(source, epoch))).sort().reverse();

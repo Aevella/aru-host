@@ -12,9 +12,11 @@ turn cancellation, LAN address resolution, Windows npm shims, daily schedules,
 revocation, keyless profiles, API-key origin protection and fixed-list upgraders.
 Native additions retained: async/coalesced driver probes, newest installed Codex and
 package-manager discovery, message time context, provider diagnostic probes, local
-operator CLI and explicitly configured encrypted Linux vault. Both deployed Linux
-secret formats remain selected by their existing installation settings; no credential
-migration or live installation conversion is performed in this source merge.
+operator CLI and a one-time import from the native encrypted Linux vault. Linux
+uses the public sealed-file store as its canonical format. Import decrypts and verifies
+each old profile before marking completion; original ciphertext and key remain as
+recovery evidence. Existing canonical secrets win. Fresh installations create no second
+vault. No live installation conversion was performed during this source work.
 
 `mobile-collaborator-identities.mjs` remains the public re-export of the owner bundled
 inside the pre-existing replica payload, preserving old fixed-list installer startup.
@@ -126,7 +128,7 @@ Replica storage uses a redo-transaction record layout rather than rewriting all
 execution and delivery bodies. Node 18 migration/recovery tests pass. A copy of the
 real Mac acceptance instance's two executions and one delivery migrated with every
 record identical and the exact legacy file preserved; the live instance was untouched.
-Final Node suite: 100 pass, 1 platform skip. Mac Console: 42 pass. Linux/macOS installer,
+Final Node suite: 102 pass, 1 platform skip. Mac Console: 42 pass. Linux/macOS installer,
 HTTP/local operator, conversation, legacy payload, Linux packaging and a signed arm64
 Mac app build pass. No production service or phone was upgraded by this consolidation.
 
