@@ -157,6 +157,8 @@ done
 tar -xOf "$artifacts/aru-selfhost-macos.tar.gz" release.json \
   | grep -Fq '"version":"0.28.0-test"'
 
+bash "$SELFHOST_DIR/tests/macos-installer-spaces.sh"
+
 echo "ARU_SELFHOST_MACOS_INSTALLER_SMOKE_OK"
 
 bash "$SELFHOST_DIR/tests/macos-installer-spaces.sh"

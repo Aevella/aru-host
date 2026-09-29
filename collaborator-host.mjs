@@ -1,6 +1,6 @@
-import { createMobileCollaboratorIdentityHost } from "./mobile-collaborator-replicas.mjs";
+import { createMobileCollaboratorIdentityHost } from "./mobile-collaborator-identities.mjs";
 import { randomUUID } from "node:crypto";
-import { spawnSync } from "node:child_process";
+import { execFile, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -12,6 +12,7 @@ import { createCodexAppServerDriver } from "./codex-app-server-driver.mjs";
 // The Host must still start; Claude Code then reports unavailable until the
 // next upgrade installs its files.
 const claudeCodeModule = await import("./claude-code-driver.mjs").catch(() => null);
+
 import { createCollaboratorConversationHost } from "./collaborator-conversations.mjs";
 import { createCollaboratorInitiativeHost } from "./collaborator-initiative.mjs";
 import { createCollaboratorProjectHost } from "./collaborator-projects.mjs";
@@ -41,11 +42,18 @@ const LOCAL_DRIVER_DEFINITIONS = [
         "/Applications/ChatGPT.app/Contents/Resources/codex",
         `${homedir()}/Applications/ChatGPT.app/Contents/Resources/codex`,
         "/Applications/Codex.app/Contents/Resources/codex",
+        "/Applications/ChatGPT.app/Contents/Resources/codex",
+        `${homedir()}/Applications/ChatGPT.app/Contents/Resources/codex`,
         `${homedir()}/Applications/Codex.app/Contents/Resources/codex`,
         `${homedir()}/.local/bin/codex`,
         "/opt/homebrew/bin/codex",
         "/usr/local/bin/codex",
       ],
+    // launchd trims PATH, so an npm-global / nvm / fnm / volta install is only
+    // reachable through the same package-manager discovery Claude Code uses.
+    discoverExecutableCandidates: process.platform === "win32"
+      ? null
+      : () => nodePackageExecutableCandidates("codex"),
     adapter: "codex-app-server",
     transport: "loopback-websocket",
     integrationGuide: "https://github.com/openai/codex/tree/main/codex-rs/app-server",
@@ -66,6 +74,12 @@ const LOCAL_DRIVER_DEFINITIONS = [
         `${homedir()}/.claude/local/claude`,
         "/opt/homebrew/bin/claude",
         "/usr/local/bin/claude",
+      ],
+    discoverExecutableCandidates: process.platform === "win32"
+      ? null
+      : () => [
+        ...(process.platform === "darwin" ? claudeDesktopExecutableCandidates() : []),
+        ...nodePackageExecutableCandidates("claude"),
       ],
     adapter: "claude-code-cli",
     transport: "stream-json",
@@ -104,9 +118,11 @@ export function createCollaboratorHost({
   providerSecretStore = createProviderSecretStore(),
   conversationHostFactory = createCollaboratorConversationHost,
   onTurnSettled = async () => {},
-  probeLocalDriver = probeDriver,
   log = () => {},
   now = Date.now,
+  probeLocalDriver = probeDriver,
+  retryLocalDriverProbe = probeDriverAsync,
+  driverProbeRetryMs = 30_000,
 }) {
   state.agentDriverProbes ??= [];
   state.hostedCollaborators ??= [];
@@ -219,8 +235,6 @@ export function createCollaboratorHost({
     collaboratorIds: () => state.hostedCollaborators
       .filter((collaborator) => !collaborator.archivedAt)
       .map((collaborator) => collaborator.collaboratorId),
-    conversationExists: (collaboratorId, conversationId) =>
-      conversations.hasConversation(collaboratorId, conversationId),
     trigger: (collaborator, rule) => conversations.runProactive(collaborator, rule),
     now,
     log,
@@ -241,14 +255,14 @@ export function createCollaboratorHost({
     ];
   }
 
-  async function executeConversationTool(name, args, device, collaborator, context) {
+  async function executeConversationTool(name, args, device, collaborator) {
     const surfaceCall = surfaces.callSelfTool(name, args, device, collaborator);
     if (surfaceCall.matched) return surfaceCall.value;
     const projectCall = projects.callSelfTool(name, args, device, collaborator);
     if (projectCall.matched) return projectCall.value;
     const cognitionCall = cognition.callSelfTool(name, args, device, collaborator);
     if (cognitionCall.matched) return cognitionCall.value;
-    const initiativeCall = initiative.callSelfTool(name, args, device, collaborator, context);
+    const initiativeCall = initiative.callSelfTool(name, args, device, collaborator);
     if (initiativeCall.matched) return initiativeCall.value;
     const mobileReplicaCall = mobileReplicas.callSelfTool(name, args, device, collaborator);
     if (mobileReplicaCall.matched) return mobileReplicaCall.value;
@@ -266,7 +280,65 @@ export function createCollaboratorHost({
     return driverInventory();
   }
 
-  // Capability discovery must not scan durable conversations or attachments.
+  // Startup probes run before serving requests. Every live refresh is asynchronous.
+  // A manual refresh supersedes older automatic work; only its generation may publish.
+  let probeGeneration = 0;
+  let staleProbeRetry = null;
+  let manualProbeRefresh = null;
+
+  async function publishDriverProbes(definitions, generation) {
+    const checkedAt = now();
+    const retried = await Promise.all(definitions.map(async (definition) => {
+      try {
+        return await retryLocalDriverProbe(definition, checkedAt);
+      } catch (error) {
+        log(`driver probe failed for ${definition.id}: ${error?.message ?? error}`);
+        return { ...unavailableProbe(definition, checkedAt), failure: "version-probe-failed" };
+      }
+    }));
+    if (generation !== probeGeneration) return;
+    const byId = new Map(retried.map((probe) => [probe.id, probe]));
+    const current = new Map(state.agentDriverProbes.map((probe) => [probe.id, probe]));
+    state.agentDriverProbes = LOCAL_DRIVER_DEFINITIONS
+      .map((definition) => byId.get(definition.id) ?? current.get(definition.id))
+      .filter(Boolean);
+    saveState();
+    // Executable resolution stays with driver launch; do not run its synchronous
+    // --version checks here after the asynchronous inventory probes complete.
+  }
+
+  function refreshDriversAsync() {
+    if (manualProbeRefresh) return manualProbeRefresh;
+    const generation = ++probeGeneration;
+    staleProbeRetry = null;
+    const work = publishDriverProbes(LOCAL_DRIVER_DEFINITIONS, generation)
+      .then(() => driverInventory())
+      .finally(() => { if (manualProbeRefresh === work) manualProbeRefresh = null; });
+    manualProbeRefresh = work;
+    return work;
+  }
+
+  // Reads return the current inventory while one coalesced retry repairs stale,
+  // unready entries. Ready drivers are untouched by automatic retries.
+  function retryStaleDriverProbes() {
+    if (manualProbeRefresh) return manualProbeRefresh;
+    if (staleProbeRetry) return staleProbeRetry;
+    const probes = new Map(state.agentDriverProbes.map((probe) => [probe.id, probe]));
+    const checkedAt = now();
+    const stale = LOCAL_DRIVER_DEFINITIONS.filter((definition) => {
+      const probe = probes.get(definition.id);
+      if (!probe) return true;
+      if (probe.status === "ready") return false;
+      return checkedAt - (Number(probe.checkedAt) || 0) >= driverProbeRetryMs;
+    });
+    if (stale.length === 0) return null;
+    const work = publishDriverProbes(stale, probeGeneration)
+      .catch((error) => { log(`driver probe publication failed: ${error?.message ?? error}`); })
+      .finally(() => { if (staleProbeRetry === work) staleProbeRetry = null; });
+    staleProbeRetry = work;
+    return work;
+  }
+
   function driverInventory() {
     const providerInventory = providerProfiles.inventory();
     const drivers = driverInventoryWithoutExecution(providerInventory).drivers;
@@ -332,12 +404,13 @@ export function createCollaboratorHost({
     }
     if (path === "/aru/v1/agent-drivers" && req.method === "GET") {
       requireDevice();
+      retryStaleDriverProbes();
       sendJSON(res, 200, driverInventory());
       return true;
     }
     if (path === "/aru/v1/agent-drivers/refresh" && req.method === "POST") {
       requireDevice();
-      sendJSON(res, 200, refreshDrivers());
+      sendJSON(res, 200, await refreshDriversAsync());
       return true;
     }
     if (path === "/aru/v1/hosted-collaborators" && req.method === "GET") {
@@ -706,13 +779,6 @@ export function createCollaboratorHost({
   };
 }
 
-// npm installs a CLI on Windows as a `.cmd` shim next to a `node_modules`
-// tree. Node refuses to spawn `.cmd`/`.bat` files without a shell (EINVAL,
-// since the CVE-2024-27980 fix), so the shim is mapped to the JavaScript entry
-// it forwards to and launched with this Host's own Node. That avoids cmd.exe,
-// PATHEXT and console code pages entirely; a non-ASCII user directory is then
-// just an ordinary UTF-16 argument. A shim that cannot be mapped falls back to
-// a quoted shell launch. Everything else is spawned as-is.
 const NPM_SHIM_ENTRY = /"%(?:~)?dp0%?\\([^"\r\n]+?\.[cm]?js)"/i;
 
 export function driverLaunchSpec(executable, {
@@ -752,37 +818,102 @@ function probeFailureDetail(result) {
   return stderr ? `exit ${result.status}: ${stderr}` : `exit ${result.status}`;
 }
 
-// Every candidate is tried; a candidate that exists but fails no longer hides
-// the ones after it (the npm shim used to fail first and stop the search).
-export function probeDriver(definition, checkedAt) {
-  let firstFailure = null;
-  for (const executable of driverExecutableCandidates(definition)) {
-    const result = runDriverExecutable(executable, ["--version"]);
-    if (result.error?.code === "ENOENT") continue;
-    const version = firstLine(result.stdout) || firstLine(result.stderr);
-    if (result.status === 0 && version) {
-      return {
-        id: definition.id,
-        status: "ready",
-        version,
-        checkedAt,
-        failure: null,
-        failureDetail: null,
-      };
-    }
-    firstFailure ??= {
-      id: definition.id,
-      status: "unhealthy",
-      version: version || null,
-      checkedAt,
-      failure: result.error?.code === "ETIMEDOUT" ? "version-probe-timed-out" : "version-probe-failed",
-      failureDetail: `${executable}: ${probeFailureDetail(result)}`,
-    };
-  }
-  return firstFailure ?? unavailableProbe(definition, checkedAt);
+const VERSION_PROBE_OPTIONS = Object.freeze({
+  encoding: "utf8",
+  env: { ...process.env, NO_COLOR: "1" },
+  timeout: 3_000,
+  windowsHide: true,
+});
+
+// Startup probes synchronously before the host begins serving requests.
+function probeExecutableVersion(definition, executable, options) {
+  const launch = driverLaunchSpec(executable);
+  return spawnSync(launch.file, [...launch.args, "--version"], { ...options, shell: launch.shell });
 }
 
-function publicDriverDefinition({ executableCandidates: _, ...definition }) {
+export function probeDriver(definition, checkedAt) {
+  const candidates = driverExecutableCandidates(definition);
+  if (definition.id === "codex") {
+    const selected = selectNewestCodex(candidates);
+    if (selected) return readyProbe(definition, selected.version, checkedAt);
+  }
+  let firstFailure = null;
+  for (const executable of candidates) {
+    const result = probeExecutableVersion(definition, executable, VERSION_PROBE_OPTIONS);
+    const outcome = versionProbeOutcome(definition, result, checkedAt);
+    if (outcome && outcome.status !== "ready") outcome.failureDetail = `${executable}: ${probeFailureDetail(result)}`;
+    if (outcome?.status === "ready") return outcome;
+    firstFailure ??= outcome;
+  }
+  if (firstFailure) return firstFailure;
+  return unavailableProbe(definition, checkedAt);
+}
+
+// The stale-probe retry runs while the service is live, so every candidate is spawned
+// asynchronously and a hung binary only costs its own timeout, not the event loop.
+async function probeDriverAsync(definition, checkedAt) {
+  const candidates = driverExecutableCandidates(definition);
+  if (definition.id === "codex") {
+    const selected = await selectNewestCodexAsync(candidates);
+    if (selected) return readyProbe(definition, selected.version, checkedAt);
+  }
+  let firstFailure = null;
+  for (const executable of candidates) {
+    const launch = driverLaunchSpec(executable);
+    const result = await runVersionProbe(launch.file, [...launch.args, "--version"], { ...VERSION_PROBE_OPTIONS, shell: launch.shell });
+    const outcome = versionProbeOutcome(definition, result, checkedAt);
+    if (outcome?.status === "ready") return outcome;
+    firstFailure ??= outcome;
+  }
+  if (firstFailure) return firstFailure;
+  return unavailableProbe(definition, checkedAt);
+}
+
+// Shapes an execFile completion like a spawnSync result so both probe paths share one verdict.
+function runVersionProbe(executable, args = ["--version"], options = VERSION_PROBE_OPTIONS) {
+  return new Promise((resolve) => {
+    execFile(executable, args, options, (error, stdout, stderr) => {
+      if (!error) {
+        resolve({ status: 0, stdout, stderr, error: null });
+        return;
+      }
+      if (typeof error.code === "string") {
+        resolve({ status: null, stdout, stderr, error: { code: error.code } });
+        return;
+      }
+      if (error.killed) {
+        resolve({ status: null, stdout, stderr, error: { code: "ETIMEDOUT" } });
+        return;
+      }
+      resolve({ status: typeof error.code === "number" ? error.code : 1, stdout, stderr, error: null });
+    });
+  });
+}
+
+// Returns a probe when this candidate settles the verdict, or null when the next candidate
+// should be tried (the executable does not exist).
+function versionProbeOutcome(definition, result, checkedAt) {
+  if (result.error?.code === "ENOENT") return null;
+  const version = firstLine(result.stdout) || firstLine(result.stderr);
+  if (result.status === 0 && version) return readyProbe(definition, version, checkedAt);
+  return {
+    id: definition.id,
+    status: "unhealthy",
+    version: version || null,
+    checkedAt,
+    failure: result.error?.code === "ETIMEDOUT" ? "version-probe-timed-out" : "version-probe-failed",
+  };
+}
+
+function readyProbe(definition, version, checkedAt) {
+  return { id: definition.id, status: "ready", version, checkedAt, failure: null };
+}
+
+function publicDriverDefinition({
+  executableCandidates: _,
+  discoverExecutableCandidates: __,
+  ...definition
+}) {
   return definition;
 }
 
@@ -810,7 +941,6 @@ function unavailableProbe(definition, checkedAt) {
     version: null,
     checkedAt,
     failure: "command-not-found",
-    failureDetail: null,
   };
 }
 
@@ -818,20 +948,26 @@ function firstLine(value) {
   return String(value ?? "").split(/\r?\n/, 1)[0].trim().slice(0, 160);
 }
 
-// Returns the launch spec the driver must use, not the bare path: on Windows
-// the working launch may be `node <entry.js>` rather than the candidate itself.
 export function resolveDriverExecutable(definition) {
+  if (definition.id === "codex") {
+    const selected = selectNewestCodex(driverExecutableCandidates(definition));
+    if (selected) return driverLaunchSpec(selected.executable);
+  }
   for (const executable of driverExecutableCandidates(definition)) {
-    const result = runDriverExecutable(executable, ["--version"]);
+    const result = probeExecutableVersion(definition, executable, {
+      encoding: "utf8",
+      env: { ...process.env, NO_COLOR: "1" },
+      timeout: 3_000,
+      windowsHide: true,
+    });
     if (result.status === 0) return driverLaunchSpec(executable);
   }
   return null;
 }
 
 function driverExecutableCandidates(definition) {
-  const discovered = definition.id === "claude-code" && process.platform !== "win32"
-    ? [...(process.platform === "darwin" ? claudeDesktopExecutableCandidates() : []),
-      ...nodePackageExecutableCandidates("claude")]
+  const discovered = typeof definition.discoverExecutableCandidates === "function"
+    ? definition.discoverExecutableCandidates()
     : [];
   return [...new Set([...definition.executableCandidates, ...discovered])];
 }
@@ -894,4 +1030,40 @@ export function nodePackageExecutableCandidates(
   }
   candidates.push(`${env.VOLTA_HOME || `${homeDirectory}/.volta`}/bin/${binaryName}`);
   return [...new Set(candidates)];
+}
+
+// Probe installed binaries only; inventory and launch share the same version choice.
+export function selectNewestCodex(candidates, run = (executable, args, options) => { const spec = driverLaunchSpec(executable); return spawnSync(spec.file, [...spec.args, ...args], { ...options, shell: spec.shell }); }) {
+  return pickNewestCodex([...new Set(candidates)].map((executable) => ({
+    executable,
+    result: run(executable, ["--version"], VERSION_PROBE_OPTIONS),
+  })));
+}
+
+export async function selectNewestCodexAsync(candidates, run = (executable, args, options) => { const spec = driverLaunchSpec(executable); return runVersionProbe(spec.file, [...spec.args, ...args], { ...options, shell: spec.shell }); }) {
+  const unique = [...new Set(candidates)];
+  const results = await Promise.all(unique.map((executable) => run(executable, ["--version"], VERSION_PROBE_OPTIONS)));
+  return pickNewestCodex(unique.map((executable, index) => ({ executable, result: results[index] })));
+}
+
+function pickNewestCodex(probed) {
+  let selected = null;
+  for (const { executable, result } of probed) {
+    if (result.status !== 0) continue;
+    const version = firstLine(result.stdout) || firstLine(result.stderr);
+    const match = /^codex-cli (\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\s|$)/.exec(version);
+    if (!match) continue;
+    const parts = match.slice(1, 4).map(Number);
+    const prerelease = match[4] ?? "";
+    let comparison = selected ? 0 : 1;
+    if (selected) {
+      for (let i = 0; i < 3 && comparison === 0; i++) comparison = parts[i] - selected.parts[i];
+      if (comparison === 0 && prerelease !== selected.prerelease) {
+        comparison = !prerelease ? 1 : !selected.prerelease ? -1
+          : prerelease.localeCompare(selected.prerelease, "en", { numeric: true });
+      }
+    }
+    if (comparison > 0) selected = { executable, version, parts, prerelease };
+  }
+  return selected && { executable: selected.executable, version: selected.version };
 }

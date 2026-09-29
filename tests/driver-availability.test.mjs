@@ -13,6 +13,7 @@ test('driver inventory reports live capabilities without conversation statistics
   let reads = 0;
   const host = createCollaboratorHost({
     dataDir: directory, managedWorkspaceRoot: directory, state,
+    probeLocalDriver: definition => ({ id: definition.id, status: "unavailable", checkedAt: Date.now() }),
     saveState() {}, readJSONBody: async req => req.body, sendJSON() {}, HttpError: Error,
     providerSecretStore: { availability: () => ({ supported: true }), read: () => null },
     conversationHostFactory: () => ({ route: async () => false,

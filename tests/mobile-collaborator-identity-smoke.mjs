@@ -16,6 +16,7 @@ let failWrite = false;
 let revokeWhileReading = false;
 const build = () => createCollaboratorHost({
   dataDir: root, state,
+  probeLocalDriver: definition => ({ id: definition.id, status: "unavailable", checkedAt: Date.now() }),
   saveState: () => {
     if (failWrite) throw new Error("test disk write failure");
     writeFileSync(stateFile, JSON.stringify(state));

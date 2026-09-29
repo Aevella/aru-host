@@ -1,0 +1,256 @@
+#!/usr/bin/env node
+
+import { readFileSync } from "node:fs";
+import { createInterface } from "node:readline";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
+const PROFILE_ID = /^provider_[A-Fa-f0-9-]+$/;
+
+export async function runProviderCLI(
+  argv,
+  {
+    fetchImpl = fetch,
+    readCredential = () => readFileSync(requiredEnv("ARU_LOCAL_OPERATOR_CREDENTIAL_FILE"), "utf8").trim(),
+    readSecret = readAPIKey,
+    write = (value) => process.stdout.write(value),
+    baseURL = process.env.ARU_SELFHOST_CLI_BASE_URL,
+  } = {},
+) {
+  const [command, ...rawArguments] = argv;
+  if (!command || ["help", "--help", "-h"].includes(command)) {
+    write(usage());
+    return 0;
+  }
+  const { values, flags } = parseArguments(rawArguments);
+  const json = flags.has("json");
+  const request = createRequest({ fetchImpl, readCredential, baseURL });
+
+  if (command === "list") {
+    rejectUnknown(values, flags, [], ["json"]);
+    const inventory = await request("GET", "/aru/v1/provider-profiles");
+    output(inventory, json, write);
+    return 0;
+  }
+
+  if (command === "add") {
+    rejectUnknown(values, flags, [
+      "name", "protocol", "base-url", "path", "model", "auth-mode",
+      "max-output-tokens", "max-tool-rounds",
+    ], ["api-key-stdin", "json"]);
+    const protocol = values.protocol ?? "openai-compatible";
+    const authMode = values["auth-mode"] ?? (protocol === "anthropic-messages" ? "x-api-key" : "bearer");
+    const body = profileBody(values, { protocol, authMode });
+    if (authMode !== "none") body.apiKey = await readSecret({ fromStdin: flags.has("api-key-stdin") });
+    const profile = await request("POST", "/aru/v1/provider-profiles", body);
+    output(profile, json, write);
+    return 0;
+  }
+
+  if (["update", "test", "delete"].includes(command)) {
+    const profileId = rawArguments.find((value) => !value.startsWith("--"));
+    if (!PROFILE_ID.test(profileId ?? "")) throw new Error(`${command} requires a provider profile id`);
+    const positionalIndex = rawArguments.indexOf(profileId);
+    const filtered = rawArguments.filter((_, index) => index !== positionalIndex);
+    const parsed = parseArguments(filtered);
+
+    if (command === "test") {
+      rejectUnknown(parsed.values, parsed.flags, [], ["json"]);
+      const result = await request("POST", `/aru/v1/provider-profiles/${profileId}/test`);
+      output(result, parsed.flags.has("json"), write);
+      return 0;
+    }
+
+    if (command === "delete") {
+      rejectUnknown(parsed.values, parsed.flags, [], ["yes", "json"]);
+      if (!parsed.flags.has("yes")) {
+        throw new Error("delete is permanent; repeat with --yes after checking the profile id");
+      }
+      const result = await request("DELETE", `/aru/v1/provider-profiles/${profileId}`);
+      output(result, parsed.flags.has("json"), write);
+      return 0;
+    }
+
+    rejectUnknown(parsed.values, parsed.flags, [
+      "name", "protocol", "base-url", "path", "model", "auth-mode",
+      "max-output-tokens", "max-tool-rounds",
+    ], ["replace-key", "api-key-stdin", "json"]);
+    if (parsed.flags.has("api-key-stdin") && !parsed.flags.has("replace-key")) {
+      throw new Error("--api-key-stdin is valid with --replace-key");
+    }
+    const current = await request("GET", `/aru/v1/provider-profiles/${profileId}`);
+    const protocol = parsed.values.protocol ?? current.protocol;
+    const authMode = parsed.values["auth-mode"] ?? current.authMode;
+    const body = profileBody(parsed.values, {
+      protocol,
+      authMode,
+      fallback: current,
+      expectedRevision: current.revision,
+    });
+    if (authMode !== "none" && parsed.flags.has("replace-key")) {
+      body.apiKey = await readSecret({ fromStdin: parsed.flags.has("api-key-stdin") });
+    }
+    const result = await request("PUT", `/aru/v1/provider-profiles/${profileId}`, body);
+    output(result, parsed.flags.has("json"), write);
+    return 0;
+  }
+
+  throw new Error(`unknown provider command: ${command}`);
+}
+
+function createRequest({ fetchImpl, readCredential, baseURL }) {
+  const origin = String(baseURL ?? "").replace(/\/+$/, "");
+  if (!/^http:\/\/127\.0\.0\.1:\d+$/.test(origin)) {
+    throw new Error("local Host CLI origin is missing or is not loopback");
+  }
+  const credential = String(readCredential() ?? "").trim();
+  if (!credential || /[\r\n\u0000]/.test(credential)) {
+    throw new Error("local Host operator credential is unavailable");
+  }
+  return async (method, path, body) => {
+    const response = await fetchImpl(`${origin}${path}`, {
+      method,
+      headers: {
+        authorization: `Bearer ${credential}`,
+        ...(body === undefined ? {} : { "content-type": "application/json" }),
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      redirect: "error",
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(String(result.message ?? result.error ?? `Host returned HTTP ${response.status}`));
+    }
+    return result;
+  };
+}
+
+function profileBody(values, { protocol, authMode, fallback = {}, expectedRevision } = {}) {
+  const body = {
+    displayName: requiredValue(values.name ?? fallback.displayName, "--name"),
+    protocol,
+    baseURL: requiredValue(values["base-url"] ?? fallback.baseURL, "--base-url"),
+    path: values.path ?? fallback.path,
+    model: requiredValue(values.model ?? fallback.model, "--model"),
+    authMode,
+    maxOutputTokens: integerOrNull(values["max-output-tokens"], fallback.maxOutputTokens),
+    maxToolRounds: integerOrNull(values["max-tool-rounds"], fallback.maxToolRounds),
+  };
+  if (expectedRevision !== undefined) body.expectedRevision = expectedRevision;
+  return body;
+}
+
+function integerOrNull(value, fallback) {
+  if (value === undefined) return fallback ?? null;
+  if (value === "none" || value === "null") return null;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 1) throw new Error("numeric limits must be positive integers or 'none'");
+  return parsed;
+}
+
+function parseArguments(argv) {
+  const values = {};
+  const flags = new Set();
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index];
+    if (!argument.startsWith("--")) continue;
+    const name = argument.slice(2);
+    const next = argv[index + 1];
+    if (next !== undefined && !next.startsWith("--")) {
+      values[name] = next;
+      index += 1;
+    } else {
+      flags.add(name);
+    }
+  }
+  return { values, flags };
+}
+
+function rejectUnknown(values, flags, acceptedValues, acceptedFlags) {
+  for (const key of Object.keys(values)) {
+    if (!acceptedValues.includes(key)) throw new Error(`unknown option: --${key}`);
+  }
+  for (const key of flags) {
+    if (!acceptedFlags.includes(key)) throw new Error(`unknown flag: --${key}`);
+  }
+}
+
+function requiredValue(value, option) {
+  if (String(value ?? "").trim()) return value;
+  throw new Error(`${option} is required`);
+}
+
+async function readAPIKey({ fromStdin }) {
+  if (fromStdin) {
+    let body = "";
+    process.stdin.setEncoding("utf8");
+    for await (const chunk of process.stdin) body += chunk;
+    return body.replace(/[\r\n]+$/, "");
+  }
+  if (!process.stdin.isTTY) {
+    throw new Error("no terminal is attached; pipe the key and add --api-key-stdin");
+  }
+  const terminal = createInterface({ input: process.stdin, output: process.stderr });
+  const hidden = spawnSync("stty", ["-echo"], { stdio: [0, "ignore", "ignore"] });
+  if (hidden.status !== 0) {
+    terminal.close();
+    throw new Error("could not hide terminal input; use --api-key-stdin");
+  }
+  try {
+    return await new Promise((resolve) => terminal.question("API key: ", resolve));
+  } finally {
+    spawnSync("stty", ["echo"], { stdio: [0, "ignore", "ignore"] });
+    terminal.close();
+    process.stderr.write("\n");
+  }
+}
+
+function output(value, json, write) {
+  if (json) {
+    write(`${JSON.stringify(value, null, 2)}\n`);
+    return;
+  }
+  if (Array.isArray(value.profiles)) {
+    if (value.profiles.length === 0) {
+      write("No provider profiles configured.\n");
+      return;
+    }
+    for (const profile of value.profiles) {
+      write(`${profile.profileId}\t${profile.displayName}\t${profile.protocol}\t${profile.model}\t${profile.health}\n`);
+    }
+    return;
+  }
+  if (value.deleted) {
+    write(`Deleted ${value.profileId}.\n`);
+    return;
+  }
+  write(`${value.profileId}\t${value.displayName}\t${value.protocol}\t${value.model}\t${value.health}\n`);
+}
+
+function requiredEnv(name) {
+  const value = process.env[name];
+  if (!value) throw new Error(`${name} is unavailable`);
+  return value;
+}
+
+function usage() {
+  return `Usage: aru-selfhost provider <command> [options]
+
+  list [--json]
+  add --name NAME --base-url URL --model MODEL [--protocol PROTOCOL]
+      [--path PATH] [--auth-mode MODE] [--api-key-stdin] [--json]
+  update PROFILE_ID [profile options] [--replace-key] [--api-key-stdin] [--json]
+  test PROFILE_ID [--json]
+  delete PROFILE_ID --yes [--json]
+
+API keys are read from a hidden terminal. For automation, pipe only the key to
+stdin and add --api-key-stdin. API keys are never accepted as command arguments.
+`;
+}
+
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  runProviderCLI(process.argv.slice(2)).catch((error) => {
+    process.stderr.write(`aru-selfhost provider: ${error?.message ?? error}\n`);
+    process.exitCode = 1;
+  });
+}

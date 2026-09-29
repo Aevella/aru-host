@@ -411,6 +411,7 @@ function createCollaboratorConversationHost({
 
   function runReplicaProactive(executor, replica, rule, deliveryId) {
     const device = { deviceId: "host-mobile-replica-scheduler" };
+    const triggeredAt = now();
     const collaborator = {
       ...executor,
       collaboratorId: `mobilereplica_${replica.sourceCollaboratorId}`,
@@ -439,14 +440,14 @@ function createCollaboratorConversationHost({
         content,
         status: "completed",
         createdAt: Number(item.createdAt) || now(),
-        updatedAt: Number(item.createdAt) || now(),
+        updatedAt: Number(item.updatedAt) || Number(item.createdAt) || now(),
       });
     }
     touch(conversation, device.deviceId);
     saveConversation(conversation);
     return enqueueMessage(conversation, collaborator, {
       clientRequestId: `mobile_initiative_${deliveryId}`,
-      text: proactiveReplicaSeed(rule),
+      text: proactiveReplicaSeed(rule, triggeredAt, replica.generatedAt),
     }, device, {
       role: "system",
       source: "mobile-replica-proactive",
@@ -495,7 +496,10 @@ function createCollaboratorConversationHost({
         historyContext: conversationHistoryContext(conversation, turn),
         historyMessages: conversationHistoryMessages(conversation, turn),
         tools: tools.map(dynamicTool),
-        text: userMessage.driverText ?? userMessage.content,
+        text: messageContentWithTime(
+          userMessage,
+          userMessage.driverText ?? userMessage.content,
+        ),
         attachments: projectedAttachments,
         userMessageId: turn.userMessageId,
         handler: {
@@ -822,7 +826,7 @@ function createCollaboratorConversationHost({
         && item.messageId !== currentTurn.assistantMessageId
         && item.status === "completed"
         && item.content)
-      .map((item) => `${item.role === "user" ? "User" : "Assistant"}: ${item.content}`)
+      .map((item) => `${historyRoleLabel(item.role)}: ${messageContentWithTime(item)}`)
       .join("\n\n");
   }
 
@@ -832,7 +836,7 @@ function createCollaboratorConversationHost({
         && item.messageId !== currentTurn.assistantMessageId
         && item.status === "completed"
         && item.content)
-      .map((item) => ({ role: item.role, content: item.content }));
+      .map((item) => ({ role: item.role, content: messageContentWithTime(item) }));
   }
 
   function recoverInterruptedConversations() {
@@ -1083,13 +1087,42 @@ function replicaInstructions(replica) {
   ].filter(Boolean).join("\n\n");
 }
 
-function proactiveReplicaSeed(rule) {
+function proactiveReplicaSeed(rule, triggeredAt, replicaGeneratedAt) {
+  const clock = {
+    triggered_at: isoTimestamp(triggeredAt),
+    triggered_at_unix_ms: triggeredAt,
+    time_zone: String(rule.scheduleTimeZoneIdentifier ?? "UTC"),
+    replica_generated_at: isoTimestamp(replicaGeneratedAt),
+    replica_generated_at_unix_ms: replicaGeneratedAt,
+  };
   return [
+    `<runtime_clock>${JSON.stringify(clock)}</runtime_clock>`,
     "This is a scheduled proactive turn. Decide what is genuinely worth saying now and reply directly to the user.",
     rule.title ? `Rule: ${rule.title}` : "",
     rule.goal ? `Goal: ${rule.goal}` : "",
     rule.instructions ? `Instructions: ${rule.instructions}` : "",
   ].filter(Boolean).join("\n");
+}
+
+function messageContentWithTime(message, content = message.content) {
+  const metadata = {
+    sent_at: isoTimestamp(message.createdAt),
+    sent_at_unix_ms: Number(message.createdAt),
+    updated_at: isoTimestamp(message.updatedAt),
+    updated_at_unix_ms: Number(message.updatedAt),
+  };
+  return `<message_meta>${JSON.stringify(metadata)}</message_meta>\n${String(content ?? "")}`;
+}
+
+function historyRoleLabel(role) {
+  return ({ user: "User", assistant: "Assistant", system: "System", tool: "Tool" })[role]
+    ?? "Unknown";
+}
+
+function isoTimestamp(value) {
+  const milliseconds = Number(value);
+  if (!Number.isFinite(milliseconds) || milliseconds <= 0) return null;
+  return new Date(milliseconds).toISOString();
 }
 
 function validatedReplicaRole(value) {

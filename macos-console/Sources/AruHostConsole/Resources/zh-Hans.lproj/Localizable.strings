@@ -275,6 +275,7 @@
 "drivers" = "驱动";
 "collaborators" = "协作者";
 "agent.drivers" = "AI 驱动";
+"agent.drivers.refresh" = "重新探测驱动";
 "execution.ready" = "驱动与对话运行器都已就绪";
 "execution.pending" = "驱动已识别 · 对话运行器待接通";
 "provider.profiles" = "模型 API";

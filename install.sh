@@ -391,7 +391,7 @@ fetch_source_payload() {
     local entries expected_entries
     entries="$(tar -tzf "$SOURCE_TMP/bundle.tar.gz" | LC_ALL=C sort)"
     expected_entries="$(printf '%s\n' \
-      aru-selfhost-stub.mjs backup-settings.mjs conversation-turn-relay.mjs collaborator-host.mjs mobile-collaborator-replicas.mjs mobile-collaborator-identities.mjs container-runtime-setup.mjs collaborator-cognition.mjs collaborator-surface-bundles.mjs collaborator-surfaces.mjs collaborator-conversations.mjs collaborator-conversation-attachments.mjs collaborator-initiative.mjs collaborator-projects.mjs apns-push.mjs wake-bridge.mjs codex-app-server-driver.mjs claude-code-driver.mjs claude-code-host-bridge.mjs claude-code-mcp-bridge.mjs direct-api-driver.mjs provider-profiles.mjs provider-secret-store.mjs node-control.mjs node-workspaces.mjs plugin-supervisor.mjs plugin-workshop.mjs source-plugin-runtime.mjs source-plugin-runner.mjs \
+      aru-selfhost-stub.mjs backup-settings.mjs conversation-turn-relay.mjs collaborator-host.mjs mobile-collaborator-replicas.mjs mobile-collaborator-identities.mjs container-runtime-setup.mjs collaborator-cognition.mjs collaborator-surface-bundles.mjs collaborator-surfaces.mjs collaborator-conversations.mjs collaborator-conversation-attachments.mjs collaborator-initiative.mjs collaborator-projects.mjs apns-push.mjs wake-bridge.mjs codex-app-server-driver.mjs claude-code-driver.mjs claude-code-host-bridge.mjs claude-code-mcp-bridge.mjs direct-api-driver.mjs provider-profiles.mjs provider-secret-store.mjs provider-cli.mjs node-control.mjs node-workspaces.mjs plugin-supervisor.mjs plugin-workshop.mjs source-plugin-runtime.mjs source-plugin-runner.mjs \
       aru-selfhost.service aru-selfhostctl install.sh run-node.sh \
       | LC_ALL=C sort)"
     [[ "$entries" == "$expected_entries" || "$entries" == "$(printf '%s\n' "$expected_entries" release.json | LC_ALL=C sort)" ]] || die "release bundle contains an unexpected file set"
@@ -403,14 +403,14 @@ fetch_source_payload() {
   if [[ "$SOURCE_REF" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then RELEASE_VERSION="${BASH_REMATCH[1]}"; fi
   local raw="$REPO_RAW_DEFAULT/$SOURCE_REF"
   log "downloading node payload from Aevella/aru-host@$SOURCE_REF"
-  for file in aru-selfhost-stub.mjs backup-settings.mjs conversation-turn-relay.mjs collaborator-host.mjs mobile-collaborator-replicas.mjs mobile-collaborator-identities.mjs container-runtime-setup.mjs collaborator-cognition.mjs collaborator-surface-bundles.mjs collaborator-surfaces.mjs collaborator-conversations.mjs collaborator-conversation-attachments.mjs collaborator-initiative.mjs collaborator-projects.mjs apns-push.mjs wake-bridge.mjs codex-app-server-driver.mjs claude-code-driver.mjs claude-code-host-bridge.mjs claude-code-mcp-bridge.mjs direct-api-driver.mjs provider-profiles.mjs provider-secret-store.mjs node-control.mjs node-workspaces.mjs plugin-supervisor.mjs plugin-workshop.mjs source-plugin-runtime.mjs source-plugin-runner.mjs run-node.sh aru-selfhost.service aru-selfhostctl install.sh; do
+  for file in aru-selfhost-stub.mjs backup-settings.mjs conversation-turn-relay.mjs collaborator-host.mjs mobile-collaborator-replicas.mjs mobile-collaborator-identities.mjs container-runtime-setup.mjs collaborator-cognition.mjs collaborator-surface-bundles.mjs collaborator-surfaces.mjs collaborator-conversations.mjs collaborator-conversation-attachments.mjs collaborator-initiative.mjs collaborator-projects.mjs apns-push.mjs wake-bridge.mjs codex-app-server-driver.mjs claude-code-driver.mjs claude-code-host-bridge.mjs claude-code-mcp-bridge.mjs direct-api-driver.mjs provider-profiles.mjs provider-secret-store.mjs provider-cli.mjs node-control.mjs node-workspaces.mjs plugin-supervisor.mjs plugin-workshop.mjs source-plugin-runtime.mjs source-plugin-runner.mjs run-node.sh aru-selfhost.service aru-selfhostctl install.sh; do
     download "$raw/$file" -o "$SOURCE_TMP/$file"
   done
   SOURCE_DIR="$SOURCE_TMP"
 }
 
 fetch_source_payload
-for file in aru-selfhost-stub.mjs backup-settings.mjs conversation-turn-relay.mjs collaborator-host.mjs mobile-collaborator-replicas.mjs mobile-collaborator-identities.mjs container-runtime-setup.mjs collaborator-cognition.mjs collaborator-surface-bundles.mjs collaborator-surfaces.mjs collaborator-conversations.mjs collaborator-conversation-attachments.mjs collaborator-initiative.mjs collaborator-projects.mjs apns-push.mjs wake-bridge.mjs codex-app-server-driver.mjs claude-code-driver.mjs claude-code-host-bridge.mjs claude-code-mcp-bridge.mjs direct-api-driver.mjs provider-profiles.mjs provider-secret-store.mjs node-control.mjs node-workspaces.mjs plugin-supervisor.mjs plugin-workshop.mjs source-plugin-runtime.mjs source-plugin-runner.mjs run-node.sh aru-selfhost.service aru-selfhostctl install.sh; do
+for file in aru-selfhost-stub.mjs backup-settings.mjs conversation-turn-relay.mjs collaborator-host.mjs mobile-collaborator-replicas.mjs mobile-collaborator-identities.mjs container-runtime-setup.mjs collaborator-cognition.mjs collaborator-surface-bundles.mjs collaborator-surfaces.mjs collaborator-conversations.mjs collaborator-conversation-attachments.mjs collaborator-initiative.mjs collaborator-projects.mjs apns-push.mjs wake-bridge.mjs codex-app-server-driver.mjs claude-code-driver.mjs claude-code-host-bridge.mjs claude-code-mcp-bridge.mjs direct-api-driver.mjs provider-profiles.mjs provider-secret-store.mjs provider-cli.mjs node-control.mjs node-workspaces.mjs plugin-supervisor.mjs plugin-workshop.mjs source-plugin-runtime.mjs source-plugin-runner.mjs run-node.sh aru-selfhost.service aru-selfhostctl install.sh; do
   [[ -f "$SOURCE_DIR/$file" ]] || die "payload is missing $file"
 done
 
@@ -438,6 +438,8 @@ fi
 install -m 0644 "$SOURCE_DIR/backup-settings.mjs" "$release_dir/backup-settings.mjs"
 install -m 0644 "$SOURCE_DIR/conversation-turn-relay.mjs" "$release_dir/conversation-turn-relay.mjs"
 install -m 0644 "$SOURCE_DIR/collaborator-host.mjs" "$release_dir/collaborator-host.mjs"
+install -m 0644 "$SOURCE_DIR/mobile-collaborator-identities.mjs" "$release_dir/mobile-collaborator-identities.mjs"
+install -m 0644 "$SOURCE_DIR/container-runtime-setup.mjs" "$release_dir/container-runtime-setup.mjs"
 install -m 0644 "$SOURCE_DIR/mobile-collaborator-replicas.mjs" "$release_dir/mobile-collaborator-replicas.mjs"
 install -m 0644 "$SOURCE_DIR/mobile-collaborator-identities.mjs" "$release_dir/mobile-collaborator-identities.mjs"
 install -m 0644 "$SOURCE_DIR/container-runtime-setup.mjs" "$release_dir/container-runtime-setup.mjs"
@@ -457,6 +459,7 @@ install -m 0644 "$SOURCE_DIR/claude-code-mcp-bridge.mjs" "$release_dir/claude-co
 install -m 0644 "$SOURCE_DIR/direct-api-driver.mjs" "$release_dir/direct-api-driver.mjs"
 install -m 0644 "$SOURCE_DIR/provider-profiles.mjs" "$release_dir/provider-profiles.mjs"
 install -m 0644 "$SOURCE_DIR/provider-secret-store.mjs" "$release_dir/provider-secret-store.mjs"
+install -m 0755 "$SOURCE_DIR/provider-cli.mjs" "$release_dir/provider-cli.mjs"
 install -m 0644 "$SOURCE_DIR/node-control.mjs" "$release_dir/node-control.mjs"
 install -m 0644 "$SOURCE_DIR/node-workspaces.mjs" "$release_dir/node-workspaces.mjs"
 install -m 0644 "$SOURCE_DIR/plugin-supervisor.mjs" "$release_dir/plugin-supervisor.mjs"
@@ -482,6 +485,35 @@ mkdir -p \
   "$(root_path /etc/systemd/system)" \
   "$(root_path /usr/local/bin)" \
   "$(root_path /var/lib/aru-selfhost/tmp)"
+
+credential_dir="$(root_path /var/lib/aru-selfhost/credentials)"
+provider_secret_dir="$(root_path /var/lib/aru-selfhost/provider-secrets)"
+provider_secret_key="$credential_dir/provider-secrets.key"
+provider_secret_credential="$credential_dir/provider-secrets.key.cred"
+operator_credential="$credential_dir/local-operator.credential"
+install -d -m 0700 "$credential_dir"
+install -d -m 0700 "$provider_secret_dir"
+if [[ -n "$INSTALL_ROOT" ]]; then
+  if [[ ! -f "$provider_secret_key" ]]; then
+    node -e 'require("node:fs").writeFileSync(process.argv[1], require("node:crypto").randomBytes(32), { mode: 0o640, flag: "wx" })' \
+      "$provider_secret_key"
+  fi
+  chmod 0640 "$provider_secret_key"
+else
+  command -v systemd-creds >/dev/null 2>&1 \
+    || die "systemd-creds is required to protect the headless provider vault key"
+  if [[ ! -f "$provider_secret_credential" ]]; then
+    node -e 'process.stdout.write(require("node:crypto").randomBytes(32))' \
+      | systemd-creds encrypt --name=aru-provider-vault-key - "$provider_secret_credential" >/dev/null
+  fi
+  chmod 0600 "$provider_secret_credential"
+fi
+if [[ ! -f "$operator_credential" ]]; then
+  node -e 'require("node:fs").writeFileSync(process.argv[1], require("node:crypto").randomBytes(32).toString("base64url"), { mode: 0o600, flag: "wx" })' \
+    "$operator_credential"
+fi
+chmod 0600 "$operator_credential"
+ARU_LOCAL_OPERATOR_CREDENTIAL_SHA256="$(node -e 'const fs=require("node:fs"),crypto=require("node:crypto");process.stdout.write(crypto.createHash("sha256").update(fs.readFileSync(process.argv[1],"utf8").trim()).digest("hex"))' "$operator_credential")"
 
 write_env() {
   local destination="$1"
@@ -538,6 +570,14 @@ ARU_WAKE_RELAY_URL="https://wake.aelion.cn"
 ARU_TRANSPORT_KIND="$TRANSPORT_KIND"
 ARU_DISPLAY_NAME="$DISPLAY_NAME"
 ARU_NODE_KIND="vps"
+ARU_LOCAL_OPERATOR_CREDENTIAL_FILE="/var/lib/aru-selfhost/credentials/local-operator.credential"
+ARU_PROVIDER_SECRET_CREDENTIAL_ID="aru-provider-vault-key"
+if [[ -n "$INSTALL_ROOT" ]]; then
+  ARU_PROVIDER_SECRET_KEY_FILE="/var/lib/aru-selfhost/credentials/provider-secrets.key"
+else
+  ARU_PROVIDER_SECRET_KEY_FILE=""
+fi
+ARU_PROVIDER_SECRET_ROOT="/var/lib/aru-selfhost/provider-secrets"
 ARU_CONTAINER_RUNTIME="podman"
 ARU_MAX_PACKAGE_MB="2048"
 ARU_MAX_WORKSPACE_MB="512"
@@ -550,6 +590,8 @@ ARU_SHELL_IMAGE="$SHELL_IMAGE"
 write_env "$(root_path /etc/aru-selfhost/node.env)" \
   ARU_PROVIDER_SECRET_ROOT ARU_SERVER_ENTRY ARU_NODE_BINARY ARU_LISTEN_HOST ARU_PORT ARU_DATA_DIR ARU_BASE_URL ARU_WAKE_RELAY_URL \
   ARU_TRANSPORT_KIND ARU_DISPLAY_NAME ARU_NODE_KIND ARU_CONTAINER_RUNTIME \
+  ARU_LOCAL_OPERATOR_CREDENTIAL_FILE ARU_LOCAL_OPERATOR_CREDENTIAL_SHA256 \
+  ARU_PROVIDER_SECRET_CREDENTIAL_ID ARU_PROVIDER_SECRET_KEY_FILE ARU_PROVIDER_SECRET_ROOT \
   ARU_MAX_PACKAGE_MB ARU_MAX_WORKSPACE_MB ARU_MAX_WORKSPACE_OUTPUT_MB \
   ARU_CONTAINER_MEMORY ARU_CONTAINER_CPUS ARU_NODE_IMAGE ARU_PYTHON_IMAGE ARU_SHELL_IMAGE
 chmod 0640 "$(root_path /etc/aru-selfhost/node.env)"
@@ -579,6 +621,14 @@ install -m 0755 "$SOURCE_DIR/aru-selfhostctl" "$(root_path /usr/local/bin/aru-se
 if [[ -z "$INSTALL_ROOT" ]]; then
   mkdir -p /var/lib/aru-selfhost/data /var/lib/aru-selfhost/tmp
   chown -R "$SERVICE_USER:$SERVICE_USER" /var/lib/aru-selfhost
+  chown root:root /var/lib/aru-selfhost/credentials
+  chown root:root /var/lib/aru-selfhost/credentials/provider-secrets.key.cred
+  chown root:root /var/lib/aru-selfhost/credentials/local-operator.credential
+  chown -R "$SERVICE_USER:$SERVICE_USER" /var/lib/aru-selfhost/provider-secrets
+  chmod 0700 /var/lib/aru-selfhost/credentials
+  chmod 0600 /var/lib/aru-selfhost/credentials/provider-secrets.key.cred
+  chmod 0600 /var/lib/aru-selfhost/credentials/local-operator.credential
+  chmod 0700 /var/lib/aru-selfhost/provider-secrets
   chown "root:$SERVICE_USER" /etc/aru-selfhost/node.env
   chown root:root /etc/aru-selfhost/install.env
 fi

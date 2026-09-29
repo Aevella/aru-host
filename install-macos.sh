@@ -387,6 +387,8 @@ install -m 0755 "$SOURCE_DIR/aru-selfhost-stub.mjs" "$RELEASES_DIR/$release_id/s
 install -m 0644 "$SOURCE_DIR/backup-settings.mjs" "$RELEASES_DIR/$release_id/backup-settings.mjs"
 install -m 0644 "$SOURCE_DIR/conversation-turn-relay.mjs" "$RELEASES_DIR/$release_id/conversation-turn-relay.mjs"
 install -m 0644 "$SOURCE_DIR/collaborator-host.mjs" "$RELEASES_DIR/$release_id/collaborator-host.mjs"
+install -m 0644 "$SOURCE_DIR/mobile-collaborator-identities.mjs" "$RELEASES_DIR/$release_id/mobile-collaborator-identities.mjs"
+install -m 0644 "$SOURCE_DIR/container-runtime-setup.mjs" "$RELEASES_DIR/$release_id/container-runtime-setup.mjs"
 install -m 0644 "$SOURCE_DIR/mobile-collaborator-replicas.mjs" "$RELEASES_DIR/$release_id/mobile-collaborator-replicas.mjs"
 install -m 0644 "$SOURCE_DIR/mobile-collaborator-identities.mjs" "$RELEASES_DIR/$release_id/mobile-collaborator-identities.mjs"
 install -m 0644 "$SOURCE_DIR/container-runtime-setup.mjs" "$RELEASES_DIR/$release_id/container-runtime-setup.mjs"
@@ -620,6 +622,7 @@ ROLLBACK_TMP=""
 log "installed instance $INSTANCE release $release_id"
 log "canonical URL: $BASE_URL"
 if [[ "$CONTAINER_RUNTIME" == "none" ]]; then
+  log "optional scripts/OCI plugins: open Console > Runtime for Podman installation and verification; project files, page publication and phone pairing remain available"
   log "workspace jobs and OCI plugins are disabled; the isolated source-plugin workshop remains available"
 else
   log "workspace runtime: $CONTAINER_RUNTIME"

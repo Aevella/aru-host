@@ -52,6 +52,25 @@ args=(
   --shell-image "${ARU_SHELL_IMAGE:-alpine:3.22}"
 )
 
+if [[ -n "${ARU_LOCAL_OPERATOR_CREDENTIAL_SHA256:-}" ]]; then
+  args+=(--local-operator-credential-sha256 "$ARU_LOCAL_OPERATOR_CREDENTIAL_SHA256")
+fi
+
+# Production systemd decrypts the machine-bound vault key into a private
+# runtime credential directory. Test-root installs may point at a fixture key.
+if [[ -n "${ARU_PROVIDER_SECRET_CREDENTIAL_ID:-}" && -n "${CREDENTIALS_DIRECTORY:-}" ]]; then
+  ARU_PROVIDER_SECRET_KEY_FILE="$CREDENTIALS_DIRECTORY/$ARU_PROVIDER_SECRET_CREDENTIAL_ID"
+fi
+# The provider secret owner reads only these two non-secret locations. The
+# service never receives the root-only local operator bearer credential.
+if [[ -n "${ARU_PROVIDER_SECRET_KEY_FILE:-}" && -n "${ARU_PROVIDER_SECRET_ROOT:-}" ]]; then
+  [[ -r "$ARU_PROVIDER_SECRET_KEY_FILE" ]] || {
+    echo "Aru self-hosted provider vault credential is unavailable" >&2
+    exit 78
+  }
+  export ARU_PROVIDER_SECRET_KEY_FILE ARU_PROVIDER_SECRET_ROOT
+fi
+
 if [[ -n "${ARU_MANAGED_WORKSPACE_ROOT:-}" ]]; then
   args+=(--managed-workspace-root "$ARU_MANAGED_WORKSPACE_ROOT")
 fi

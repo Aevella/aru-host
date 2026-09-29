@@ -281,6 +281,7 @@ enum L10n {
     static let drivers = value("drivers")
     static let collaborators = value("collaborators")
     static let agentDrivers = value("agent.drivers")
+    static let refreshDrivers = value("agent.drivers.refresh")
     static let executionReady = value("execution.ready")
     static let executionPending = value("execution.pending")
     static let providerProfiles = value("provider.profiles")

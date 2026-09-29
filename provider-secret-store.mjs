@@ -1,6 +1,15 @@
-import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
-import { readFileSync, writeFileSync, renameSync, unlinkSync, lstatSync, constants, openSync, closeSync, fsyncSync } from "node:fs";
+import { lstatSync, constants, openSync, closeSync, fsyncSync } from "node:fs";
 import { spawnSync } from "node:child_process";
+import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -9,6 +18,7 @@ const WINDOWS_POWERSHELL_FLAGS = ["-NoProfile", "-NonInteractive", "-ExecutionPo
 const LINUX_SECRET_TOOL = "/usr/bin/secret-tool";
 const LINUX_AVAILABILITY_PROBE_SERVICE = "cn.aelion.aru.secret-service-probe.v1";
 const LINUX_AVAILABILITY_PROBE_ACCOUNT = "availability-probe";
+const LINUX_ENCRYPTED_VAULT_SCHEMA = "aru.provider-secret.v1";
 export const LINUX_AVAILABILITY_CACHE_MILLISECONDS = 5_000;
 
 export function lookupLinuxSecret({
@@ -99,7 +109,7 @@ export function createProviderSecretStore({
 } = {}) {
   // The installer selects this backend explicitly; a desktop keyring outage
   // must never silently create a second credential store.
-  if (platform === "linux" && env.ARU_PROVIDER_SECRET_ROOT) {
+  if (platform === "linux" && env.ARU_PROVIDER_SECRET_ROOT && !env.ARU_PROVIDER_SECRET_KEY_FILE) {
     return createHeadlessProviderSecretStore(env.ARU_PROVIDER_SECRET_ROOT);
   }
   let cachedAvailability;
@@ -107,6 +117,7 @@ export function createProviderSecretStore({
 
   function availability() {
     if (platform === "linux") {
+      if (usesEncryptedFileVault()) return encryptedFileAvailability();
       const timestamp = now();
       if (cachedAvailability
           && timestamp - availabilityCheckedAt < LINUX_AVAILABILITY_CACHE_MILLISECONDS) {
@@ -155,6 +166,7 @@ export function createProviderSecretStore({
   function read(profileId) {
     requireAvailable();
     if (platform === "linux") {
+      if (usesEncryptedFileVault()) return readEncryptedFile(profileId);
       const result = lookupLinuxSecret({
         run,
         service,
@@ -201,6 +213,10 @@ export function createProviderSecretStore({
     requireAvailable();
     const value = validatedSecret(secret);
     if (platform === "linux") {
+      if (usesEncryptedFileVault()) {
+        writeEncryptedFile(profileId, value);
+        return;
+      }
       const result = run(LINUX_SECRET_TOOL, [
         "store", "--label=Aru Host provider", "service", service, "account", account(profileId),
       ], {
@@ -248,6 +264,10 @@ export function createProviderSecretStore({
   function remove(profileId) {
     requireAvailable();
     if (platform === "linux") {
+      if (usesEncryptedFileVault()) {
+        removeEncryptedFile(profileId);
+        return;
+      }
       const result = run(LINUX_SECRET_TOOL, [
         "clear", "service", service, "account", account(profileId),
       ], {
@@ -298,6 +318,85 @@ export function createProviderSecretStore({
       throw new Error("Linux Secret Service 当前不可访问或尚未解锁");
     }
     throw new Error("当前系统没有可用的安全凭据存储");
+  }
+
+  function usesEncryptedFileVault() {
+    return platform === "linux"
+      && Boolean(env.ARU_PROVIDER_SECRET_KEY_FILE)
+      && Boolean(env.ARU_PROVIDER_SECRET_ROOT);
+  }
+
+  function encryptedFileAvailability() {
+    try {
+      const key = readFileSync(env.ARU_PROVIDER_SECRET_KEY_FILE);
+      if (key.length !== 32) {
+        return {
+          supported: false,
+          storage: "unavailable",
+          failure: "linux-encrypted-vault-key-invalid",
+        };
+      }
+      return { supported: true, storage: "linux-encrypted-vault", failure: null };
+    } catch {
+      return {
+        supported: false,
+        storage: "unavailable",
+        failure: "linux-encrypted-vault-key-unavailable",
+      };
+    }
+  }
+
+  function encryptedFilePath(profileId) {
+    return join(env.ARU_PROVIDER_SECRET_ROOT, `${account(profileId)}.secret`);
+  }
+
+  function readEncryptedFile(profileId) {
+    const path = encryptedFilePath(profileId);
+    if (!existsSync(path)) return null;
+    try {
+      const envelope = JSON.parse(readFileSync(path, "utf8"));
+      if (envelope.schema !== LINUX_ENCRYPTED_VAULT_SCHEMA) throw new Error("unsupported schema");
+      const key = readFileSync(env.ARU_PROVIDER_SECRET_KEY_FILE);
+      const nonce = Buffer.from(envelope.nonce, "base64");
+      const tag = Buffer.from(envelope.tag, "base64");
+      const ciphertext = Buffer.from(envelope.ciphertext, "base64");
+      const decipher = createDecipheriv("aes-256-gcm", key, nonce);
+      decipher.setAAD(Buffer.from(account(profileId), "utf8"));
+      decipher.setAuthTag(tag);
+      return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");
+    } catch {
+      throw new Error("Host 加密密钥库无法读取这个模型 API 密钥");
+    }
+  }
+
+  function writeEncryptedFile(profileId, value) {
+    const id = account(profileId);
+    const key = readFileSync(env.ARU_PROVIDER_SECRET_KEY_FILE);
+    const nonce = randomBytes(12);
+    const cipher = createCipheriv("aes-256-gcm", key, nonce);
+    cipher.setAAD(Buffer.from(id, "utf8"));
+    const ciphertext = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
+    const envelope = JSON.stringify({
+      schema: LINUX_ENCRYPTED_VAULT_SCHEMA,
+      algorithm: "aes-256-gcm",
+      nonce: nonce.toString("base64"),
+      tag: cipher.getAuthTag().toString("base64"),
+      ciphertext: ciphertext.toString("base64"),
+    });
+    mkdirSync(env.ARU_PROVIDER_SECRET_ROOT, { recursive: true, mode: 0o700 });
+    const path = encryptedFilePath(profileId);
+    const temporaryPath = `${path}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
+    writeFileSync(temporaryPath, envelope, { encoding: "utf8", mode: 0o600, flag: "wx" });
+    renameSync(temporaryPath, path);
+    chmodSync(path, 0o600);
+  }
+
+  function removeEncryptedFile(profileId) {
+    try {
+      unlinkSync(encryptedFilePath(profileId));
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw new Error("Host 加密密钥库无法删除这个模型 API 密钥");
+    }
   }
 
   return { availability, read, write, remove };

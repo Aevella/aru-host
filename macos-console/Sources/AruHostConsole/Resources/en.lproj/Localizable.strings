@@ -275,6 +275,7 @@
 "drivers" = "Drivers";
 "collaborators" = "Collaborators";
 "agent.drivers" = "AI Drivers";
+"agent.drivers.refresh" = "Refresh drivers";
 "execution.ready" = "Drivers and turn execution are ready";
 "execution.pending" = "Drivers detected · turn execution pending";
 "provider.profiles" = "Model APIs";

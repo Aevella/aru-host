@@ -633,3 +633,65 @@ private final class StableOverviewURLProtocol: URLProtocol, @unchecked Sendable 
     #expect(manifest.releaseVersion == "0.33.2-dev.20260929.2")
     #expect(manifest.serverVersion == "stub-0.30")
 }
+
+@Test @MainActor func collaboratorDriverRefreshUsesExplicitProbeEndpoint() async throws {
+    DriverRefreshURLProtocol.reset()
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [DriverRefreshURLProtocol.self]
+    let runtime = HostConsoleRuntime(
+        session: URLSession(configuration: configuration),
+        baseURL: URL(string: "http://aru-host.test")!
+    )
+
+    await runtime.refresh(.collaborators, forceDriverProbe: true)
+
+    #expect(DriverRefreshURLProtocol.requests() == [
+        "POST /aru/v1/agent-drivers/refresh",
+        "GET /aru/v1/hosted-collaborators"
+    ])
+    #expect(runtime.driverInventory?.drivers.first?.id == "codex")
+    #expect(runtime.sectionErrors[.collaborators] == nil)
+    #expect(runtime.loadingSections.isEmpty)
+}
+
+private final class DriverRefreshURLProtocol: URLProtocol, @unchecked Sendable {
+    private static let recordedRequests = Mutex<[String]>([])
+
+    static func reset() {
+        recordedRequests.withLock { $0.removeAll() }
+    }
+
+    static func requests() -> [String] {
+        recordedRequests.withLock { $0 }
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        Self.recordedRequests.withLock {
+            $0.append("\(request.httpMethod ?? "GET") \(request.url?.path ?? "")")
+        }
+        let payload: String
+        switch request.url?.path {
+        case "/aru/v1/agent-drivers/refresh":
+            payload = #"{"schema":"aru.selfhost.agent-driver-inventory.v1","refreshedAt":1784090000000,"drivers":[{"id":"codex","displayName":"Codex","status":"ready","version":"codex-cli 0.144.0","failure":null}],"execution":{"enabled":true,"status":"ready"}}"#
+        case "/aru/v1/hosted-collaborators":
+            payload = #"{"schema":"aru.selfhost.hosted-collaborator-inventory.v1","collaborators":[]}"#
+        default:
+            client?.urlProtocol(self, didFailWithError: URLError(.unsupportedURL))
+            return
+        }
+        let response = HTTPURLResponse(
+            url: request.url!,
+            statusCode: 200,
+            httpVersion: "HTTP/1.1",
+            headerFields: ["Content-Type": "application/json"]
+        )!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(payload.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+}

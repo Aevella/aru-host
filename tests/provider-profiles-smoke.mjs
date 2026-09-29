@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createProviderProfileHost } from "../provider-profiles.mjs";
 import { createProviderSecretStore } from "../provider-secret-store.mjs";
 
@@ -169,6 +172,33 @@ assert.equal(linuxSecretCalls[0].command, "/usr/bin/secret-tool");
 assert.deepEqual(linuxSecretCalls.map((call) => call.args[0]), ["lookup", "lookup", "store", "clear"]);
 assert.equal(linuxSecretCalls[2].input, "new-linux-key\n");
 assert.ok(linuxSecretCalls.every((call) => !call.args.includes("--version")));
+
+const encryptedVaultRoot = mkdtempSync(join(tmpdir(), "aru-provider-vault-"));
+try {
+  const keyFile = join(encryptedVaultRoot, "provider-secrets.key");
+  const secretRoot = join(encryptedVaultRoot, "secrets");
+  writeFileSync(keyFile, Buffer.alloc(32, 7), { mode: 0o640 });
+  const encryptedVault = createProviderSecretStore({
+    platform: "linux",
+    env: {
+      ARU_PROVIDER_SECRET_KEY_FILE: keyFile,
+      ARU_PROVIDER_SECRET_ROOT: secretRoot,
+    },
+  });
+  assert.deepEqual(encryptedVault.availability(), {
+    supported: true,
+    storage: "linux-encrypted-vault",
+    failure: null,
+  });
+  encryptedVault.write("provider_cafebabe", "headless-key-value");
+  const encryptedBytes = readFileSync(join(secretRoot, "provider_cafebabe.secret"), "utf8");
+  assert.equal(encryptedBytes.includes("headless-key-value"), false);
+  assert.equal(encryptedVault.read("provider_cafebabe"), "headless-key-value");
+  encryptedVault.remove("provider_cafebabe");
+  assert.equal(encryptedVault.read("provider_cafebabe"), null);
+} finally {
+  rmSync(encryptedVaultRoot, { recursive: true, force: true });
+}
 
 let unavailableProbeCount = 0;
 let unavailableProbeClock = 100;

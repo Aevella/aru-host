@@ -14,6 +14,7 @@ const RECEIPT_SCHEMA = "aru.selfhost.mobile-collaborator-replica-receipt.v1";
 const DELIVERY_SCHEMA = "aru.selfhost.mobile-collaborator-delivery.v1";
 const DELIVERY_INVENTORY_SCHEMA = "aru.selfhost.mobile-collaborator-delivery-inventory.v1";
 const DELIVERY_ACK_SCHEMA = "aru.selfhost.mobile-collaborator-delivery-ack.v1";
+
 const ID = /^[A-Za-z0-9_-]+$/;
 
 // Bounds the Host's own not-yet-synced messages added to one turn's context.
@@ -290,7 +291,8 @@ export function createMobileCollaboratorReplicaHost({
     for (const replica of ledger.replicas) {
       if (executionRevoked(replica.sourceCollaboratorId, replica.epoch)) continue;
       for (const rule of replica.rules ?? []) {
-        if (rule.enabled && rule.nextFireAt && rule.nextFireAt <= timestamp && !rule.inFlightDeliveryId) {
+        if (rule.enabled && rule.nextFireAt && rule.nextFireAt <= timestamp
+            && !rule.inFlightDeliveryId) {
           due.push({ replica, rule });
         }
       }
@@ -308,6 +310,7 @@ export function createMobileCollaboratorReplicaHost({
         trigger(executor, replicaContinuingOwnDeliveries(replica, rule), rule, deliveryId);
       } catch (error) {
         rule.inFlightDeliveryId = null;
+        rule.inFlightRuleVersion = null;
         const execution = ledger.executions.find((item) => item.deliveryId === deliveryId);
         execution.state = "uncertain";
         execution.failure = String(error?.message ?? error);
@@ -636,6 +639,8 @@ function validatedRules(value, current, epoch) {
       lastFiredAt: previous?.lastFiredAt ?? null,
       inFlightRuleVersion: previous?.inFlightRuleVersion ?? (previous?.inFlightDeliveryId ? previous.sourceVersion : null),
       inFlightDeliveryId: previous?.inFlightDeliveryId ?? null,
+      inFlightRuleVersion: previous?.inFlightRuleVersion
+        ?? (previous?.inFlightDeliveryId ? previous.sourceVersion : null),
     };
   });
 }

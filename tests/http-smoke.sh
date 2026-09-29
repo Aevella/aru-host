@@ -908,7 +908,9 @@ mcp_call="$(curl -fsS -X POST "http://127.0.0.1:$port/aru/v1/mcp" \
   --data '{"jsonrpc":"2.0","id":"call","method":"tools/call","params":{"name":"aru_node_status","arguments":{}}}')"
 printf '%s' "$mcp_call" | node -e '
   let b="";process.stdin.on("data",c=>b+=c);process.stdin.on("end",()=>{
-    const r=JSON.parse(b);if(!r.result?.structuredContent?.serverId||r.result?.isError!==false)process.exit(1)
+    const r=JSON.parse(b);if(!r.result?.structuredContent?.serverId||r.result?.isError!==false)process.exit(1);
+    const scope=r.result.structuredContent.workspaceRuntimeDescription;
+    if(!scope?.includes("Node/Python/Shell")||!scope.includes("Project files and page publication are independent"))process.exit(2)
   });'
 if printf '%s' "$mcp_call" | grep -Fq -- "$credential"; then
   echo "credential leaked into MCP response" >&2
