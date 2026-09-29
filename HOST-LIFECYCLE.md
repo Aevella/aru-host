@@ -131,8 +131,16 @@ Wake bridge validation now uses the injected HttpError class, so authenticated
 invalid fields produce 400 with a field message, while bad authentication remains
 401. These follow-up changes are source/test evidence, not a new VPS deployment.
 
-Known storage debt remains: execution and delivery arrays grow in ledger.json and
-are rewritten on saves. Do not truncate them to a fixed record count: undelivered
-results, continuation context, duplicate-settlement receipts and saved execution
-content have different retention responsibilities. A bounded hot ledger requires
-separate durable history/receipt storage, not silent loss of generated replies.
+Mobile execution and delivery bodies now live in records-v2 outside the scheduler
+snapshot. Each save publishes a durable redo transaction before record/index and
+scheduler writes; startup replays storage only, never models or tools. History body
+reads are paged. Pending delivery and continuation indexes retain all undelivered
+and unreflected receipts; no age/count-based deletion is introduced.
+
+The first read migrates ledger.json into a staged record store, retaining its exact
+bytes in ledger.v1.backup.json. A guard replaces ledger.json before activation so
+old writers fail closed. Migration interruptions resume from the backup. Downgrading
+to a pre-record-store Host requires explicit recovery planning: do not restore an
+old snapshot over work admitted since migration. Tests cover interrupted activation,
+post-journal and post-publication restart, acknowledgement, no replay and scoped
+history. This remains source/local test evidence until a new release is installed.

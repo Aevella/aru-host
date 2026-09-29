@@ -60,10 +60,6 @@
     "output": "mobile-collaborator-identities.mjs"
   },
   {
-    "source": "src/host/mobile-collaborator-replicas.mjs",
-    "output": "mobile-collaborator-replicas.mjs"
-  },
-  {
     "source": "src/host/node-control.mjs",
     "output": "node-control.mjs"
   },

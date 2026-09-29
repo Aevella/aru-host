@@ -166,3 +166,30 @@ Callbacks remain bound to their original turn, and late results cannot change th
 next turn. Deletion remains blocked while stop is unconfirmed. Console and phone
 render this owner state; older distributed Hosts retain the phone's existing
 running-state cancellation affordance when `canCancel` is absent.
+
+
+## Replica execution storage
+
+`src/host/replica-record-store.mjs` owns atomic record publication and recovery.
+The mobile replica scheduler remains the only authority for admission, execution
+outcome and delivery settlement. The store receives those records; it never chooses
+whether to retry or reconcile a model operation. `records-v2/scheduler.json` contains
+rule/configuration state, not historical generated bodies. Execution/delivery files
+retain identity-scoped results; lightweight indexes serve running work, unacknowledged
+results, unreflected continuation and paged history. Page requests list index names
+but read at most the requested page bodies. Per-owner filename indexes still grow;
+this is not a constant-time database index or a migration of all Host state.json data.
+
+Transactions are redo-only storage publication: persist the transaction, publish its
+record/index files and scheduler snapshot, then remove the journal. An in-process
+write failure blocks further store access until restart reconciliation. Legacy data
+is copied completely before activation and retained as a recovery backup. This format
+works on Node 18 without adding a native SQLite dependency. The older experimental
+whole-Host SQLite branch requires Node 22.13+ and is archived separately; it is not
+silently introduced as an installation prerequisite.
+
+Conversation attachment storage and driver request projections have separate source
+modules; the existing fixed conversation deployment payload still contains them.
+Mac protocol declarations are grouped by surface. HTTP response handling and MCP
+session/catalog retrieval have separate stateless helpers; Console remains the owner
+of credential selection and observable connection state.

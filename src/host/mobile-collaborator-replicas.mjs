@@ -1,3 +1,4 @@
+import { createReplicaRecordStore } from "./replica-record-store.mjs";
 import { randomUUID } from "node:crypto";
 import {
   chmodSync,
@@ -36,12 +37,11 @@ export function createMobileCollaboratorReplicaHost({
   clearTimer = clearTimeout,
 }) {
   const root = join(dataDir, "mobile-collaborator-replicas");
-  const statePath = join(root, "ledger.json");
   mkdirSync(root, { recursive: true, mode: 0o700 });
-  const ledger = loadLedger();
-  ledger.executions ??= [];
-  if (!Array.isArray(ledger.executions)) throw new Error("mobile execution ledger is unreadable");
+  const records = createReplicaRecordStore(root);
+  const ledger = records.ledger;
   ledger.revokedExecutions ??= [];
+  for (const replica of ledger.replicas) records.retireContinuation(replica.sourceCollaboratorId, replica.epoch, replica.revision);
   let timer = null;
   let started = false;
   // Complete results are reconciled before old in-flight markers are cleared.
@@ -50,18 +50,20 @@ export function createMobileCollaboratorReplicaHost({
   // Migrate outstanding legacy rule markers once into independent attempts.
   for (const replica of ledger.replicas) {
     for (const rule of replica.rules ?? []) {
-      if (rule.inFlightDeliveryId && !ledger.executions.some((item) => item.deliveryId === rule.inFlightDeliveryId)) {
-        ledger.executions.push(executionRecord(replica, rule, rule.inFlightDeliveryId));
+      if (rule.inFlightDeliveryId && !records.get("executions", replica.sourceCollaboratorId, replica.epoch, rule.inFlightDeliveryId)) {
+        records.put("executions", executionRecord(replica, rule, rule.inFlightDeliveryId));
       }
     }
   }
-  for (const execution of ledger.executions) {
+  saveLedger();
+  for (const execution of records.running()) {
     if (execution.state !== "running") continue;
     const event = recoverDelivery(execution.sourceCollaboratorId, execution.deliveryId, execution.epoch);
     if (event) recoveryEvents.push(event);
     else {
       execution.state = "uncertain";
       execution.updatedAt = now();
+      records.put("executions", execution);
       const replica = replicaForId(execution.sourceCollaboratorId, false);
       const rule = replica?.epoch === execution.epoch
         ? replica.rules.find((item) => item.inFlightDeliveryId === execution.deliveryId) : null;
@@ -110,16 +112,13 @@ export function createMobileCollaboratorReplicaHost({
       const epoch = requestEpoch(req.url);
       const replica = replicaForId(sourceCollaboratorId, true);
       if (replica.epoch !== epoch) throw new HttpError(409, "mobile_replica.epoch_stale", "execution epoch is stale");
-      const ordered = ledger.executions.filter((item) => item.sourceCollaboratorId === sourceCollaboratorId && item.epoch === epoch)
-        .sort((a, b) => b.createdAt - a.createdAt || a.deliveryId.localeCompare(b.deliveryId));
       const cursor = new URL(req.url, "http://aru.local").searchParams.get("after");
-      const cursorIndex = cursor ? ordered.findIndex((item) => item.deliveryId === cursor) : -1;
-      if (cursor && cursorIndex < 0) throw new HttpError(409, "mobile_execution.cursor_stale", "refresh execution history");
-      const start = cursorIndex + 1;
-      const executions = ordered.slice(start, start + 50);
+      const page = records.indexed("executions", sourceCollaboratorId, epoch, { after: cursor, limit: 51 });
+      if (!page) throw new HttpError(409, "mobile_execution.cursor_stale", "refresh execution history");
+      const executions = page.slice(0, 50);
       sendJSON(res, 200, { schema: "aru.selfhost.mobile-collaborator-execution-inventory.v1",
         sourceCollaboratorId, epoch, executions,
-        nextCursor: start + executions.length < ordered.length ? executions.at(-1).deliveryId : null });
+        nextCursor: page.length > 50 ? executions.at(-1).deliveryId : null });
       return true;
     }
     if (suffix === "/deliveries" && req.method === "GET") {
@@ -174,6 +173,7 @@ export function createMobileCollaboratorReplicaHost({
       generatedAt: positiveInteger(body.generatedAt, "generatedAt"),
       updatedAt: now(),
     };
+    records.retireContinuation(sourceCollaboratorId, epoch, revision);
     if (current) ledger.replicas.splice(ledger.replicas.indexOf(current), 1, value);
     else ledger.replicas.push(value);
     saveLedger();
@@ -188,9 +188,7 @@ export function createMobileCollaboratorReplicaHost({
     }
     return {
       schema: DELIVERY_INVENTORY_SCHEMA,
-      deliveries: ledger.deliveries
-        .filter((item) => item.sourceCollaboratorId === sourceCollaboratorId
-          && item.epoch === epoch && !item.acknowledgedAt)
+      deliveries: records.pending("deliveries", sourceCollaboratorId, epoch)
         .sort((left, right) => left.createdAt - right.createdAt || left.deliveryId.localeCompare(right.deliveryId))
         .map(publicDelivery),
     };
@@ -203,10 +201,11 @@ export function createMobileCollaboratorReplicaHost({
       throw new HttpError(409, "mobile_replica.epoch_stale", "mobile collaborator execution epoch is stale");
     }
     const deliveryId = validatedId(body?.deliveryId, "delivery");
-    const delivery = ledger.deliveries.find((item) => item.deliveryId === deliveryId
-      && item.sourceCollaboratorId === sourceCollaboratorId && item.epoch === epoch);
+    const delivery = records.get("deliveries", sourceCollaboratorId, epoch, deliveryId);
     if (!delivery) throw new HttpError(404, "mobile_delivery.unknown", "unknown mobile collaborator delivery");
     delivery.acknowledgedAt ??= now();
+    records.put("deliveries", delivery);
+    records.retireContinuation(sourceCollaboratorId, epoch, replica.revision);
     saveLedger();
     return { schema: DELIVERY_ACK_SCHEMA, deliveryId };
   }
@@ -302,7 +301,7 @@ export function createMobileCollaboratorReplicaHost({
       rule.inFlightDeliveryId = deliveryId;
       rule.inFlightRuleVersion = rule.sourceVersion;
       rule.lastFiredAt = rule.nextFireAt;
-      ledger.executions.push(executionRecord(replica, rule, deliveryId));
+      records.put("executions", executionRecord(replica, rule, deliveryId));
       advanceRule(rule, timestamp);
       saveLedger();
       try {
@@ -311,10 +310,11 @@ export function createMobileCollaboratorReplicaHost({
       } catch (error) {
         rule.inFlightDeliveryId = null;
         rule.inFlightRuleVersion = null;
-        const execution = ledger.executions.find((item) => item.deliveryId === deliveryId);
+        const execution = records.get("executions", replica.sourceCollaboratorId, replica.epoch, deliveryId);
         execution.state = "uncertain";
         execution.failure = String(error?.message ?? error);
         execution.updatedAt = now();
+        records.put("executions", execution);
         log(`mobile collaborator proactive trigger failed: ${error?.message ?? error}`);
         saveLedger();
       }
@@ -329,13 +329,9 @@ export function createMobileCollaboratorReplicaHost({
   // delivery right after the previous one.
   function replicaContinuingOwnDeliveries(replica, rule) {
     if (!rule.conversationId) return replica;
-    const pending = ledger.deliveries
-      .filter((delivery) => delivery.sourceCollaboratorId === replica.sourceCollaboratorId
-        && delivery.epoch === replica.epoch
-        && delivery.sourceConversationId === rule.conversationId
-        && !deliveryReflectedInReplica(delivery, replica))
-      .sort((left, right) => left.createdAt - right.createdAt)
-      .slice(-MAX_CONTINUED_DELIVERIES);
+    const pending = records.continuation(replica.sourceCollaboratorId, replica.epoch, rule.conversationId, MAX_CONTINUED_DELIVERIES)
+      .filter(delivery => !deliveryReflectedInReplica(delivery, replica));
+    pending.sort((a, b) => a.createdAt - b.createdAt);
     if (pending.length === 0) return replica;
     return {
       ...replica,
@@ -369,8 +365,7 @@ export function createMobileCollaboratorReplicaHost({
     const replica = replicaForId(event.turn.sourceCollaboratorId, false);
     const rule = replica?.rules?.find((candidate) => candidate.ruleId === event.turn.ruleId);
     if (!replica || replica.epoch !== event.turn.executionEpoch || executionRevoked(replica.sourceCollaboratorId, replica.epoch)) return true;
-    const execution = ledger.executions.find((item) => item.deliveryId === event.turn.deliveryId
-      && item.sourceCollaboratorId === replica.sourceCollaboratorId && item.epoch === replica.epoch);
+    const execution = records.get("executions", replica.sourceCollaboratorId, replica.epoch, event.turn.deliveryId);
     if (execution) {
       if (execution.state !== "running" && !(notify === false && execution.state === "uncertain")) return true;
     } else if (!rule || rule.inFlightDeliveryId !== event.turn.deliveryId) return true;
@@ -379,6 +374,7 @@ export function createMobileCollaboratorReplicaHost({
       execution.content = String(event.assistantMessage?.content ?? "").trim() || null;
       execution.failure = event.failure ?? null;
       execution.updatedAt = now();
+      records.put("executions", execution);
     }
     const executedRuleVersion = execution?.ruleVersion ?? event.turn.ruleVersion ?? rule?.inFlightRuleVersion ?? rule?.sourceVersion;
     if (rule?.inFlightDeliveryId === event.turn.deliveryId) {
@@ -403,8 +399,8 @@ export function createMobileCollaboratorReplicaHost({
           replicaRevision: replica.revision,
           acknowledgedAt: null,
         };
-        if (!ledger.deliveries.some((item) => item.deliveryId === delivery.deliveryId)) {
-          ledger.deliveries.push(delivery);
+        if (!records.get("deliveries", replica.sourceCollaboratorId, replica.epoch, delivery.deliveryId)) {
+          records.put("deliveries", delivery);
         }
         saveLedger();
         // The durable delivery is authoritative; notification is only a hint.
@@ -443,24 +439,7 @@ export function createMobileCollaboratorReplicaHost({
     return ledger.revokedExecutions.some((item) => item.sourceCollaboratorId === sourceCollaboratorId && epoch <= item.epoch);
   }
 
-  function loadLedger() {
-    if (!existsSync(statePath)) return { schema: "aru.selfhost.mobile-collaborator-ledger.v1", replicas: [], deliveries: [] };
-    try {
-      const value = JSON.parse(readFileSync(statePath, "utf8"));
-      value.replicas ??= [];
-      value.deliveries ??= [];
-      return value;
-    } catch {
-      throw new Error("mobile collaborator replica ledger is unreadable");
-    }
-  }
-
-  function saveLedger() {
-    const temporary = `${statePath}.${randomUUID()}.tmp`;
-    writeFileSync(temporary, `${JSON.stringify(ledger, null, 2)}\n`, { mode: 0o600 });
-    chmodSync(temporary, 0o600);
-    renameSync(temporary, statePath);
-  }
+  function saveLedger() { records.commit(ledger); }
 
   function replicaForId(sourceCollaboratorId, required) {
     const value = ledger.replicas.find((item) => item.sourceCollaboratorId === sourceCollaboratorId) ?? null;

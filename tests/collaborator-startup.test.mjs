@@ -20,7 +20,7 @@ test("startup settlement disk failure is contained and durable evidence survives
   writeFileSync(path, JSON.stringify({ replicas: [{ sourceCollaboratorId: "phone", epoch: 1, revision: 1,
     rules: [{ ruleId: "rule", inFlightDeliveryId: "delivery", inFlightRuleVersion: "v1", enabled: false }] }],
     deliveries: [], executions: [{ sourceCollaboratorId: "phone", epoch: 1, deliveryId: "delivery",
-      ruleId: "rule", ruleVersion: "v1", state: "running" }] }));
+      ruleId: "rule", ruleVersion: "v1", state: "running", createdAt: 1 }] }));
   const logs = [];
   const options = { dataDir: root, managedWorkspaceRoot: root, state: { agentDriverProbes: [{ id: "claude-code", status: "ready", checkedAt: 1 }] }, saveState() {},
     readJSONBody: async (req) => req.body, sendJSON(res, status, body) { res.status = status; res.body = body; },
@@ -37,9 +37,10 @@ test("startup settlement disk failure is contained and durable evidence survives
   assert.equal(options.state.agentDriverProbes.find((p) => p.id === "claude-code").status, "unavailable");
   assert.ok(options.state.agentDriverProbes.every((p) => p.checkedAt > 1));
   context.after(() => host.stop());
-  const durable = readFileSync(path);
+  const scheduler = join(folder, "records-v2", "scheduler.json");
+  const durable = readFileSync(scheduler);
   // Force rename failure after construction, while startup is settling its saved result.
-  rmSync(path); mkdirSync(path);
+  rmSync(scheduler); mkdirSync(scheduler);
   await host.start();
   assert.equal(logs.length, 1);
   assert.match(logs[0], /EISDIR|ENOTDIR|EEXIST/);
@@ -48,11 +49,11 @@ test("startup settlement disk failure is contained and durable evidence survives
   await host.route({ method: "GET" }, response, "/aru/v1/agent-drivers", () => ({}));
   assert.equal(response.status, 200);
   host.stop();
-  rmSync(path, { recursive: true }); writeFileSync(path, durable);
+  rmSync(scheduler, { recursive: true }); writeFileSync(scheduler, durable);
   host = createCollaboratorHost(options);
   await host.start(); host.stop();
-  const recovered = JSON.parse(readFileSync(path));
-  assert.equal(recovered.deliveries.length, 1);
-  assert.equal(recovered.deliveries[0].assistantContent, "saved reply");
-  assert.equal(recovered.executions[0].state, "completed");
+  const delivery = JSON.parse(readFileSync(join(folder, "records-v2/deliveries/phone/1/delivery.json")));
+  const execution = JSON.parse(readFileSync(join(folder, "records-v2/executions/phone/1/delivery.json")));
+  assert.equal(delivery.assistantContent, "saved reply");
+  assert.equal(execution.state, "completed");
 });
