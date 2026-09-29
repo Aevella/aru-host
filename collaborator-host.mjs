@@ -104,6 +104,7 @@ export function createCollaboratorHost({
   providerSecretStore = createProviderSecretStore(),
   conversationHostFactory = createCollaboratorConversationHost,
   onTurnSettled = async () => {},
+  probeLocalDriver = probeDriver,
   log = () => {},
   now = Date.now,
 }) {
@@ -258,7 +259,7 @@ export function createCollaboratorHost({
     state.agentDriverProbes = LOCAL_DRIVER_DEFINITIONS.map((definition) => (
       definition.id === "claude-code" && !claudeCodeModule
         ? { ...unavailableProbe(definition, now()), failure: "driver-files-missing" }
-        : probeDriver(definition, now())));
+        : probeLocalDriver(definition, now())));
     codexDriver.refreshExecutable();
     claudeCodeDriver.refreshExecutable();
     saveState();
@@ -608,7 +609,8 @@ export function createCollaboratorHost({
     };
   }
 
-  if (state.agentDriverProbes.length === 0) refreshDrivers();
+  // Persisted probes describe an earlier process, not the installed executables now.
+  refreshDrivers();
 
   function driverStatus(drivers, providerInventory) {
     const codexReady = drivers.some((driver) => driver.id === "codex" && driver.status === "ready");

@@ -84,7 +84,8 @@ struct CollaboratorSurfaceStudioView: View {
             }
             .padding(18)
         }
-        .frame(minWidth: 1020, minHeight: 700)
+        // Keep the sheet viewport independent of streamed transcript height.
+        .frame(width: 1020, height: 700)
         .preferredColorScheme(.light)
         .task {
             if let first = surfaces.first(where: { !$0.isArchived }) ?? surfaces.first {

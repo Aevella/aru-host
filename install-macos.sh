@@ -448,6 +448,7 @@ fi
 ln -sfn "releases/$release_id" "$CURRENT_LINK"
 
 write_env() {
+  local LC_ALL=C
   local destination="$1"
   shift
   : > "$destination"

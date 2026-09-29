@@ -22,7 +22,7 @@ test("startup settlement disk failure is contained and durable evidence survives
     deliveries: [], executions: [{ sourceCollaboratorId: "phone", epoch: 1, deliveryId: "delivery",
       ruleId: "rule", ruleVersion: "v1", state: "running" }] }));
   const logs = [];
-  const options = { dataDir: root, managedWorkspaceRoot: root, state: {}, saveState() {},
+  const options = { dataDir: root, managedWorkspaceRoot: root, state: { agentDriverProbes: [{ id: "claude-code", status: "ready", checkedAt: 1 }] }, saveState() {},
     readJSONBody: async (req) => req.body, sendJSON(res, status, body) { res.status = status; res.body = body; },
     HttpError, log: (line) => logs.push(line),
     probeLocalDriver: (definition) => ({ id: definition.id, status: "unavailable", checkedAt: Date.now() }),
@@ -34,6 +34,8 @@ test("startup settlement disk failure is contained and durable evidence survives
     }),
   };
   let host = createCollaboratorHost(options);
+  assert.equal(options.state.agentDriverProbes.find((p) => p.id === "claude-code").status, "unavailable");
+  assert.ok(options.state.agentDriverProbes.every((p) => p.checkedAt > 1));
   context.after(() => host.stop());
   const durable = readFileSync(path);
   // Force rename failure after construction, while startup is settling its saved result.

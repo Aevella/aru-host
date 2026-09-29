@@ -3,6 +3,31 @@ import Testing
 @testable import AruHostConsole
 
 @Suite struct HostCoreInstallerTests {
+    @Test func repairsLegacyBashByteQuotingWithoutChangingShellValue() throws {
+        let url = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: url) }
+        var bytes = Data("ARU_INSTALL_DISPLAY_NAME=$'Alyssa".utf8)
+        bytes.append(0xe7)
+        bytes.append(Data("\\232\\204MacBook Air Aru'\nARU_INSTALL_RELEASE_VERSION=0.33.0\n".utf8))
+        try bytes.write(to: url)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        #expect(try HostCoreInstallationRecord.read(at: url)?.version == "0.33.0")
+        let repaired = try String(contentsOf: url, encoding: .utf8)
+        #expect(repaired.contains("\\347\\232\\204"))
+        let process = Process(), output = Pipe()
+        process.executableURL = URL(filePath: "/bin/bash")
+        process.arguments = ["-c", "source \"$1\"; printf '%s' \"$ARU_INSTALL_DISPLAY_NAME\"", "test", url.path]
+        process.standardOutput = output
+        try process.run(); process.waitUntilExit()
+        #expect(process.terminationStatus == 0)
+        #expect(String(data: output.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) == "Alyssa的MacBook Air Aru")
+        #expect(try HostCoreInstallationRecord.read(at: url)?.contents == repaired)
+        #expect((try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? NSNumber)?.intValue == 0o600)
+        try Data([0xff, 10]).write(to: url)
+        #expect(throws: (any Error).self) { try HostCoreInstallationRecord.read(at: url) }
+        #expect(try Data(contentsOf: url) == Data([0xff, 10]))
+    }
+
     @Test func semanticUpdateOrderDoesNotDowngradePrereleases() {
         #expect(HostSemanticVersion.isNewer("0.33.0-rc.10", than: "0.33.0-rc.2"))
         #expect(!HostSemanticVersion.isNewer("0.33.0-rc.2", than: "0.33.0-rc.10"))
