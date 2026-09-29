@@ -22,12 +22,15 @@ Third-party plugins are separate permissioned lifecycle units. The official `ful
 
 ## Runtime source and installed payloads
 
-The root `aru-selfhost-stub.mjs`, `collaborator-conversations.mjs` and `conversation-turn-relay.mjs` are generated
-runtime payloads. Edit `src/` and run `node tools/build-runtime.mjs`; CI checks
-that checked-in payloads match their sources. Existing installed upgraders copy
-fixed filenames, so these deployed entrypoints must not gain new local
-runtime dependencies. Source modules are assembled into those existing files,
-not maintained as a second hand-written implementation.
+All root runtime `.mjs` files are generated deployment payloads. Handwritten runtime
+code lives under `src/`; `tools/build-runtime.mjs` assembles modular owners and emits
+fixed entrypoints listed in `tools/runtime-entries.json`. That list records each
+entrypoint's source. Imports in emitted entrypoint sources resolve from the installed
+payload root, including `import.meta.url` resource lookups. Edit the listed source,
+then regenerate; CI rejects stale output. Root `bundle-*.mjs` files are build tools.
+Released upgraders copy fixed filenames, so moving source never adds a new installed
+runtime dependency. Aru consumes an exact repository revision rather than maintaining
+a second implementation.
 
 | Source | Responsibility |
 | --- | --- |

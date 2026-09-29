@@ -70,11 +70,10 @@ A happy-path test alone does not prove recovery.
 
 ## Source and release closure
 
-Aru integration source and the public Host distribution checkout may contain
-independent changes. Compare affected owners and tests before mirroring; never
-replace a whole file just because one checkout looks newer. Record what was synced
-and what remains divergent. Verify generated runtime and installer payloads when
-changing module dependencies. Source, local tests, packaged payload, published
+Aevella/aru-host is the sole Host source authority. Aru pins an exact commit from
+this repository; it does not maintain a second editable implementation. Update the
+pin after verifying its source and protocol tests. Verify generated runtime and
+installer payloads when changing module dependencies. Source, local tests, packaged payload, published
 release and installed-device acceptance are separate claims.
 
 ## Implementation evidence and open work

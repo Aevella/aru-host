@@ -18,7 +18,9 @@ jobs:
           node-version: 22
       - name: Host and installer smoke tests
         run: |
-          node --test tests/container-runtime-setup.test.mjs tests/container-status-http.test.mjs
+          node --test tests/*.test.mjs
+          node tests/provider-cli-smoke.mjs
+          bash tests/local-operator-smoke.sh
           node --test tests/runtime-truth.test.mjs tests/turn-cancellation.test.mjs tests/codex-cancellation.test.mjs
           node tools/build-runtime.mjs --check
           node --test tests/project-async.test.mjs tests/legacy-installer-upgrade.test.mjs
