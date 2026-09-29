@@ -6,7 +6,7 @@ import Testing
     @Test func repairsLegacyBashByteQuotingWithoutChangingShellValue() throws {
         let url = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: url) }
-        var bytes = Data("ARU_INSTALL_DISPLAY_NAME=$'Alyssa".utf8)
+        var bytes = Data("ARU_INSTALL_DISPLAY_NAME=$'Example".utf8)
         bytes.append(0xe7)
         bytes.append(Data("\\232\\204MacBook Air Aru'\nARU_INSTALL_RELEASE_VERSION=0.33.0\n".utf8))
         try bytes.write(to: url)
@@ -20,7 +20,7 @@ import Testing
         process.standardOutput = output
         try process.run(); process.waitUntilExit()
         #expect(process.terminationStatus == 0)
-        #expect(String(data: output.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) == "Alyssa的MacBook Air Aru")
+        #expect(String(data: output.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) == "Example的MacBook Air Aru")
         #expect(try HostCoreInstallationRecord.read(at: url)?.contents == repaired)
         #expect((try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? NSNumber)?.intValue == 0o600)
         try Data([0xff, 10]).write(to: url)

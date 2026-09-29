@@ -12,3 +12,11 @@ Edit runtime code under `src/`. Root runtime `.mjs` files are generated payloads
 Keep root deployment names for released fixed-list upgraders. Run
 `node tools/build-runtime.mjs` after source changes and `--check` before commit.
 Root bundle/build scripts, installers and Console sources remain handwritten.
+
+## Public repository privacy
+
+Before pushing, review the full outgoing commit range, including fixtures, documents,
+commit metadata and PR text. Use synthetic names and device identifiers in tests.
+Keep personal paths, private infrastructure details, credentials, raw runtime data
+and personal operational records outside this repository. A clean latest tree does
+not remove information from earlier commits.
