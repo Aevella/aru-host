@@ -14,6 +14,17 @@ import {
 import { dirname, join, resolve } from "node:path";
 
 const RESULT_PREFIX = "ARU_SOURCE_PLUGIN_RESULT_JSON=";
+const NETWORK_PERMISSION_PROBE = [
+  "const net = require('node:net');",
+  "const server = net.createServer();",
+  "server.listen(0, '127.0.0.1', () => server.close());",
+].join("");
+const permissionDenied = (result) => {
+  const detail = `${result.stderr ?? ""}\n${result.stdout ?? ""}`;
+  return result.status !== 0
+    && (/ERR_ACCESS_DENIED/.test(detail)
+      || /Access to this API has been restricted/.test(detail));
+};
 
 export function createSourcePluginRuntime({
   dataDir,
@@ -31,7 +42,7 @@ export function createSourcePluginRuntime({
   const draftRoot = join(dataDir, "plugin-drafts");
   for (const path of [packageRoot, dataRoot, draftRoot]) mkdirSync(path, { recursive: true, mode: 0o700 });
 
-  const hostPermissionRuntime = nodeSupportsPermissions(nodeBinary);
+  const hostPermissionRuntime = nodeSupportsPluginPermissions(nodeBinary, runnerPath);
   const available = hostPermissionRuntime || Boolean(containerRuntime);
 
   function guide() {
@@ -156,6 +167,8 @@ export function createSourcePluginRuntime({
   }
 
   async function invoke(entry, permissions, resources, request, dataDirectory) {
+    requireAvailable();
+    const runtimeKind = hostPermissionRuntime ? "permissioned Node runtime" : "container runtime";
     const child = hostPermissionRuntime
       ? spawnHost(entry, permissions, resources, dataDirectory)
       : spawnContainer(entry, permissions, resources, dataDirectory);
@@ -194,17 +207,25 @@ export function createSourcePluginRuntime({
       }, callTimeoutSeconds * 1000);
       timer.unref();
     }
-    const status = await new Promise((resolveStatus, reject) => {
-      child.once("error", reject);
-      child.once("close", (code, signal) => resolveStatus({ code, signal }));
-    }).finally(() => { if (timer) clearTimeout(timer); });
+    let status;
+    try {
+      status = await new Promise((resolveStatus, reject) => {
+        child.once("error", reject);
+        child.once("close", (code, signal) => resolveStatus({ code, signal }));
+      });
+    } catch (error) {
+      throw new HttpError(503, "plugin.execution_failed",
+        `Source plugin ${runtimeKind} could not start: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
 
     if (exceeded) throw new HttpError(413, "plugin.output_too_large", "Plugin output exceeded the node budget");
     if (timedOut) throw new HttpError(408, "plugin.execution_timed_out", "Plugin call exceeded the node time budget");
     const line = stdout.toString("utf8").split(/\r?\n/)
       .reverse().find((candidate) => candidate.startsWith(RESULT_PREFIX));
     if (!line) {
-      const detail = stderr.toString("utf8").trim().slice(0, 500);
+      const detail = (stderr.toString("utf8").trim() || stdout.toString("utf8").trim()).slice(0, 500);
       throw new HttpError(503, "plugin.execution_failed",
         detail || `Plugin runner exited with ${status.signal ?? status.code}`);
     }
@@ -296,7 +317,7 @@ export function createSourcePluginRuntime({
   function requireAvailable() {
     if (!available) {
       throw new HttpError(503, "plugin.source_runtime_unavailable",
-        "Source plugins require Node.js 22+ permission mode or a container runtime");
+        "Source plugins require a container runtime or a Node.js permission runtime that enforces network denial and supports explicit network grants (Node.js 25+)");
     }
   }
 
@@ -319,9 +340,37 @@ function digestSource(sourceCode) {
   return `sha256:${createHash("sha256").update(sourceCode).digest("hex")}`;
 }
 
-function nodeSupportsPermissions(nodeBinary) {
-  const result = spawnSync(nodeBinary, ["--permission", "--eval", ""], {
+function nodeSupportsPluginPermissions(nodeBinary, readableProbePath) {
+  const base = spawnSync(nodeBinary, ["--permission", "--eval", ""], {
     encoding: "utf8",
+    timeout: 5_000,
   });
-  return result.status === 0;
+  if (base.status !== 0) return false;
+
+  const resolvedProbePath = realpathSync(readableProbePath);
+  const filesystemProbe = `require('node:fs').readFileSync(${JSON.stringify(resolvedProbePath)})`;
+  const filesystemDenied = spawnSync(nodeBinary, ["--permission", "--eval", filesystemProbe], {
+    encoding: "utf8",
+    timeout: 5_000,
+  });
+  if (!permissionDenied(filesystemDenied)) return false;
+  const filesystemGranted = spawnSync(nodeBinary,
+    ["--permission", `--allow-fs-read=${resolvedProbePath}`, "--eval", filesystemProbe], {
+      encoding: "utf8",
+      timeout: 5_000,
+    });
+  if (filesystemGranted.status !== 0) return false;
+
+  const denied = spawnSync(nodeBinary, ["--permission", "--eval", NETWORK_PERMISSION_PROBE], {
+    encoding: "utf8",
+    timeout: 5_000,
+  });
+  if (!permissionDenied(denied)) return false;
+
+  const granted = spawnSync(nodeBinary,
+    ["--permission", "--allow-net", "--eval", NETWORK_PERMISSION_PROBE], {
+      encoding: "utf8",
+      timeout: 5_000,
+    });
+  return granted.status === 0;
 }
