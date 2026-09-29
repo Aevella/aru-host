@@ -55,6 +55,10 @@ esac
 detached=false
 container_name=""
 workspace=""
+source_plugin_runner=""
+source_plugin_entry=""
+source_plugin_data=""
+network_disabled=false
 arguments=("$@")
 for ((index = 0; index < ${#arguments[@]}; index += 1)); do
   argument="${arguments[$index]}"
@@ -65,9 +69,24 @@ for ((index = 0; index < ${#arguments[@]}; index += 1)); do
     --name)
       container_name="${arguments[$((index + 1))]}"
       ;;
+    --network)
+      [[ "${arguments[$((index + 1))]}" != "none" ]] || network_disabled=true
+      ;;
     type=bind,src=*,dst=/workspace,rw)
       workspace="${argument#type=bind,src=}"
       workspace="${workspace%,dst=/workspace,rw}"
+      ;;
+    type=bind,src=*,dst=/aru/runner.mjs,ro)
+      source_plugin_runner="${argument#type=bind,src=}"
+      source_plugin_runner="${source_plugin_runner%,dst=/aru/runner.mjs,ro}"
+      ;;
+    type=bind,src=*,dst=/aru/plugin.mjs,ro)
+      source_plugin_entry="${argument#type=bind,src=}"
+      source_plugin_entry="${source_plugin_entry%,dst=/aru/plugin.mjs,ro}"
+      ;;
+    type=bind,src=*,dst=/data,rw)
+      source_plugin_data="${argument#type=bind,src=}"
+      source_plugin_data="${source_plugin_data%,dst=/data,rw}"
       ;;
   esac
 done
@@ -80,6 +99,49 @@ if [[ "$detached" == "true" ]]; then
   touch "$state_dir/containers/$container_name"
   echo "fake-$container_name"
   exit 0
+fi
+
+if [[ -n "$source_plugin_runner" || -n "$source_plugin_entry" ]]; then
+  [[ -f "$source_plugin_runner" && -f "$source_plugin_entry" ]] || {
+    echo "fake runtime received an incomplete source-plugin mount set" >&2
+    exit 2
+  }
+  node_binary="$(command -v node)"
+  source_plugin_runner_dir="$(cd "${source_plugin_runner%/*}" && pwd -P)"
+  source_plugin_entry_dir="$(cd "${source_plugin_entry%/*}" && pwd -P)"
+  source_plugin_runner="$source_plugin_runner_dir/${source_plugin_runner##*/}"
+  source_plugin_entry="$source_plugin_entry_dir/${source_plugin_entry##*/}"
+  permission_args=(
+    --permission
+    "--allow-fs-read=$source_plugin_runner_dir"
+    "--allow-fs-read=$source_plugin_entry_dir"
+  )
+  if [[ -n "$source_plugin_data" ]]; then
+    source_plugin_data="$(cd "$source_plugin_data" && pwd -P)"
+    permission_args+=("--allow-fs-read=$source_plugin_data" "--allow-fs-write=$source_plugin_data")
+  fi
+  if [[ "$network_disabled" == "false" ]] \
+    && "$node_binary" --permission --allow-net --eval "" >/dev/null 2>&1; then
+    permission_args+=(--allow-net)
+  fi
+  if [[ -z "$source_plugin_data" ]]; then
+    exec env -i LANG=C LC_ALL=C TZ=UTC "$node_binary" "${permission_args[@]}" \
+      "$source_plugin_runner" "$source_plugin_entry"
+  fi
+  request="$(cat)"
+  request="$(printf '%s' "$request" | node -e '
+      let body = "";
+      process.stdin.on("data", (chunk) => { body += chunk; });
+      process.stdin.on("end", () => {
+        const request = JSON.parse(body);
+        request.dataDirectory = process.argv[1];
+        process.stdout.write(JSON.stringify(request));
+      });
+    ' "$source_plugin_data")"
+  printf '%s' "$request" \
+    | env -i LANG=C LC_ALL=C TZ=UTC "$node_binary" "${permission_args[@]}" \
+      "$source_plugin_runner" "$source_plugin_entry"
+  exit $?
 fi
 
 if [[ -z "$workspace" || ! -d "$workspace" ]]; then

@@ -45,6 +45,21 @@ body = {
   relayRouteId, relayWakeToken: relayWake,
 };
 assert.equal(await bridge.route(request("PUT", ""), {}, "/aru/v1/wake-bridge/endpoints/current"), true);
+// Authenticated malformed payloads must use the server's recognized HTTP error.
+for (const invalidPayload of [undefined, "", "x".repeat(192 * 1024 + 1)]) {
+  body = { schema: "aru.wake-bridge.sealed-event.v1", eventId: "bad-event", sealedPayload: invalidPayload };
+  await assert.rejects(
+    bridge.route(request("POST", submit), {}, "/aru/v1/wake-bridge/endpoints/phone-1/events"),
+    (error) => error instanceof HttpError && error.status === 400
+      && error.code === "wake.invalid_request" && error.message === "sealedPayload is invalid",
+  );
+  assert.equal(state.wakeBridgeEvents.length, 0);
+}
+body = { schema: "aru.wake-bridge.sealed-event.v1", eventId: "bad-event" };
+await assert.rejects(
+  bridge.route(request("POST", "wrong-token"), {}, "/aru/v1/wake-bridge/endpoints/phone-1/events"),
+  (error) => error instanceof HttpError && error.status === 401,
+);
 body = { schema: "aru.wake-bridge.sealed-event.v1", eventId: "event-1", sealedPayload: "ciphertext" };
 await bridge.route(request("POST", submit), {}, "/aru/v1/wake-bridge/endpoints/phone-1/events");
 await bridge.route(request("POST", submit), {}, "/aru/v1/wake-bridge/endpoints/phone-1/events");

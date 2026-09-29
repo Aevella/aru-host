@@ -5,6 +5,7 @@ import Observation
 @Observable
 final class HostConsoleRuntime {
     private(set) var phase: HostConsolePhase = .loading
+    private(set) var corePreparation: HostCorePreparation?
     private(set) var manifest: HostManifest?
     private(set) var diagnostics: HostDiagnostics?
     private(set) var nodeSettings: HostNodeSettings?
@@ -56,7 +57,7 @@ final class HostConsoleRuntime {
             return try await self.dataRequest(path, method: method, body: body, authenticated: true).0
         }, didUpdate: { [weak self] in self?.lastUpdated = Date() })
 
-    private let session: URLSession
+    private let transport: HostHTTPTransport
     private let vault: HostCredentialVault
     private let configuredBaseURL: URL?
     private let hostCoreInstaller: any HostCoreInstalling
@@ -69,7 +70,7 @@ final class HostConsoleRuntime {
         baseURL: URL? = nil,
         hostCoreInstaller: any HostCoreInstalling = BundledHostCoreInstaller()
     ) {
-        self.session = session
+        self.transport = HostHTTPTransport(session: session)
         self.vault = vault
         self.configuredBaseURL = baseURL
         self.hostCoreInstaller = hostCoreInstaller
@@ -91,12 +92,36 @@ final class HostConsoleRuntime {
         manifest?.capabilities[id]
     }
 
-    func start() async {
+    func selectLocalInstance(_ name: String) async {
+        do {
+            try LocalHostInstance.select(name, homeDirectory: FileManager.default.homeDirectoryForCurrentUser)
+            await start()
+        } catch { phase = .failure(error.localizedDescription) }
+    }
+
+    func updateLocalCore() async {
+        guard managesLocalHost, let preparation = corePreparation, preparation.updateVersion != nil else { return }
         phase = .preparingHost
         do {
-            try await hostCoreInstaller.prepare()
+            try await hostCoreInstaller.update(expected: preparation)
+            await start()
+        } catch { phase = .failure(error.localizedDescription) }
+    }
+
+    func start() async {
+        phase = .preparingHost
+        corePreparation = nil
+        do {
+            if managesLocalHost { corePreparation = try await hostCoreInstaller.prepare() }
+        } catch HostCoreInstallationError.chooseInstance(let names) {
+            phase = .selectingHost(names)
+            return
         } catch {
             phase = .failure(error.localizedDescription)
+            return
+        }
+        if corePreparation?.operation == .repair {
+            phase = .failure(L10n.hostRepairDetail)
             return
         }
         phase = .loading
@@ -768,51 +793,9 @@ final class HostConsoleRuntime {
     }
 
     private func loadMCPCatalog() async throws -> MCPGatewaySnapshot {
-        let initializeBody = try JSONSerialization.data(withJSONObject: [
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "initialize",
-            "params": [
-                "protocolVersion": "2025-03-26",
-                "capabilities": [:],
-                "clientInfo": ["name": "Aru Host Console", "version": "0.3.0"],
-            ],
-        ])
-        let (initializeData, initializeResponse) = try await dataRequest(
-            "/aru/v1/mcp",
-            method: "POST",
-            body: initializeBody,
-            authenticated: true,
-            headers: ["Accept": "application/json, text/event-stream"]
-        )
-        let initialized = try JSONDecoder().decode(MCPInitializeEnvelope.self, from: initializeData)
-        guard let sessionId = initializeResponse.value(forHTTPHeaderField: "mcp-session-id"),
-              !sessionId.isEmpty else {
-            throw HostConsoleHTTPError.server(L10n.mcpSessionMissing)
+        try await HostMCPCatalogLoader.load { path, method, body, authenticated, headers in
+            try await self.dataRequest(path, method: method, body: body, authenticated: authenticated, headers: headers)
         }
-        let toolsBody = try JSONSerialization.data(withJSONObject: [
-            "jsonrpc": "2.0",
-            "id": 2,
-            "method": "tools/list",
-            "params": [:],
-        ])
-        let (toolsData, _) = try await dataRequest(
-            "/aru/v1/mcp",
-            method: "POST",
-            body: toolsBody,
-            authenticated: true,
-            headers: [
-                "Accept": "application/json, text/event-stream",
-                "mcp-session-id": sessionId,
-            ]
-        )
-        let tools = try JSONDecoder().decode(MCPToolsEnvelope.self, from: toolsData)
-        return MCPGatewaySnapshot(
-            serverName: initialized.result.serverInfo.name,
-            serverVersion: initialized.result.serverInfo.version,
-            protocolVersion: initialized.result.protocolVersion,
-            tools: tools.result.tools.sorted { $0.name < $1.name }
-        )
     }
 
     func request<Response: Decodable>(
@@ -837,34 +820,8 @@ final class HostConsoleRuntime {
         authenticated: Bool,
         headers: [String: String] = [:]
     ) async throws -> (Data, HTTPURLResponse) {
-        guard let url = URL(string: path, relativeTo: baseURL) else {
-            throw HostConsoleHTTPError.invalidURL
-        }
-        var request = URLRequest(url: url)
-        request.httpMethod = method
-        request.httpBody = body
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        if body != nil {
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        }
-        if authenticated, let credential {
-            request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
-        }
-        for (name, value) in headers {
-            request.setValue(value, forHTTPHeaderField: name)
-        }
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw HostConsoleHTTPError.invalidResponse
-        }
-        if http.statusCode == 401 || http.statusCode == 403 {
-            throw HostConsoleHTTPError.unauthorized
-        }
-        guard (200..<300).contains(http.statusCode) else {
-            let body = try? JSONDecoder().decode(HostAPIError.self, from: data)
-            throw HostConsoleHTTPError.server(body?.message ?? body?.error ?? "HTTP \(http.statusCode)")
-        }
-        return (data, http)
+        try await transport.request(path, baseURL: baseURL, method: method, body: body,
+                                    credential: authenticated ? credential : nil, headers: headers)
     }
 
     private func clearAuthenticatedState() {

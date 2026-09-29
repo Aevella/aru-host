@@ -7,6 +7,8 @@ struct CollaboratorConversationStudioView: View {
     @State private var selectedConversationId: String?
     @State private var draft = ""
     @State private var errorMessage: String?
+    @State private var directoryError: String?
+    @State private var detailError: String?
     @State private var isCreating = false
     @State private var isRefreshing = false
 
@@ -26,6 +28,7 @@ struct CollaboratorConversationStudioView: View {
             }
         }
         .task(id: selectedConversationId) {
+            detailError = nil
             guard let selectedConversationId else { return }
             while !Task.isCancelled {
                 await refreshDetail(selectedConversationId, reportError: false)
@@ -132,7 +135,7 @@ struct CollaboratorConversationStudioView: View {
             VStack(spacing: 0) {
                 conversationHeader
                 Divider().overlay(Color.white.opacity(0.42))
-                if let errorMessage {
+                if let errorMessage = errorMessage ?? detailError ?? directoryError {
                     SectionErrorBanner(message: errorMessage)
                         .padding(.horizontal, 18)
                         .padding(.top, 12)
@@ -184,26 +187,23 @@ struct CollaboratorConversationStudioView: View {
     }
 
     private var timeline: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(spacing: 12) {
-                    ForEach(detail?.messages ?? []) { message in
-                        messageBubble(message)
-                            .id(message.id)
-                    }
-                    ForEach(detail?.approvals?.filter(\.isPending) ?? []) { approval in
-                        approvalCard(approval)
-                            .id(approval.id)
-                    }
+        ScrollView {
+            LazyVStack(spacing: 12) {
+                ForEach(detail?.messages ?? []) { message in
+                    messageBubble(message)
+                        .id(message.id)
                 }
-                .padding(18)
-            }
-            .onChange(of: detail?.cursor) { _, _ in
-                if let last = detail?.messages?.last?.id {
-                    withAnimation(.easeOut(duration: 0.18)) { proxy.scrollTo(last, anchor: .bottom) }
+                ForEach(detail?.approvals?.filter(\.isPending) ?? []) { approval in
+                    approvalCard(approval)
+                        .id(approval.id)
                 }
             }
+            .padding(18)
         }
+        // Native size-change anchoring avoids repeatedly animating scrollTo
+        // against a lazy row whose height changes throughout a streamed reply.
+        .defaultScrollAnchor(.bottom, for: .initialOffset)
+        .defaultScrollAnchor(.bottom, for: .sizeChanges)
     }
 
     private func messageBubble(_ message: HostCollaboratorConversationMessage) -> some View {
@@ -349,11 +349,14 @@ struct CollaboratorConversationStudioView: View {
         defer { isRefreshing = false }
         do {
             try await runtime.conversations.refreshConversations(collaboratorId: collaborator.id)
+            guard !Task.isCancelled else { return }
+            directoryError = nil
             if selectNewestWhenNeeded && selectedConversationId == nil {
                 selectedConversationId = conversations.first?.id
             }
         } catch {
-            errorMessage = error.localizedDescription
+            guard !Task.isCancelled else { return }
+            directoryError = error.localizedDescription
         }
     }
 
@@ -362,8 +365,11 @@ struct CollaboratorConversationStudioView: View {
             _ = try await runtime.conversations.conversationDetail(
                 collaboratorId: collaborator.id,
                 conversationId: conversationId)
+            guard !Task.isCancelled, selectedConversationId == conversationId else { return }
+            detailError = nil
         } catch where reportError {
-            errorMessage = error.localizedDescription
+            guard !Task.isCancelled, selectedConversationId == conversationId else { return }
+            detailError = error.localizedDescription
         } catch {}
     }
 

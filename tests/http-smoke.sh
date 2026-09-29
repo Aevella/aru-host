@@ -137,7 +137,7 @@ curl -fsS "http://127.0.0.1:$port/aru/v1/agent-drivers" \
         if(!drivers.some(d=>d.id==="claude-code"&&d.adapter==="claude-code-cli"))process.exit(3);
         if(!drivers.some(d=>d.id==="api"&&d.adapter==="direct-provider-api"))process.exit(7);
         if(typeof p.execution?.enabled!=="boolean"||!["driver-unavailable","ready","starting","running"].includes(p.execution?.status))process.exit(4);
-        if(!Number.isInteger(p.execution?.conversationCount)||!Number.isInteger(p.execution?.activeTurnCount)||!Number.isInteger(p.execution?.pendingApprovalCount))process.exit(6);
+        if(["conversationCount","activeTurnCount","pendingApprovalCount"].some(k=>k in p.execution))process.exit(6);
         if(drivers.some(d=>d.executableCandidates!==undefined))process.exit(5);
       });'
 
@@ -908,7 +908,9 @@ mcp_call="$(curl -fsS -X POST "http://127.0.0.1:$port/aru/v1/mcp" \
   --data '{"jsonrpc":"2.0","id":"call","method":"tools/call","params":{"name":"aru_node_status","arguments":{}}}')"
 printf '%s' "$mcp_call" | node -e '
   let b="";process.stdin.on("data",c=>b+=c);process.stdin.on("end",()=>{
-    const r=JSON.parse(b);if(!r.result?.structuredContent?.serverId||r.result?.isError!==false)process.exit(1)
+    const r=JSON.parse(b);if(!r.result?.structuredContent?.serverId||r.result?.isError!==false)process.exit(1);
+    const scope=r.result.structuredContent.workspaceRuntimeDescription;
+    if(!scope?.includes("Node/Python/Shell")||!scope.includes("Project files and page publication are independent"))process.exit(2)
   });'
 if printf '%s' "$mcp_call" | grep -Fq -- "$credential"; then
   echo "credential leaked into MCP response" >&2

@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+replica_rollback_compatible() {
+  [[ ! -d "$2/mobile-collaborator-replicas/records-v2" ]] && return 0
+  "$3" --input-type=module - "$1/mobile-collaborator-replicas.mjs" <<'NODE'
+import { pathToFileURL } from 'node:url';
+const target = await import(pathToFileURL(process.argv[2]));
+if (target.replicaStorageVersion !== 2) process.exit(1);
+NODE
+}
+
+
 readonly PRODUCT="Aru self-hosted for macOS"
 readonly REPO_RAW_DEFAULT="https://raw.githubusercontent.com/Aevella/aru-host"
 
@@ -14,6 +24,7 @@ SOURCE_DIR=""
 SOURCE_REF="main"
 BUNDLE_URL=""
 RELEASE_VERSION=""
+INSTALL_OWNER="independent"
 SKIP_DEPENDENCIES="false"
 SKIP_START="false"
 UNINSTALL="false"
@@ -42,6 +53,7 @@ Options:
   --source-ref REF         Download payload from this Aevella/aru-host ref (default: main).
   --bundle-url URL         Install a hash-verified macOS release tarball.
   --release-version VER    Record the enclosing signed Host release version.
+  --install-owner OWNER    desktop or independent (default: independent).
   --base-root DIR          Override the user-owned installation root.
   --skip-dependencies      Require an existing Node.js 22+ runtime.
   --skip-start             Install files without loading the LaunchAgent.
@@ -80,6 +92,7 @@ while (($#)); do
     --source-dir) SOURCE_DIR="${2:?missing value for --source-dir}"; shift 2 ;;
     --source-ref) SOURCE_REF="${2:?missing value for --source-ref}"; shift 2 ;;
     --bundle-url) BUNDLE_URL="${2:?missing value for --bundle-url}"; shift 2 ;;
+    --install-owner) INSTALL_OWNER="${2:?missing value for --install-owner}"; shift 2 ;;
     --release-version) RELEASE_VERSION="${2:?missing value for --release-version}"; shift 2 ;;
     --base-root) BASE_ROOT="${2:?missing value for --base-root}"; shift 2 ;;
     --skip-dependencies) SKIP_DEPENDENCIES="true"; shift ;;
@@ -99,6 +112,7 @@ done
 [[ "$SOURCE_REF" =~ ^[A-Za-z0-9._/-]+$ ]] || die "source ref contains unsupported characters"
 [[ -z "$RELEASE_VERSION" || "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.]+)?$ ]] \
   || die "release version must be a semantic version"
+[[ "$INSTALL_OWNER" == "desktop" || "$INSTALL_OWNER" == "independent" ]] || die "invalid install owner"
 [[ -z "$SOURCE_DIR" || -z "$BUNDLE_URL" ]] || die "choose --source-dir or --bundle-url, not both"
 
 if [[ -n "$INSTALL_ROOT" ]]; then
@@ -244,7 +258,7 @@ resolve_node_binary() {
   candidate="$(command -v node 2>/dev/null || true)"
   [[ -n "$candidate" ]] || candidate="$(managed_node_binary)"
   if [[ -n "$candidate" && -x "$candidate" ]]; then
-    major="$($candidate --version | sed -E 's/^v([0-9]+).*/\1/')"
+    major="$("$candidate" --version | sed -E 's/^v([0-9]+).*/\1/')"
     if [[ "$major" =~ ^[0-9]+$ ]] && ((major >= 22)); then
       printf '%s' "$candidate"
       return
@@ -341,7 +355,7 @@ fetch_source_payload() {
 SOURCE_INPUT_DIR="$SOURCE_DIR"
 fetch_source_payload
 if [[ -f "$SOURCE_DIR/release.json" ]]; then
-  payload_release_version="$($NODE_BINARY -e '
+  payload_release_version="$("$NODE_BINARY" -e '
     const fs = require("node:fs");
     const release = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
     if (release.schema !== "aru.host.release.v1" || typeof release.version !== "string") process.exit(2);
@@ -383,6 +397,8 @@ install -m 0755 "$SOURCE_DIR/aru-selfhost-stub.mjs" "$RELEASES_DIR/$release_id/s
 install -m 0644 "$SOURCE_DIR/backup-settings.mjs" "$RELEASES_DIR/$release_id/backup-settings.mjs"
 install -m 0644 "$SOURCE_DIR/conversation-turn-relay.mjs" "$RELEASES_DIR/$release_id/conversation-turn-relay.mjs"
 install -m 0644 "$SOURCE_DIR/collaborator-host.mjs" "$RELEASES_DIR/$release_id/collaborator-host.mjs"
+install -m 0644 "$SOURCE_DIR/mobile-collaborator-identities.mjs" "$RELEASES_DIR/$release_id/mobile-collaborator-identities.mjs"
+install -m 0644 "$SOURCE_DIR/container-runtime-setup.mjs" "$RELEASES_DIR/$release_id/container-runtime-setup.mjs"
 install -m 0644 "$SOURCE_DIR/mobile-collaborator-replicas.mjs" "$RELEASES_DIR/$release_id/mobile-collaborator-replicas.mjs"
 install -m 0644 "$SOURCE_DIR/mobile-collaborator-identities.mjs" "$RELEASES_DIR/$release_id/mobile-collaborator-identities.mjs"
 install -m 0644 "$SOURCE_DIR/container-runtime-setup.mjs" "$RELEASES_DIR/$release_id/container-runtime-setup.mjs"
@@ -444,6 +460,7 @@ fi
 ln -sfn "releases/$release_id" "$CURRENT_LINK"
 
 write_env() {
+  local LC_ALL=C
   local destination="$1"
   shift
   : > "$destination"
@@ -479,6 +496,7 @@ write_env "$NODE_ENV" ARU_SERVER_ENTRY ARU_NODE_BINARY ARU_LISTEN_HOST ARU_PORT 
   ARU_MAX_WORKSPACE_OUTPUT_MB ARU_CONTAINER_MEMORY ARU_CONTAINER_CPUS \
   ARU_NODE_IMAGE ARU_PYTHON_IMAGE ARU_SHELL_IMAGE
 
+ARU_INSTALL_OWNER="$INSTALL_OWNER"
 ARU_INSTALL_INSTANCE="$INSTANCE"
 ARU_INSTALL_BASE_ROOT="$BASE_ROOT"
 ARU_INSTALL_BASE_URL="$BASE_URL"
@@ -492,7 +510,7 @@ ARU_INSTALL_SOURCE_DIR=""
 if [[ -n "$SOURCE_INPUT_DIR" ]]; then
   ARU_INSTALL_SOURCE_DIR="$SOURCE_DIR"
 fi
-write_env "$INSTALL_ENV" ARU_INSTALL_INSTANCE ARU_INSTALL_BASE_ROOT \
+write_env "$INSTALL_ENV" ARU_INSTALL_OWNER ARU_INSTALL_INSTANCE ARU_INSTALL_BASE_ROOT \
   ARU_INSTALL_BASE_URL ARU_INSTALL_TRANSPORT_KIND ARU_INSTALL_DISPLAY_NAME \
   ARU_INSTALL_PORT ARU_INSTALL_SOURCE_REF ARU_INSTALL_BUNDLE_URL \
   ARU_INSTALL_RELEASE_VERSION ARU_INSTALL_SOURCE_DIR
@@ -577,6 +595,9 @@ if [[ "$SKIP_START" != "true" ]]; then
   if ! start_instance; then
     stop_instance
     check_state || die "state check failed; previous release was not restarted"
+    if [[ -n "$old_release" ]]; then
+      replica_rollback_compatible "$INSTANCE_ROOT/$old_release" "$DATA_DIR" "$NODE_BINARY" || die "previous release cannot read migrated execution records; retain current release for repair"
+    fi
     if [[ "$had_node_env" == true ]]; then
       cp -p "$ROLLBACK_TMP/node.env" "$NODE_ENV"
     else
@@ -614,6 +635,7 @@ ROLLBACK_TMP=""
 log "installed instance $INSTANCE release $release_id"
 log "canonical URL: $BASE_URL"
 if [[ "$CONTAINER_RUNTIME" == "none" ]]; then
+  log "optional scripts/OCI plugins: open Console > Runtime for Podman installation and verification; project files, page publication and phone pairing remain available"
   log "workspace jobs and OCI plugins are disabled; the isolated source-plugin workshop remains available"
 else
   log "workspace runtime: $CONTAINER_RUNTIME"

@@ -600,3 +600,30 @@ const keylessResult = await runTurn(keylessTurn, [], async () => ({})).done;
 assert.equal(keylessResult.status, "completed", keylessResult.error?.message);
 assert.equal(noAuthRequest.headers.authorization, undefined);
 console.log("ARU_DIRECT_API_NO_AUTH_SMOKE_OK");
+console.log("ARU_DIRECT_API_NO_AUTH_SMOKE_OK");
+
+for (const protocol of ["openai-compatible", "anthropic-messages"]) {
+  let testedBody;
+  const probe = createDirectAPIDriver({
+    profileForId: () => ({ ...profile, protocol }), readSecret: () => "test-key",
+    fetchImpl: async (_url, init) => {
+      testedBody = JSON.parse(init.body);
+      assert.ok(testedBody.messages.some((message) => message.role === "user"));
+      return new Response(JSON.stringify({ choices: [{ message: { content: "OK" } }] }));
+    },
+  });
+  assert.deepEqual(await probe.testProfile(profile.profileId), { ok: true });
+}
+for (const errorPayload of [
+  [{ error: { code: 400, message: "Gemini rejected test-key input", status: "INVALID_ARGUMENT" } }],
+  { error: { message: "Gemini rejected test-key input" } },
+]) {
+  const probe = createDirectAPIDriver({
+    profileForId: () => profile, readSecret: () => "test-key",
+    fetchImpl: async () => new Response(JSON.stringify(errorPayload), { status: 400 }),
+  });
+  await assert.rejects(() => probe.testProfile(profile.profileId), (error) =>
+    error.message.includes("Gemini rejected") && !error.message.includes("test-key")
+      && error.message.includes("[REDACTED]"));
+}
+console.log("DIRECT_API_PROFILE_PROBE_REGRESSION_OK");

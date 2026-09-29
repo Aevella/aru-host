@@ -2,7 +2,8 @@ import Darwin
 import Foundation
 
 protocol HostCoreInstalling: Sendable {
-    func prepare() async throws
+    func prepare() async throws -> HostCorePreparation
+    func update(expected: HostCorePreparation) async throws
 }
 
 struct BundledHostCoreInstaller: HostCoreInstalling {
@@ -13,74 +14,97 @@ struct BundledHostCoreInstaller: HostCoreInstalling {
 
     private let resourceRoot: URL?
     private let homeDirectory: URL
+    private let run: @Sendable (URL, [String]) async throws -> Void
 
-    init(
-        resourceRoot: URL? = Bundle.main.resourceURL,
-        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
-    ) {
+    init(resourceRoot: URL? = Bundle.main.resourceURL,
+         homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
+         run: @escaping @Sendable (URL, [String]) async throws -> Void = HostCoreCommand.run) {
         self.resourceRoot = resourceRoot
         self.homeDirectory = homeDirectory
+        self.run = run
     }
 
-    func prepare() async throws {
-        guard let payloadDirectory = resourceRoot?.appending(path: "HostCore", directoryHint: .isDirectory),
-              FileManager.default.fileExists(atPath: payloadDirectory.path) else {
-            throw HostCoreInstallationError.payloadMissing
-        }
-        let release = try Self.readRelease(from: payloadDirectory)
-        let baseRoot = homeDirectory.appending(
-            path: "Library/Application Support/Aru Self-Hosted",
-            directoryHint: .isDirectory)
-        let installedVersion = Self.installedReleaseVersion(
-            at: baseRoot.appending(path: "instances/home/config/install.env"))
-        let controlTool = homeDirectory.appending(path: ".local/bin/aru-selfhost")
-
-        if installedVersion != release.version ||
-            !FileManager.default.isExecutableFile(atPath: controlTool.path) {
-            let installer = payloadDirectory.appending(path: "install-macos.sh")
-            guard FileManager.default.isExecutableFile(atPath: installer.path) else {
-                throw HostCoreInstallationError.installerMissing
+    func prepare() async throws -> HostCorePreparation {
+        let instance = try LocalHostInstance.resolve(homeDirectory: homeDirectory)
+        let recordURL = instance.root.appending(path: "config/install.env")
+        let record = try HostCoreInstallationRecord.read(at: recordURL)
+        let owner = record?.owner ?? (instance.hasInstallation ? .independent : .desktop)
+        try record?.persistLegacyOwner(at: recordURL)
+        let server = instance.root.appending(path: "current/server.mjs")
+        let hasProgram = FileManager.default.fileExists(atPath: server.path)
+        if !hasProgram {
+            guard owner == .desktop else { throw HostCoreInstallationError.independentRepair }
+            let payload = try payloadDirectory()
+            let release = try Self.readRelease(from: payload)
+            if let record {
+                guard let version = record.version,
+                      version == release.version || HostSemanticVersion.isNewer(release.version, than: version) else {
+                    throw HostCoreInstallationError.managedRepair
+                }
+                // A process can still be serving from memory after files were
+                // removed. Repair therefore requires an explicit restart too.
+                try instance.rememberSelection()
+                return HostCorePreparation(instance: instance.name, owner: .desktop,
+                    installedVersion: record.version, updateVersion: release.version, operation: .repair)
             }
-            try await Self.run(
-                executable: URL(filePath: "/bin/bash"),
-                arguments: [
-                    installer.path,
-                    "--source-dir", payloadDirectory.path,
-                    "--instance", "home",
-                    "--release-version", release.version,
-                ])
-            return
+            try await install(payload: payload, version: release.version, instance: instance)
+            try instance.rememberSelection()
+            return HostCorePreparation(instance: instance.name, owner: .desktop,
+                installedVersion: release.version, updateVersion: nil)
         }
 
-        try await Self.run(
-            executable: URL(filePath: "/bin/bash"),
-            arguments: ["-c",
+        try instance.rememberSelection()
+        // Check the installed reader, never an older reader bundled with the UI.
+        if FileManager.default.fileExists(atPath: instance.root.appending(path: "config/node.env").path) {
+            try await run(URL(filePath: "/bin/bash"), ["-c",
                 #"source "$1"; exec "$ARU_NODE_BINARY" "$2" --data-dir "$ARU_DATA_DIR" --container-runtime none --check-state"#,
-                "aru-state-check",
-                baseRoot.appending(path: "instances/home/config/node.env").path,
-                payloadDirectory.appending(path: "aru-selfhost-stub.mjs").path,
-            ])
-
-        // `kickstart` without `-k` starts a stopped helper but leaves an already
-        // running Host and its in-flight work untouched.
-        _ = try? await Self.run(
-            executable: URL(filePath: "/bin/launchctl"),
-            arguments: ["kickstart", "gui/\(getuid())/cn.aelion.aru-selfhost.home"])
-    }
-
-    static func installedReleaseVersion(in contents: String) -> String? {
-        guard let line = contents.split(whereSeparator: \.isNewline)
-            .first(where: { $0.hasPrefix("ARU_INSTALL_RELEASE_VERSION=") }) else {
-            return nil
+                "aru-state-check", instance.root.appending(path: "config/node.env").path, server.path])
         }
-        let raw = line.dropFirst("ARU_INSTALL_RELEASE_VERSION=".count)
-        let value = String(raw).trimmingCharacters(in: CharacterSet(charactersIn: "'\""))
-        return value.isEmpty ? nil : value
+        // Starts a stopped, registered helper; never restarts a running one.
+        // An independently managed process may not be registered with launchd.
+        _ = try? await run(URL(filePath: "/bin/launchctl"),
+            ["kickstart", "gui/\(getuid())/\(instance.launchLabel)"])
+        let release = (try? payloadDirectory()).flatMap { try? Self.readRelease(from: $0) }
+        let update: String?
+        if owner == .desktop, let installed = record?.version, let release,
+           HostSemanticVersion.isNewer(release.version, than: installed) {
+            update = release.version
+        } else { update = nil }
+        return HostCorePreparation(instance: instance.name, owner: owner,
+            installedVersion: record?.version, updateVersion: update)
     }
 
-    private static func installedReleaseVersion(at url: URL) -> String? {
-        guard let contents = try? String(contentsOf: url, encoding: .utf8) else { return nil }
-        return installedReleaseVersion(in: contents)
+    /// Only the explicit update action may replace an existing installation.
+    /// Re-read both selection and ownership, since either may have changed since
+    /// the window opened. Unknown or newer installations are never downgraded.
+    func update(expected: HostCorePreparation) async throws {
+        let instance = try LocalHostInstance.resolve(homeDirectory: homeDirectory)
+        guard instance.name == expected.instance,
+              let record = try HostCoreInstallationRecord.read(at: instance.root.appending(path: "config/install.env")),
+              record.owner == .desktop, record.version == expected.installedVersion,
+              let installed = record.version else {
+            throw HostCoreInstallationError.managedRepair
+        }
+        let payload = try payloadDirectory()
+        let release = try Self.readRelease(from: payload)
+        let newer = HostSemanticVersion.isNewer(release.version, than: installed)
+        let repair = expected.operation == .repair && release.version == installed
+            && !FileManager.default.fileExists(atPath: instance.root.appending(path: "current/server.mjs").path)
+        guard newer || repair else { return }
+        try await install(payload: payload, version: release.version, instance: instance)
+    }
+
+    private func payloadDirectory() throws -> URL {
+        guard let payload = resourceRoot?.appending(path: "HostCore"),
+              FileManager.default.fileExists(atPath: payload.path) else { throw HostCoreInstallationError.payloadMissing }
+        return payload
+    }
+
+    private func install(payload: URL, version: String, instance: LocalHostInstance) async throws {
+        let installer = payload.appending(path: "install-macos.sh")
+        guard FileManager.default.isExecutableFile(atPath: installer.path) else { throw HostCoreInstallationError.installerMissing }
+        try await run(URL(filePath: "/bin/bash"), [installer.path, "--source-dir", payload.path,
+            "--instance", instance.name, "--base-root", instance.baseRoot.path, "--release-version", version, "--install-owner", "desktop"])
     }
 
     private static func readRelease(from payloadDirectory: URL) throws -> BundledRelease {
@@ -101,28 +125,12 @@ struct BundledHostCoreInstaller: HostCoreInstalling {
         }
     }
 
-    private static func run(executable: URL, arguments: [String]) async throws {
-        try await Task.detached {
-            let process = Process()
-            let output = Pipe()
-            let errors = Pipe()
-            process.executableURL = executable
-            process.arguments = arguments
-            process.standardOutput = output
-            process.standardError = errors
-            try process.run()
-            process.waitUntilExit()
-            guard process.terminationStatus == 0 else {
-                let data = errors.fileHandleForReading.readDataToEndOfFile()
-                let detail = String(data: data, encoding: .utf8)?
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                throw HostCoreInstallationError.commandFailed(detail)
-            }
-        }.value
-    }
 }
 
 enum HostCoreInstallationError: LocalizedError, Equatable {
+    case chooseInstance([String])
+    case independentRepair
+    case managedRepair
     case payloadMissing
     case releaseInvalid
     case installerMissing
@@ -130,6 +138,9 @@ enum HostCoreInstallationError: LocalizedError, Equatable {
 
     var errorDescription: String? {
         switch self {
+        case .chooseInstance: return L10n.hostChooseInstance
+        case .independentRepair: return L10n.hostIndependentRepair
+        case .managedRepair: return L10n.hostManagedRepair
         case .payloadMissing: return L10n.hostCorePayloadMissing
         case .releaseInvalid: return L10n.hostCoreReleaseInvalid
         case .installerMissing: return L10n.hostCoreInstallerMissing

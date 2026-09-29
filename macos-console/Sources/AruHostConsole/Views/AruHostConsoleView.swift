@@ -33,6 +33,17 @@ struct AruHostConsoleView: View {
     @ViewBuilder
     private var content: some View {
         switch runtime.phase {
+        case .selectingHost(let names):
+            VStack(spacing: 16) {
+                Text(L10n.hostChooseInstance).font(.headline)
+                Text(L10n.hostChooseInstanceDetail).foregroundStyle(HostPalette.secondaryInk)
+                ForEach(names, id: \.self) { name in
+                    Button(name) { Task { await runtime.selectLocalInstance(name) } }
+                        .buttonStyle(FloatingGlassButtonStyle())
+                }
+            }
+            .padding(30)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .preparingHost:
             preparingHostView
         case .loading:
@@ -106,6 +117,9 @@ struct AruHostConsoleView: View {
                 .foregroundStyle(HostPalette.secondaryInk.opacity(0.72))
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 480)
+            if let core = runtime.corePreparation, core.updateVersion != nil {
+                HostCoreInstallationPanel(runtime: runtime, preparation: core).frame(maxWidth: 480)
+            }
             Button(L10n.tryAgain) {
                 Task { await runtime.start() }
             }

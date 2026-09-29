@@ -1,5 +1,7 @@
 # Architecture boundary
 
+Installation and execution lifecycle changes follow [HOST-LIFECYCLE.md](../HOST-LIFECYCLE.md).
+
 Aru Host has three one-way responsibilities:
 
 1. **Host Core** owns paired identities, computer-hosted collaborators, durable conversations, cognition, approvals, proactive rules, page projects, pages, jobs, plugins and artifacts.
@@ -20,12 +22,15 @@ Third-party plugins are separate permissioned lifecycle units. The official `ful
 
 ## Runtime source and installed payloads
 
-The root `aru-selfhost-stub.mjs`, `collaborator-conversations.mjs` and `conversation-turn-relay.mjs` are generated
-runtime payloads. Edit `src/` and run `node tools/build-runtime.mjs`; CI checks
-that checked-in payloads match their sources. Existing installed upgraders copy
-fixed filenames, so these deployed entrypoints must not gain new local
-runtime dependencies. Source modules are assembled into those existing files,
-not maintained as a second hand-written implementation.
+All root runtime `.mjs` files are generated deployment payloads. Handwritten runtime
+code lives under `src/`; `tools/build-runtime.mjs` assembles modular owners and emits
+fixed entrypoints listed in `tools/runtime-entries.json`. That list records each
+entrypoint's source. Imports in emitted entrypoint sources resolve from the installed
+payload root, including `import.meta.url` resource lookups. Edit the listed source,
+then regenerate; CI rejects stale output. Root `bundle-*.mjs` files are build tools.
+Released upgraders copy fixed filenames, so moving source never adds a new installed
+runtime dependency. Aru consumes an exact repository revision rather than maintaining
+a second implementation.
 
 | Source | Responsibility |
 | --- | --- |
@@ -43,6 +48,13 @@ Backup, artifact and job owners receive only their relevant state collections;
 `state.json` keeps its existing format and one write authority. Persistence is
 still synchronous and writes a complete snapshot: this restructuring is not a
 storage migration or a claim of measured large-dataset performance.
+
+`collaborator-host.mjs` projects current driver availability without conversation
+statistics. The public unauthenticated manifest, authenticated diagnostics and
+agent-driver inventory do not read conversation history or attachment directories.
+The unused aggregate conversation, active-turn and pending-approval counts and
+full-history status outlet have been removed. Per-conversation projections keep
+their own pending-approval counts for actual conversation UI consumers.
 
 Project Git and archive subprocesses are asynchronous. Checkpoint creation
 rechecks the project's revision after awaiting compression and before publishing
@@ -154,3 +166,30 @@ Callbacks remain bound to their original turn, and late results cannot change th
 next turn. Deletion remains blocked while stop is unconfirmed. Console and phone
 render this owner state; older distributed Hosts retain the phone's existing
 running-state cancellation affordance when `canCancel` is absent.
+
+
+## Replica execution storage
+
+`src/host/replica-record-store.mjs` owns atomic record publication and recovery.
+The mobile replica scheduler remains the only authority for admission, execution
+outcome and delivery settlement. The store receives those records; it never chooses
+whether to retry or reconcile a model operation. `records-v2/scheduler.json` contains
+rule/configuration state, not historical generated bodies. Execution/delivery files
+retain identity-scoped results; lightweight indexes serve running work, unacknowledged
+results, unreflected continuation and paged history. Page requests list index names
+but read at most the requested page bodies. Per-owner filename indexes still grow;
+this is not a constant-time database index or a migration of all Host state.json data.
+
+Transactions are redo-only storage publication: persist the transaction, publish its
+record/index files and scheduler snapshot, then remove the journal. An in-process
+write failure blocks further store access until restart reconciliation. Legacy data
+is copied completely before activation and retained as a recovery backup. This format
+works on Node 18 without adding a native SQLite dependency. The older experimental
+whole-Host SQLite branch requires Node 22.13+ and is archived separately; it is not
+silently introduced as an installation prerequisite.
+
+Conversation attachment storage and driver request projections have separate source
+modules; the existing fixed conversation deployment payload still contains them.
+Mac protocol declarations are grouped by surface. HTTP response handling and MCP
+session/catalog retrieval have separate stateless helpers; Console remains the owner
+of credential selection and observable connection state.

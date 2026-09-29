@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, readFileSync, rmSync, chmodSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { randomBytes } from 'node:crypto';
+import { createCipheriv, randomBytes } from 'node:crypto';
 import { createProviderSecretStore } from '../provider-secret-store.mjs';
 
 test('headless credentials survive reopening, update atomically and delete without a desktop bus', () => {
@@ -60,4 +60,33 @@ test('a damaged profile key stays visible and can be replaced without replacing 
     assert.equal(state.providerProfiles[0].profileId, 'provider_abc');
     assert.equal(readFileSync(join(root, 'legacy-import-complete'),'utf8'), '1\n');
   } finally { rmSync(root, {recursive:true,force:true}); }
+});
+
+
+test('native vault imports once without switching existing canonical keys or losing the backup', () => {
+  const root = mkdtempSync(join(tmpdir(), 'aru-native-vault-'));
+  try {
+    chmodSync(root, 0o700);
+    writeFileSync(join(root, 'master.key'), randomBytes(32), { mode: 0o600 });
+    const legacyKey = randomBytes(32), nonce = randomBytes(12);
+    const cipher = createCipheriv('aes-256-gcm', legacyKey, nonce);
+    cipher.setAAD(Buffer.from('provider_aabb'));
+    const ciphertext = Buffer.concat([cipher.update('original-native-secret'), cipher.final()]);
+    const source = JSON.stringify({ schema: 'aru.provider-secret.v1', nonce: nonce.toString('base64'), tag: cipher.getAuthTag().toString('base64'), ciphertext: ciphertext.toString('base64') });
+    writeFileSync(join(root, 'provider_aabb.secret'), source, { mode: 0o600 });
+    const env = { ARU_PROVIDER_SECRET_ROOT: root, ARU_PROVIDER_SECRET_KEY_FILE: join(root, 'old.key') };
+    const store = createProviderSecretStore({ platform: 'linux', env });
+    store.write('provider_ccdd', 'canonical-secret');
+    assert.throws(() => store.adoptLegacyProfiles([{ profileId: 'provider_aabb' }]), /ENOENT/);
+    assert.equal(store.read('provider_ccdd'), 'canonical-secret');
+    writeFileSync(env.ARU_PROVIDER_SECRET_KEY_FILE, legacyKey, { mode: 0o600 });
+    store.adoptLegacyProfiles([{ profileId: 'provider_aabb' }]);
+    assert.equal(store.read('provider_aabb'), 'original-native-secret');
+    assert.equal(readFileSync(join(root, 'provider_aabb.secret'), 'utf8'), source);
+    unlinkSync(env.ARU_PROVIDER_SECRET_KEY_FILE);
+    const reopened = createProviderSecretStore({ platform: 'linux', env });
+    reopened.adoptLegacyProfiles([{ profileId: 'provider_aabb' }]);
+    assert.equal(reopened.read('provider_aabb'), 'original-native-secret');
+    assert.equal(reopened.read('provider_ccdd'), 'canonical-secret');
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });

@@ -1,0 +1,24 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { execFileSync } from 'node:child_process';
+test('installer keeps canonical key and attaches only an existing native credential for import', t => {
+  if (process.platform === 'win32') return t.skip('POSIX installer');
+  const root = mkdtempSync(join(tmpdir(), 'aru-vault-upgrade-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const install = () => execFileSync('bash', ['install.sh', '--root', root, '--source-dir', process.cwd(), '--base-url', 'http://127.0.0.1:8787'], { stdio: 'pipe' });
+  install();
+  const keyPath = join(root, 'var/lib/aru-selfhost/provider-secrets/master.key');
+  const original = readFileSync(keyPath);
+  const unit = join(root, 'etc/systemd/system/aru-selfhost.service');
+  assert.equal(readFileSync(unit, 'utf8').includes('LoadCredentialEncrypted='), false);
+  const oldKey = join(root, 'var/lib/aru-selfhost/credentials/provider-secrets.key.cred');
+  writeFileSync(oldKey, 'existing-encrypted-key-fixture', { mode: 0o600 });
+  install();
+  assert.deepEqual(readFileSync(keyPath), original);
+  assert.equal(readFileSync(oldKey, 'utf8'), 'existing-encrypted-key-fixture');
+  assert.match(readFileSync(unit, 'utf8'), /LoadCredentialEncrypted=aru-provider-vault-key:/);
+  assert.match(readFileSync(join(root, 'etc/aru-selfhost/node.env'), 'utf8'), /ARU_PROVIDER_SECRET_CREDENTIAL_ID=aru-provider-vault-key/);
+});

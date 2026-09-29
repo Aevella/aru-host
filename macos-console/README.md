@@ -6,8 +6,8 @@ Instead it pairs as an ordinary local device, keeps that device credential in
 macOS Keychain, renders authenticated Host inventories, and sends explicit
 Host intents.
 
-Opening the Console is itself the consent to manage the Host installed on the
-same Mac. If its dedicated Keychain credential is absent or has been revoked,
+Opening the Console connects to the selected Host on the same Mac; it does not
+authorize replacing an existing Core installation. If its dedicated Keychain credential is absent or has been revoked,
 the Console asks the local control tool for a one-time bootstrap token, rotates
 the unique `host-console` device credential, saves it in Keychain, and finishes
 loading without exposing a pairing step. A rebuild must keep a stable code
@@ -45,3 +45,27 @@ proof only. Real users must receive one prebuilt universal Developer ID signed
 and notarized package containing a matching Host Core and Console; they do not
 install signing certificates, run this build script, or manage Keychain access.
 That official package is not shipped yet.
+
+Local installation identity is shared by preparation, endpoint lookup, pairing,
+and container setup. Discovery uses installed programs/configuration, not a
+leftover data directory. A unique installation (including a named CLI instance)
+is reused; multiple installations require one explicit choice, persisted in
+`desktop-instance`. Retained `home/data` is restored only when no installed
+service competes. No data is moved.
+
+`install-macos.sh --install-owner desktop|independent` records ownership in
+`config/install.env`; terminal invocations default to independent. Legacy
+records with an App bundle HostCore source migrate to desktop ownership; other
+legacy records migrate to independent ownership. Instance names and version
+numbers alone never establish ownership.
+
+Opening the Console installs Core only when none is installed. Existing Core is
+checked with its own reader, then started without restarting an active process.
+Protocol compatibility is checked through the existing manifest/capability
+boundary. Independent installs are never replaced by the desktop app. Managed
+installs offer an explicit update-and-restart action only for a newer bundled
+version; unknown/newer installed versions are not overwritten. Missing managed
+programs use an explicit repair-and-restart action, preserving data. The action
+rechecks instance, owner and installed version before calling the installer.
+Pairing uses the selected instance's own control tool, so a missing global CLI
+wrapper is not a reason to reinstall Core.

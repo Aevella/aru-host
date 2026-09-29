@@ -1,4 +1,6 @@
 <p align="center">
+
+Engineering: read [Host lifecycle contract](HOST-LIFECYCLE.md) before changing installation, execution, recovery or phone delivery.
   <img src="docs/assets/aru-is-here.jpg" width="420" alt="虹彩的波浪里躲着三只毛茸茸的小家伙，画面下方写着 Aru is here.">
 </p>
 
@@ -206,3 +208,7 @@ npm test --prefix desktop-console
 本项目使用 [Apache License 2.0](LICENSE)。Aru iOS 客户端不在这个仓库中。
 
 开发源码与责任划分见 [架构说明](docs/architecture.md)；主服务与托管回复的模块化源码位于 `src/`，根目录对应文件为兼容已安装升级器的生成运行文件。
+
+## 源码开发
+
+Host 的唯一源码仓库是本仓库。Aru 原生仓库的 `scripts/selfhost` 通过 Git submodule 固定版本，不维护另一份代码。运行时代码修改 `src/`；根目录 `.mjs` 是供安装包使用的生成入口。修改后运行 `node tools/build-runtime.mjs`，提交源码及生成结果，并用 `node tools/build-runtime.mjs --check` 检查一致性。职责和迁移记录见 [源码收敛记录](docs/source-consolidation-20260929.md)。
