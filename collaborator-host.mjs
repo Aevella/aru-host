@@ -692,7 +692,10 @@ export function createCollaboratorHost({
     },
     start() {
       initiative.start();
-      mobileReplicas.start();
+      return mobileReplicas.start().catch((error) => {
+        mobileReplicas.stop();
+        log(`mobile collaborator startup recovery failed; scheduling stopped until Host restart: ${error?.message ?? error}`);
+      });
     },
     stop() {
       initiative.stop();

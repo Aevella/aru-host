@@ -258,6 +258,23 @@ export function createWakeBridge({
       .slice(0, 10_000);
   }
 
+  function secret(value, name) {
+    const result = String(value ?? "");
+    if (Buffer.byteLength(result) < 32 || Buffer.byteLength(result) > 256) throw invalid(`${name} is invalid`);
+    return result;
+  }
+  function bounded(value, name, maximum) {
+    const result = String(value ?? "").trim();
+    if (!result || Buffer.byteLength(result) > maximum) throw invalid(`${name} is invalid`);
+    return result;
+  }
+  function fingerprint(value) {
+    const result = String(value ?? "").toLowerCase();
+    if (!/^[a-f0-9]{24}$/.test(result)) throw invalid("encryption key fingerprint is invalid");
+    return result;
+  }
+  function invalid(message) { return new HttpError(400, "wake.invalid_request", message); }
+
   return { route, publicStatus };
 }
 
@@ -267,19 +284,3 @@ function bearer(req) {
 }
 
 function digest(value) { return createHash("sha256").update(value).digest("base64url"); }
-function secret(value, name) {
-  const result = String(value ?? "");
-  if (Buffer.byteLength(result) < 32 || Buffer.byteLength(result) > 256) throw invalid(`${name} is invalid`);
-  return result;
-}
-function bounded(value, name, maximum) {
-  const result = String(value ?? "").trim();
-  if (!result || Buffer.byteLength(result) > maximum) throw invalid(`${name} is invalid`);
-  return result;
-}
-function fingerprint(value) {
-  const result = String(value ?? "").toLowerCase();
-  if (!/^[a-f0-9]{24}$/.test(result)) throw invalid("encryption key fingerprint is invalid");
-  return result;
-}
-function invalid(message) { const error = new Error(message); error.status = 400; return error; }

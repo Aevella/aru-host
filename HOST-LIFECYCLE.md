@@ -121,3 +121,19 @@ Execution-history verification: native Host 13 tests and public Host 15 tests pa
 phone projection 3 tests and runtime protocol 4 parameter cases passed. The Polaris
 arm64 iOS Simulator build passed with CODE_SIGNING_ALLOWED=NO. Source and simulator
 proof only; installed phones and published Host packages have not been exercised.
+
+
+2026-09-29 review follow-up: mobile replica startup settlement failures are now
+handled at the collaborator Host composition boundary. A failed recovery stops
+that scheduler and logs the failure plus the restart requirement; unrelated Host
+routes remain available. A filesystem rename-failure fixture proves containment
+and recovery of the original durable result on the next successful startup.
+Wake bridge validation now uses the injected HttpError class, so authenticated
+invalid fields produce 400 with a field message, while bad authentication remains
+401. These follow-up changes are source/test evidence, not a new VPS deployment.
+
+Known storage debt remains: execution and delivery arrays grow in ledger.json and
+are rewritten on saves. Do not truncate them to a fixed record count: undelivered
+results, continuation context, duplicate-settlement receipts and saved execution
+content have different retention responsibilities. A bounded hot ledger requires
+separate durable history/receipt storage, not silent loss of generated replies.
