@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+replica_rollback_compatible() {
+  [[ ! -d "$2/mobile-collaborator-replicas/records-v2" ]] && return 0
+  "$3" --input-type=module - "$1/mobile-collaborator-replicas.mjs" <<'NODE'
+import { pathToFileURL } from 'node:url';
+const target = await import(pathToFileURL(process.argv[2]));
+if (target.replicaStorageVersion !== 2) process.exit(1);
+NODE
+}
+
+
 readonly PRODUCT="Aru self-hosted for macOS"
 readonly REPO_RAW_DEFAULT="https://raw.githubusercontent.com/Aevella/aru-host"
 
@@ -585,6 +595,9 @@ if [[ "$SKIP_START" != "true" ]]; then
   if ! start_instance; then
     stop_instance
     check_state || die "state check failed; previous release was not restarted"
+    if [[ -n "$old_release" ]]; then
+      replica_rollback_compatible "$INSTANCE_ROOT/$old_release" "$DATA_DIR" "$NODE_BINARY" || die "previous release cannot read migrated execution records; retain current release for repair"
+    fi
     if [[ "$had_node_env" == true ]]; then
       cp -p "$ROLLBACK_TMP/node.env" "$NODE_ENV"
     else

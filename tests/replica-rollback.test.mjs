@@ -38,3 +38,15 @@ for (const compatible of [false, true]) test(`Linux rollback checks replica form
   if (compatible) assert.match(readFileSync(calls, 'utf8'), /restart/);
   else { assert.match(result.stderr, /current release unchanged/); assert.throws(() => readFileSync(calls)); }
 });
+
+for (const installer of ['install.sh', 'install-macos.sh']) test(`${installer} automatic fallback rejects old record readers`, { skip: process.platform === 'win32' }, t => {
+  const root = mkdtempSync(join(tmpdir(), 'aru-auto-rollback-')); t.after(() => rmSync(root, { recursive: true, force: true }));
+  const data = join(root, 'data'); mkdirSync(join(data, 'mobile-collaborator-replicas/records-v2'), { recursive: true });
+  const text = readFileSync(installer, 'utf8'), start = text.indexOf('replica_rollback_compatible() {');
+  const helper = text.slice(start, text.indexOf('\n}\n', start) + 3);
+  for (const version of [1, 2]) {
+    writeFileSync(join(root, 'mobile-collaborator-replicas.mjs'), `export const replicaStorageVersion = ${version};`);
+    const result = spawnSync('bash', ['-c', `${helper}\nreplica_rollback_compatible "$1" "$2" "$3"`, 'test', root, data, process.execPath]);
+    assert.equal(result.status, version === 2 ? 0 : 1);
+  }
+});

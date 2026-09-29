@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+replica_rollback_compatible() {
+  [[ ! -d "$2/mobile-collaborator-replicas/records-v2" ]] && return 0
+  "$3" --input-type=module - "$1/mobile-collaborator-replicas.mjs" <<'NODE'
+import { pathToFileURL } from 'node:url';
+const target = await import(pathToFileURL(process.argv[2]));
+if (target.replicaStorageVersion !== 2) process.exit(1);
+NODE
+}
+
+
 readonly PRODUCT="Aru self-hosted"
 readonly SERVICE_NAME="aru-selfhost.service"
 readonly SERVICE_USER="aru-selfhost"
@@ -348,6 +358,9 @@ cleanup() {
         runuser -u "$SERVICE_USER" -- node "/opt/aru-selfhost/$old_release/server.mjs" --data-dir /var/lib/aru-selfhost/data --container-runtime none --check-state >/dev/null 2>&1 || can_restore=false
       fi
     fi
+    if [[ -n "${old_release:-}" ]]; then
+      replica_rollback_compatible "$(root_path /opt/aru-selfhost)/$old_release" "$(root_path /var/lib/aru-selfhost/data)" node || can_restore=false
+    fi
     if [[ "$can_restore" == true ]]; then
       for path in "${recovery_paths[@]}"; do
         if [[ -f "$RECOVERY_TMP/$index" ]]; then cp -p "$RECOVERY_TMP/$index" "$(root_path "$path")"; else rm -f "$(root_path "$path")"; fi
@@ -659,7 +672,8 @@ if [[ "$SKIP_START" != "true" ]]; then
   if [[ -n "$DOMAIN" && "$SKIP_CADDY" != "true" ]]; then
     if ! caddy validate --config /etc/caddy/Caddyfile; then
       if [[ -n "$old_release" ]]; then
-        ln -sfn "$old_release" /opt/aru-selfhost/current
+        replica_rollback_compatible "/opt/aru-selfhost/$old_release" /var/lib/aru-selfhost/data node || die "previous release cannot read migrated execution records; retain current release for repair"
+      ln -sfn "$old_release" /opt/aru-selfhost/current
       fi
       die "Caddy configuration is invalid; restored the previous release pointer"
     fi
@@ -676,6 +690,7 @@ if [[ "$SKIP_START" != "true" ]]; then
     check_state || die "state check failed; previous release was not restarted"
     if [[ -n "$old_release" ]]; then
       runuser -u "$SERVICE_USER" -- node "/opt/aru-selfhost/$old_release/server.mjs" --data-dir /var/lib/aru-selfhost/data --container-runtime none --check-state || die "previous release cannot read current data; restore current release and run doctor"
+      replica_rollback_compatible "/opt/aru-selfhost/$old_release" /var/lib/aru-selfhost/data node || die "previous release cannot read migrated execution records; retain current release for repair"
       ln -sfn "$old_release" /opt/aru-selfhost/current
       systemctl restart "$SERVICE_NAME" || true
       die "new release failed its manifest health check and was rolled back"
