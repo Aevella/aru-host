@@ -1,0 +1,1069 @@
+import { createMobileCollaboratorIdentityHost } from "./mobile-collaborator-replicas.mjs";
+import { randomUUID } from "node:crypto";
+import { execFile, spawnSync } from "node:child_process";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { homedir } from "node:os";
+import path from "node:path";
+import { createCollaboratorCognitionHost } from "./collaborator-cognition.mjs";
+import { createCollaboratorSurfaceHost } from "./collaborator-surfaces.mjs";
+import { createCodexAppServerDriver } from "./codex-app-server-driver.mjs";
+// A 0.31.x fixed-list upgrader copies only the files it knew about, so the
+// Claude Code driver can be absent on the first start after such an upgrade.
+// The Host must still start; Claude Code then reports unavailable until the
+// next upgrade installs its files.
+const claudeCodeModule = await import("./claude-code-driver.mjs").catch(() => null);
+
+import { createCollaboratorConversationHost } from "./collaborator-conversations.mjs";
+import { createCollaboratorInitiativeHost } from "./collaborator-initiative.mjs";
+import { createCollaboratorProjectHost } from "./collaborator-projects.mjs";
+import { createMobileCollaboratorReplicaHost } from "./mobile-collaborator-replicas.mjs";
+import { createDirectAPIDriver } from "./direct-api-driver.mjs";
+import { createProviderProfileHost } from "./provider-profiles.mjs";
+import { createProviderSecretStore } from "./provider-secret-store.mjs";
+
+const DRIVER_INVENTORY_SCHEMA = "aru.selfhost.agent-driver-inventory.v1";
+const HOSTED_COLLABORATOR_INVENTORY_SCHEMA = "aru.selfhost.hosted-collaborator-inventory.v1";
+const HOSTED_COLLABORATOR_SCHEMA = "aru.selfhost.hosted-collaborator.v1";
+const COLLABORATOR_TOOL_ACCESS_SCHEMA = "aru.selfhost.collaborator-tool-access.v1";
+
+const LOCAL_DRIVER_DEFINITIONS = [
+  {
+    id: "codex",
+    displayName: "Codex",
+    command: "codex",
+    executableCandidates: process.platform === "win32"
+      ? [
+        "codex",
+        `${process.env.APPDATA ?? `${homedir()}\\AppData\\Roaming`}\\npm\\codex.cmd`,
+        `${process.env.LOCALAPPDATA ?? `${homedir()}\\AppData\\Local`}\\Programs\\codex\\codex.exe`,
+      ]
+      : [
+        "codex",
+        "/Applications/ChatGPT.app/Contents/Resources/codex",
+        `${homedir()}/Applications/ChatGPT.app/Contents/Resources/codex`,
+        "/Applications/Codex.app/Contents/Resources/codex",
+        "/Applications/ChatGPT.app/Contents/Resources/codex",
+        `${homedir()}/Applications/ChatGPT.app/Contents/Resources/codex`,
+        `${homedir()}/Applications/Codex.app/Contents/Resources/codex`,
+        `${homedir()}/.local/bin/codex`,
+        "/opt/homebrew/bin/codex",
+        "/usr/local/bin/codex",
+      ],
+    // launchd trims PATH, so an npm-global / nvm / fnm / volta install is only
+    // reachable through the same package-manager discovery Claude Code uses.
+    discoverExecutableCandidates: process.platform === "win32"
+      ? null
+      : () => nodePackageExecutableCandidates("codex"),
+    adapter: "codex-app-server",
+    transport: "loopback-websocket",
+    integrationGuide: "https://github.com/openai/codex/tree/main/codex-rs/app-server",
+  },
+  {
+    id: "claude-code",
+    displayName: "Claude Code",
+    command: "claude",
+    executableCandidates: process.platform === "win32"
+      ? [
+        "claude",
+        `${process.env.APPDATA ?? `${homedir()}\\AppData\\Roaming`}\\npm\\claude.cmd`,
+        `${homedir()}\\.local\\bin\\claude.exe`,
+      ]
+      : [
+        "claude",
+        `${homedir()}/.local/bin/claude`,
+        `${homedir()}/.claude/local/claude`,
+        "/opt/homebrew/bin/claude",
+        "/usr/local/bin/claude",
+      ],
+    discoverExecutableCandidates: process.platform === "win32"
+      ? null
+      : () => [
+        ...(process.platform === "darwin" ? claudeDesktopExecutableCandidates() : []),
+        ...nodePackageExecutableCandidates("claude"),
+      ],
+    adapter: "claude-code-cli",
+    transport: "stream-json",
+    integrationGuide: "https://code.claude.com/docs/en/headless",
+  },
+];
+const API_DRIVER_DEFINITION = {
+  id: "api",
+  displayName: "模型 API",
+  command: null,
+  adapter: "direct-provider-api",
+  transport: "https",
+  integrationGuide: null,
+};
+const DRIVER_DEFINITIONS = [...LOCAL_DRIVER_DEFINITIONS, API_DRIVER_DEFINITION];
+// Drivers that driverForCollaborator can run. Others are probed and listed so
+// the Console can show them, but a collaborator cannot be created on them.
+const TURN_EXECUTING_DRIVER_IDS = new Set(["codex", "claude-code", "api"]);
+
+export function createCollaboratorHost({
+  dataDir,
+  state,
+  saveState,
+  readJSONBody,
+  sendJSON,
+  HttpError,
+  managedWorkspaceRoot,
+  maximumReplicaBytes = 64 * 1024 * 1024,
+  toolCatalog = () => [],
+  executeTool = async () => {
+    throw new Error("Aru tool execution is unavailable");
+  },
+  createArtifact = () => {
+    throw new Error("Aru artifact publication is unavailable");
+  },
+  providerSecretStore = createProviderSecretStore(),
+  conversationHostFactory = createCollaboratorConversationHost,
+  onTurnSettled = async () => {},
+  log = () => {},
+  now = Date.now,
+  probeLocalDriver = probeDriver,
+  retryLocalDriverProbe = probeDriverAsync,
+  driverProbeRetryMs = 30_000,
+}) {
+  state.agentDriverProbes ??= [];
+  state.hostedCollaborators ??= [];
+  const mobileIdentities = createMobileCollaboratorIdentityHost({
+    state, saveState, readJSONBody, sendJSON, HttpError, now,
+  });
+  const artifactOwnerForId = (id) => mobileIdentities.ownerForId(id) ?? collaboratorForId(id);
+  const surfaces = createCollaboratorSurfaceHost({
+    dataDir,
+    readJSONBody,
+    sendJSON,
+    HttpError,
+    now,
+  });
+  const projects = createCollaboratorProjectHost({
+    dataDir,
+    surfaces,
+    createArtifact,
+    readJSONBody,
+    sendJSON,
+    HttpError,
+    now,
+  });
+  const cognition = createCollaboratorCognitionHost({
+    dataDir,
+    readJSONBody,
+    sendJSON,
+    HttpError,
+    now,
+  });
+  const codexDriver = createCodexAppServerDriver({
+    executable: resolveDriverExecutable(LOCAL_DRIVER_DEFINITIONS[0]),
+    resolveExecutable: () => resolveDriverExecutable(LOCAL_DRIVER_DEFINITIONS[0]),
+    log,
+  });
+  const claudeCodeDriver = claudeCodeModule
+    ? claudeCodeModule.createClaudeCodeDriver({
+      executable: resolveDriverExecutable(LOCAL_DRIVER_DEFINITIONS[1]),
+      resolveExecutable: () => resolveDriverExecutable(LOCAL_DRIVER_DEFINITIONS[1]),
+      log,
+    })
+    : uninstalledDriver("Claude Code");
+  let providerProfiles;
+  const directAPIDriver = createDirectAPIDriver({
+    profileForId: (profileId) => providerProfiles.profileForId(profileId),
+    readSecret: (profileId) => providerSecretStore.read(profileId),
+    log,
+  });
+  providerProfiles = createProviderProfileHost({
+    state,
+    saveState,
+    readJSONBody,
+    sendJSON,
+    HttpError,
+    secretStore: providerSecretStore,
+    testProfile: directAPIDriver.testProfile,
+    isProfileInUse: (profileId) => state.hostedCollaborators.some(
+      (collaborator) => collaborator.providerProfileId === profileId && !collaborator.archivedAt,
+    ),
+    now,
+  });
+  let initiative;
+  let mobileReplicas;
+  const conversations = conversationHostFactory({
+    dataDir,
+    driverForCollaborator,
+    collaboratorForId,
+    maximumRequestBytes: maximumReplicaBytes,
+    readJSONBody,
+    sendJSON,
+    HttpError,
+    toolCatalog: conversationToolCatalog,
+    executeTool: executeConversationTool,
+    requestInstructions: (collaborator) => collaborator.authority === "mobile-replica"
+      ? collaborator.mobileInstructions
+      : cognition.requestInstructions(collaborator),
+    configurationRevision: (collaborator) => collaborator.authority === "mobile-replica"
+      ? collaborator.revision
+      : cognition.summary(collaborator.collaboratorId).revision,
+    onTurnSettled: async (event) => {
+      if (await mobileReplicas?.settle(event)) return;
+      const collaborator = collaboratorForId(event.conversation.collaboratorId);
+      const enriched = { ...event, collaborator };
+      initiative?.settle(enriched);
+      await onTurnSettled(enriched);
+    },
+    now,
+  });
+  mobileReplicas = createMobileCollaboratorReplicaHost({
+    dataDir,
+    readJSONBody,
+    sendJSON,
+    HttpError,
+    collaboratorForId,
+    maximumRequestBytes: maximumReplicaBytes,
+    trigger: (executor, replica, rule, deliveryId) =>
+      conversations.runReplicaProactive(executor, replica, rule, deliveryId),
+    recoverDelivery: (sourceId, deliveryId, epoch) =>
+      conversations.recoverReplicaDelivery(sourceId, deliveryId, epoch),
+    onDelivery: onTurnSettled,
+    now,
+    log,
+  });
+  initiative = createCollaboratorInitiativeHost({
+    dataDir,
+    readJSONBody,
+    sendJSON,
+    HttpError,
+    collaboratorForId,
+    collaboratorIds: () => state.hostedCollaborators
+      .filter((collaborator) => !collaborator.archivedAt)
+      .map((collaborator) => collaborator.collaboratorId),
+    trigger: (collaborator, rule) => conversations.runProactive(collaborator, rule),
+    now,
+    log,
+  });
+
+  function conversationToolCatalog(collaborator) {
+    const externalTools = toolCatalog().filter((tool) =>
+      !tool.name.startsWith("aru_collaborator_surface_")
+      && !tool.name.startsWith("aru_collaborator_project_"));
+    if (collaborator?.authority === "mobile-replica") return externalTools;
+    return [
+      ...externalTools,
+      ...surfaces.selfTools(),
+      ...projects.selfTools(),
+      ...cognition.selfTools(),
+      ...initiative.selfTools(),
+      ...mobileReplicas.selfTools(),
+    ];
+  }
+
+  async function executeConversationTool(name, args, device, collaborator) {
+    const surfaceCall = surfaces.callSelfTool(name, args, device, collaborator);
+    if (surfaceCall.matched) return surfaceCall.value;
+    const projectCall = projects.callSelfTool(name, args, device, collaborator);
+    if (projectCall.matched) return projectCall.value;
+    const cognitionCall = cognition.callSelfTool(name, args, device, collaborator);
+    if (cognitionCall.matched) return cognitionCall.value;
+    const initiativeCall = initiative.callSelfTool(name, args, device, collaborator);
+    if (initiativeCall.matched) return initiativeCall.value;
+    const mobileReplicaCall = mobileReplicas.callSelfTool(name, args, device, collaborator);
+    if (mobileReplicaCall.matched) return mobileReplicaCall.value;
+    return executeTool(name, args, device);
+  }
+
+  function refreshDrivers() {
+    state.agentDriverProbes = LOCAL_DRIVER_DEFINITIONS.map((definition) => (
+      definition.id === "claude-code" && !claudeCodeModule
+        ? { ...unavailableProbe(definition, now()), failure: "driver-files-missing" }
+        : probeLocalDriver(definition, now())));
+    codexDriver.refreshExecutable();
+    claudeCodeDriver.refreshExecutable();
+    saveState();
+    return driverInventory();
+  }
+
+  // Startup probes run before serving requests. Every live refresh is asynchronous.
+  // A manual refresh supersedes older automatic work; only its generation may publish.
+  let probeGeneration = 0;
+  let staleProbeRetry = null;
+  let manualProbeRefresh = null;
+
+  async function publishDriverProbes(definitions, generation) {
+    const checkedAt = now();
+    const retried = await Promise.all(definitions.map(async (definition) => {
+      try {
+        return await retryLocalDriverProbe(definition, checkedAt);
+      } catch (error) {
+        log(`driver probe failed for ${definition.id}: ${error?.message ?? error}`);
+        return { ...unavailableProbe(definition, checkedAt), failure: "version-probe-failed" };
+      }
+    }));
+    if (generation !== probeGeneration) return;
+    const byId = new Map(retried.map((probe) => [probe.id, probe]));
+    const current = new Map(state.agentDriverProbes.map((probe) => [probe.id, probe]));
+    state.agentDriverProbes = LOCAL_DRIVER_DEFINITIONS
+      .map((definition) => byId.get(definition.id) ?? current.get(definition.id))
+      .filter(Boolean);
+    saveState();
+    // Executable resolution stays with driver launch; do not run its synchronous
+    // --version checks here after the asynchronous inventory probes complete.
+  }
+
+  function refreshDriversAsync() {
+    if (manualProbeRefresh) return manualProbeRefresh;
+    const generation = ++probeGeneration;
+    staleProbeRetry = null;
+    const work = publishDriverProbes(LOCAL_DRIVER_DEFINITIONS, generation)
+      .then(() => driverInventory())
+      .finally(() => { if (manualProbeRefresh === work) manualProbeRefresh = null; });
+    manualProbeRefresh = work;
+    return work;
+  }
+
+  // Reads return the current inventory while one coalesced retry repairs stale,
+  // unready entries. Ready drivers are untouched by automatic retries.
+  function retryStaleDriverProbes() {
+    if (manualProbeRefresh) return manualProbeRefresh;
+    if (staleProbeRetry) return staleProbeRetry;
+    const probes = new Map(state.agentDriverProbes.map((probe) => [probe.id, probe]));
+    const checkedAt = now();
+    const stale = LOCAL_DRIVER_DEFINITIONS.filter((definition) => {
+      const probe = probes.get(definition.id);
+      if (!probe) return true;
+      if (probe.status === "ready") return false;
+      return checkedAt - (Number(probe.checkedAt) || 0) >= driverProbeRetryMs;
+    });
+    if (stale.length === 0) return null;
+    const work = publishDriverProbes(stale, probeGeneration)
+      .catch((error) => { log(`driver probe publication failed: ${error?.message ?? error}`); })
+      .finally(() => { if (staleProbeRetry === work) staleProbeRetry = null; });
+    staleProbeRetry = work;
+    return work;
+  }
+
+  function driverInventory() {
+    const providerInventory = providerProfiles.inventory();
+    const drivers = driverInventoryWithoutExecution(providerInventory).drivers;
+    const execution = driverStatus(drivers, providerInventory);
+    return {
+      schema: DRIVER_INVENTORY_SCHEMA,
+      refreshedAt: state.agentDriverProbes.reduce(
+        (latest, probe) => Math.max(latest, Number(probe.checkedAt) || 0),
+        0,
+      ) || null,
+      drivers,
+      execution,
+    };
+  }
+
+  function collaboratorInventory() {
+    const projection = collaboratorProjection();
+    return {
+      schema: HOSTED_COLLABORATOR_INVENTORY_SCHEMA,
+      compatibility: { revision: 1, minimumClientRevision: 1 },
+      mobileIdentities: mobileIdentities.inventory(),
+      collaborators: state.hostedCollaborators.map((collaborator) => publicCollaborator(collaborator, projection)),
+    };
+  }
+
+  function publicCollaborator(collaborator, projection = collaboratorProjection()) {
+    const driver = projection.drivers.find((candidate) => candidate.id === collaborator.driverId);
+    const providerProfile = collaborator.driverId === "api"
+      ? projection.providerProfiles.get(collaborator.providerProfileId)
+      : null;
+    const turnExecution = collaboratorTurnExecution(collaborator, driver, providerProfile);
+    const activationStatus = collaborator.driverId === "api" && turnExecution && providerProfile?.health === "unhealthy"
+      ? "driver-unhealthy"
+      : (turnExecution ? "driver-ready" : "driver-unavailable");
+    return {
+      schema: HOSTED_COLLABORATOR_SCHEMA,
+      collaboratorId: collaborator.collaboratorId,
+      displayName: collaborator.displayName,
+      avatarDataURL: collaborator.avatarDataURL ?? null,
+      supportsAvatarEditing: true,
+      driverId: collaborator.driverId,
+      providerProfileId: collaborator.providerProfileId ?? null,
+      driverDisplayName: providerProfile?.displayName ?? driver?.displayName ?? collaborator.driverId,
+      driverDetail: providerProfile?.model ?? null,
+      revision: collaborator.revision,
+      createdAt: collaborator.createdAt,
+      updatedAt: collaborator.updatedAt,
+      archivedAt: collaborator.archivedAt,
+      authority: "computer-host",
+      clientProjection: "read-only-replica",
+      activationStatus,
+      turnExecution,
+      approvalMode: collaborator.approvalMode ?? "confirm",
+      toolAccess: publicToolAccess(collaborator.toolAccess),
+      cognition: cognition.summary(collaborator.collaboratorId),
+    };
+  }
+
+  async function route(req, res, path, requireDevice, requireLocalHostConsole) {
+    if (await mobileIdentities.route(req, res, path, requireDevice)) return true;
+    if (await providerProfiles.route(req, res, path, requireDevice, requireLocalHostConsole)) {
+      return true;
+    }
+    if (path === "/aru/v1/agent-drivers" && req.method === "GET") {
+      requireDevice();
+      retryStaleDriverProbes();
+      sendJSON(res, 200, driverInventory());
+      return true;
+    }
+    if (path === "/aru/v1/agent-drivers/refresh" && req.method === "POST") {
+      requireDevice();
+      sendJSON(res, 200, await refreshDriversAsync());
+      return true;
+    }
+    if (path === "/aru/v1/hosted-collaborators" && req.method === "GET") {
+      requireDevice();
+      sendJSON(res, 200, collaboratorInventory());
+      return true;
+    }
+    if (path === "/aru/v1/hosted-collaborators" && req.method === "POST") {
+      const device = requireDevice();
+      const body = await readJSONBody(req, 64 * 1024);
+      sendJSON(res, 201, createHostedCollaborator(body, device));
+      return true;
+    }
+    if (await mobileReplicas.route(req, res, path, requireDevice)) {
+      return true;
+    }
+    if (await conversations.route(req, res, path, requireDevice)) {
+      return true;
+    }
+    if (await initiative.route(req, res, path, requireDevice)) {
+      return true;
+    }
+    if (await cognition.route(req, res, path, requireDevice, collaboratorForId)) {
+      return true;
+    }
+    if (await surfaces.route(req, res, path, requireDevice, artifactOwnerForId)) {
+      return true;
+    }
+    if (await projects.route(req, res, path, requireDevice, artifactOwnerForId)) {
+      return true;
+    }
+    const match = path.match(/^\/aru\/v1\/hosted-collaborators\/([^/]+)$/);
+    if (!match) return false;
+    const collaboratorId = match[1];
+    if (!/^hostcol_[A-Fa-f0-9-]+$/.test(collaboratorId)) {
+      throw new HttpError(400, "collaborator.id_invalid", "invalid hosted collaborator id");
+    }
+    // Retrying a lost deletion receipt must be harmless. Other routes continue
+    // rejecting tombstoned identities before admitting any new work.
+    const collaborator = req.method === "DELETE"
+      ? state.hostedCollaborators.find(item => item.collaboratorId === collaboratorId)
+      : collaboratorForId(collaboratorId);
+    if (!collaborator) throw new HttpError(404, "collaborator.unknown", "unknown hosted collaborator");
+    if (req.method === "GET") {
+      requireDevice();
+      sendJSON(res, 200, publicCollaborator(collaborator));
+      return true;
+    }
+    if (req.method === "DELETE") {
+      const device = requireDevice();
+      const body = await readJSONBody(req, 64 * 1024);
+      if (collaborator.archivedAt) {
+        sendJSON(res, 200, publicCollaborator(collaborator));
+        return true;
+      }
+      if (body.expectedRevision !== collaborator.revision) {
+        throw new HttpError(409, "collaborator.revision_conflict", "hosted collaborator changed since it was read");
+      }
+      if (mobileReplicas.hasExecutionGrant(collaboratorId)) {
+        throw new HttpError(409, "collaborator.delegated", "Return mobile proactive execution to the phone before deleting this computer collaborator.");
+      }
+      // Includes proactive turns this face runs for a phone.
+      const hasActiveTurn = () => conversations.hasActiveTurns(collaboratorId);
+      if (hasActiveTurn()) {
+        if (body.stopActiveTurns !== true) {
+          throw new HttpError(409, "collaborator.busy", "Stop the current task before deleting this computer collaborator.");
+        }
+        await conversations.stopActiveTurns(collaboratorId, device);
+        // Stopping awaited drivers; the collaborator may have changed meanwhile.
+        if (collaborator.archivedAt) {
+          sendJSON(res, 200, publicCollaborator(collaborator));
+          return true;
+        }
+        if (body.expectedRevision !== collaborator.revision) {
+          throw new HttpError(409, "collaborator.revision_conflict", "hosted collaborator changed since it was read");
+        }
+        if (hasActiveTurn()) {
+          throw new HttpError(409, "collaborator.busy", "A new task started while stopping; try again.");
+        }
+      }
+      if (mobileReplicas.hasExecutionGrant(collaboratorId)) {
+        throw new HttpError(409, "collaborator.delegated", "Return mobile proactive execution to the phone before deleting this computer collaborator.");
+      }
+      const previous = { ...collaborator };
+      collaborator.archivedAt = now();
+      collaborator.revision += 1;
+      collaborator.updatedAt = now();
+      collaborator.updatedByDeviceId = device.deviceId;
+      try { saveState(); } catch (error) { Object.assign(collaborator, previous); throw error; }
+      sendJSON(res, 200, publicCollaborator(collaborator));
+      return true;
+    }
+    if (req.method === "PUT") {
+      const device = requireDevice();
+      const body = await readJSONBody(req, maximumReplicaBytes);
+      sendJSON(res, 200, updateHostedCollaborator(collaborator, body, device));
+      return true;
+    }
+    return false;
+  }
+
+  function collaboratorForId(value) {
+    const collaboratorId = String(value ?? "").trim();
+    if (!/^hostcol_[A-Fa-f0-9-]+$/.test(collaboratorId)) {
+      throw new HttpError(400, "collaborator.id_invalid", "invalid hosted collaborator id");
+    }
+    const collaborator = state.hostedCollaborators.find(
+      (candidate) => candidate.collaboratorId === collaboratorId,
+    );
+    if (!collaborator || collaborator.archivedAt) {
+      throw new HttpError(404, "collaborator.unknown", "unknown hosted collaborator");
+    }
+    return collaborator;
+  }
+
+  function createHostedCollaborator(body, device) {
+    if (body.requestId !== undefined && !/^[A-Fa-f0-9-]{36}$/.test(body.requestId)) {
+      throw new HttpError(400, "collaborator.request_id_invalid", "invalid request id");
+    }
+    if (body.requestId) {
+      const existing = state.hostedCollaborators.find((item) => item.createRequestId === body.requestId
+        && item.createdByDeviceId === device.deviceId);
+      if (existing) {
+        if (existing.archivedAt) throw new HttpError(409, "collaborator.create_deleted", "This creation was already deleted; start a new creation");
+        return publicCollaborator(existing);
+      }
+    }
+    const timestamp = now();
+    const collaborator = {
+      collaboratorId: `hostcol_${randomUUID()}`,
+      createRequestId: body.requestId ?? null,
+      displayName: validatedDisplayName(body.displayName),
+      driverId: validatedDriverId(body.driverId),
+      providerProfileId: validatedProviderProfileId(body.driverId, body.providerProfileId),
+      revision: 1,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      archivedAt: null,
+      toolAccess: validatedToolAccess(body.toolAccess),
+      createdByDeviceId: device.deviceId,
+      updatedByDeviceId: device.deviceId,
+    };
+    cognition.initialize(collaborator.collaboratorId, "isolated");
+    initiative.initialize(collaborator.collaboratorId);
+    state.hostedCollaborators.push(collaborator);
+    try { saveState(); } catch (error) {
+      state.hostedCollaborators = state.hostedCollaborators.filter(item => item !== collaborator);
+      throw error;
+    }
+    return publicCollaborator(collaborator);
+  }
+
+  function updateHostedCollaborator(collaborator, body, device) {
+    if (!Number.isSafeInteger(body.expectedRevision)) {
+      throw new HttpError(400, "collaborator.expected_revision_required", "expectedRevision required");
+    }
+    if (body.expectedRevision !== collaborator.revision) {
+      throw new HttpError(409, "collaborator.revision_conflict", "hosted collaborator changed since it was read");
+    }
+    if (body.displayName === undefined && body.driverId === undefined
+        && body.approvalMode === undefined && body.providerProfileId === undefined && body.toolAccess === undefined && body.avatarDataURL === undefined) {
+      throw new HttpError(400, "collaborator.no_changes", "displayName, driverId, providerProfileId, or toolAccess required");
+    }
+    const next = { ...collaborator };
+    if (body.displayName !== undefined) next.displayName = validatedDisplayName(body.displayName);
+    if (body.avatarDataURL !== undefined) {
+      const value = body.avatarDataURL;
+      if (value !== null && (typeof value !== "string" || !/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(value))) {
+        throw new HttpError(400, "collaborator.avatar_invalid", "Expected a PNG, JPEG or WebP avatar");
+      }
+      next.avatarDataURL = value;
+    }
+    if (body.driverId !== undefined || body.providerProfileId !== undefined) {
+      const active = conversations.inventory(collaborator.collaboratorId).conversations.some(
+        (item) => ["queued", "starting", "streaming", "waitingApproval", "toolRunning"].includes(item.activeTurn?.state));
+      if (active) throw new HttpError(409, "collaborator.busy", "Stop the current task before changing its execution configuration.");
+      const driverId = body.driverId === undefined ? collaborator.driverId : validatedDriverId(body.driverId);
+      next.driverId = driverId;
+      next.providerProfileId = validatedProviderProfileId(driverId,
+        body.providerProfileId === undefined ? collaborator.providerProfileId : body.providerProfileId);
+    }
+    if (body.approvalMode !== undefined) {
+      if (!["confirm", "always_allow"].includes(body.approvalMode)) {
+        throw new HttpError(400, "collaborator.approval_mode_invalid", "approvalMode must be confirm or always_allow");
+      }
+      next.approvalMode = body.approvalMode;
+    }
+    if (body.toolAccess !== undefined) next.toolAccess = validatedToolAccess(body.toolAccess);
+    next.revision += 1;
+    next.updatedAt = now();
+    next.updatedByDeviceId = device.deviceId;
+    const previous = { ...collaborator };
+    Object.assign(collaborator, next);
+    try { saveState(); } catch (error) {
+      for (const key of Object.keys(next)) if (!(key in previous)) delete collaborator[key];
+      Object.assign(collaborator, previous);
+      throw error;
+    }
+    return publicCollaborator(collaborator);
+  }
+
+  function validatedDisplayName(value) {
+    const displayName = String(value ?? "").trim();
+    if (!displayName) {
+      throw new HttpError(400, "collaborator.display_name_required", "displayName required");
+    }
+    if ([...displayName].length > 80) {
+      throw new HttpError(400, "collaborator.display_name_too_long", "displayName must be 80 characters or fewer");
+    }
+    return displayName;
+  }
+
+  function validatedDriverId(value) {
+    const driverId = String(value ?? "").trim();
+    if (!DRIVER_DEFINITIONS.some((driver) => driver.id === driverId)) {
+      throw new HttpError(400, "agent_driver.unknown", "driverId must name a supported agent driver");
+    }
+    if (!driverExecutesTurns(driverId)) {
+      throw new HttpError(400, "agent_driver.not_executable", "This agent driver cannot run collaborator turns on this Host yet");
+    }
+    return driverId;
+  }
+
+  function validatedProviderProfileId(driverId, value) {
+    if (driverId !== "api") return null;
+    const profileId = String(value ?? "").trim();
+    if (!profileId) {
+      throw new HttpError(400, "collaborator.provider_profile_required", "使用模型 API 时必须选择一个 API 配置");
+    }
+    providerProfiles.profileForId(profileId);
+    return profileId;
+  }
+
+  function validatedToolAccess(value) {
+    if (value === undefined) return { mode: "all", toolNames: [] };
+    if (!value || Array.isArray(value) || typeof value !== "object") {
+      throw new HttpError(400, "collaborator.tool_access_invalid", "toolAccess must be an object");
+    }
+    const mode = String(value.mode ?? "").trim();
+    if (mode !== "all" && mode !== "selected") {
+      throw new HttpError(400, "collaborator.tool_access_invalid", "toolAccess.mode must be all or selected");
+    }
+    if (!Array.isArray(value.toolNames)) {
+      throw new HttpError(400, "collaborator.tool_access_invalid", "toolAccess.toolNames must be an array");
+    }
+    const toolNames = [...new Set(value.toolNames.map((item) => validatedToolName(item)))].sort();
+    return { mode, toolNames: mode === "all" ? [] : toolNames };
+  }
+
+  function validatedToolName(value) {
+    if (typeof value !== "string") {
+      throw new HttpError(400, "collaborator.tool_access_invalid", "tool names must be strings");
+    }
+    const toolName = value.trim();
+    if (!toolName || /[\u0000-\u001f\u007f]/.test(toolName)) {
+      throw new HttpError(400, "collaborator.tool_access_invalid", "tool names must be non-empty printable strings");
+    }
+    return toolName;
+  }
+
+  function publicToolAccess(value) {
+    const normalized = value ?? { mode: "all", toolNames: [] };
+    return {
+      schema: COLLABORATOR_TOOL_ACCESS_SCHEMA,
+      mode: normalized.mode === "selected" ? "selected" : "all",
+      toolNames: normalized.mode === "selected" && Array.isArray(normalized.toolNames)
+        ? [...normalized.toolNames]
+        : [],
+    };
+  }
+
+  // Persisted probes describe an earlier process, not the installed executables now.
+  refreshDrivers();
+
+  function driverStatus(drivers, providerInventory) {
+    const codexReady = drivers.some((driver) => driver.id === "codex" && driver.status === "ready");
+    const claudeCodeReady = drivers.some(
+      (driver) => driver.id === "claude-code" && driver.status === "ready",
+    );
+    const apiConfigured = providerInventory.profiles.some((profile) => (profile.hasSecret || profile.authMode === "none"));
+    if (!codexReady && !claudeCodeReady && !apiConfigured) {
+      return { enabled: false, status: "driver-unavailable" };
+    }
+    const localDriverRunning = codexDriver.status() === "running"
+      || claudeCodeDriver.status() === "running";
+    return { enabled: true, status: localDriverRunning ? "running" : "ready" };
+  }
+
+  function driverInventoryWithoutExecution(providerInventory = providerProfiles.inventory()) {
+    const probes = new Map(state.agentDriverProbes.map((probe) => [probe.id, probe]));
+    return {
+      drivers: [
+        ...LOCAL_DRIVER_DEFINITIONS.map((definition) => ({
+          ...publicDriverDefinition(definition),
+          ...(probes.get(definition.id) ?? unavailableProbe(definition, null)),
+          executesTurns: driverExecutesTurns(definition.id),
+        })),
+        { ...apiDriverInventory(providerInventory), executesTurns: true },
+      ],
+    };
+  }
+
+  function apiDriverInventory(inventory = providerProfiles.inventory()) {
+    const configured = inventory.profiles.filter((profile) => (profile.hasSecret || profile.authMode === "none"));
+    const ready = configured.filter((profile) => profile.health === "ready");
+    return {
+      ...API_DRIVER_DEFINITION,
+      status: ready.length > 0 ? "ready" : (configured.length > 0 ? "unhealthy" : "unavailable"),
+      version: configured.length > 0 ? `${configured.length} 个 API 配置` : null,
+      checkedAt: inventory.profiles.reduce(
+        (latest, profile) => Math.max(latest, Number(profile.lastCheckedAt) || 0),
+        0,
+      ) || null,
+      failure: inventory.secretStorage.supported ? (configured.length > 0 ? null : "provider-profile-required")
+        : inventory.secretStorage.failure,
+    };
+  }
+
+  function collaboratorTurnExecution(collaborator, driver, providerProfile) {
+    if (collaborator.driverId === "codex") return driver?.status === "ready";
+    if (collaborator.driverId === "claude-code") return driver?.status === "ready";
+    if (collaborator.driverId === "api") return providerProfile?.hasSecret === true || providerProfile?.authMode === "none";
+    return false;
+  }
+
+  function collaboratorProjection() {
+    const providerInventory = providerProfiles.inventory();
+    return {
+      drivers: driverInventoryWithoutExecution(providerInventory).drivers,
+      providerProfiles: new Map(providerInventory.profiles.map((profile) => [profile.profileId, profile])),
+    };
+  }
+
+  function driverForCollaborator(collaborator) {
+    if (collaborator.driverId === "codex") return codexDriver;
+    if (collaborator.driverId === "claude-code") return claudeCodeDriver;
+    if (collaborator.driverId === "api") {
+      return directAPIDriver.forProfile(collaborator.providerProfileId);
+    }
+    throw new Error(`${collaborator.driverId} 还没有可执行的 Host 驱动`);
+  }
+
+  return {
+    route,
+    driverInventory,
+    collaboratorInventory,
+    surfaceTools: surfaces.tools,
+    projectTools: projects.tools,
+    callSurfaceTool(name, args, device) {
+      return surfaces.callTool(name, args, device, artifactOwnerForId);
+    },
+    callProjectTool(name, args, device) {
+      return projects.callTool(name, args, device, artifactOwnerForId);
+    },
+    start() {
+      initiative.start();
+      return mobileReplicas.start().catch((error) => {
+        mobileReplicas.stop();
+        log(`mobile collaborator startup recovery failed; scheduling stopped until Host restart: ${error?.message ?? error}`);
+      });
+    },
+    stop() {
+      initiative.stop();
+      mobileReplicas.stop();
+    },
+  };
+}
+
+const NPM_SHIM_ENTRY = /"%(?:~)?dp0%?\\([^"\r\n]+?\.[cm]?js)"/i;
+
+export function driverLaunchSpec(executable, {
+  platform = process.platform,
+  nodePath = process.execPath,
+  exists = existsSync,
+  readShim = (path) => readFileSync(path, "utf8"),
+} = {}) {
+  const direct = { file: executable, args: [], shell: false, source: "direct" };
+  if (platform !== "win32" || !/\.(?:cmd|bat)$/i.test(executable)) return direct;
+  if (!exists(executable)) return direct;
+  let shim = "";
+  try { shim = readShim(executable); } catch { shim = ""; }
+  const match = shim.match(NPM_SHIM_ENTRY);
+  if (match) {
+    const entry = path.win32.join(path.win32.dirname(executable), match[1]);
+    if (exists(entry)) return { file: nodePath, args: [entry], shell: false, source: "npm-shim" };
+  }
+  return { file: `"${executable}"`, args: [], shell: true, source: "shell" };
+}
+
+function runDriverExecutable(executable, args) {
+  const launch = driverLaunchSpec(executable);
+  return spawnSync(launch.file, [...launch.args, ...args], {
+    encoding: "utf8",
+    env: { ...process.env, NO_COLOR: "1" },
+    timeout: 3_000,
+    windowsHide: true,
+    shell: launch.shell,
+  });
+}
+
+function probeFailureDetail(result) {
+  if (result.error) return String(result.error.code ?? result.error.message ?? "spawn-error");
+  if (result.signal) return `signal ${result.signal}`;
+  const stderr = firstLine(result.stderr);
+  return stderr ? `exit ${result.status}: ${stderr}` : `exit ${result.status}`;
+}
+
+const VERSION_PROBE_OPTIONS = Object.freeze({
+  encoding: "utf8",
+  env: { ...process.env, NO_COLOR: "1" },
+  timeout: 3_000,
+  windowsHide: true,
+});
+
+// Startup probes synchronously before the host begins serving requests.
+function probeExecutableVersion(definition, executable, options) {
+  const launch = driverLaunchSpec(executable);
+  return spawnSync(launch.file, [...launch.args, "--version"], { ...options, shell: launch.shell });
+}
+
+export function probeDriver(definition, checkedAt) {
+  const candidates = driverExecutableCandidates(definition);
+  if (definition.id === "codex") {
+    const selected = selectNewestCodex(candidates);
+    if (selected) return readyProbe(definition, selected.version, checkedAt);
+  }
+  let firstFailure = null;
+  for (const executable of candidates) {
+    const result = probeExecutableVersion(definition, executable, VERSION_PROBE_OPTIONS);
+    const outcome = versionProbeOutcome(definition, result, checkedAt);
+    if (outcome && outcome.status !== "ready") outcome.failureDetail = `${executable}: ${probeFailureDetail(result)}`;
+    if (outcome?.status === "ready") return outcome;
+    firstFailure ??= outcome;
+  }
+  if (firstFailure) return firstFailure;
+  return unavailableProbe(definition, checkedAt);
+}
+
+// The stale-probe retry runs while the service is live, so every candidate is spawned
+// asynchronously and a hung binary only costs its own timeout, not the event loop.
+async function probeDriverAsync(definition, checkedAt) {
+  const candidates = driverExecutableCandidates(definition);
+  if (definition.id === "codex") {
+    const selected = await selectNewestCodexAsync(candidates);
+    if (selected) return readyProbe(definition, selected.version, checkedAt);
+  }
+  let firstFailure = null;
+  for (const executable of candidates) {
+    const launch = driverLaunchSpec(executable);
+    const result = await runVersionProbe(launch.file, [...launch.args, "--version"], { ...VERSION_PROBE_OPTIONS, shell: launch.shell });
+    const outcome = versionProbeOutcome(definition, result, checkedAt);
+    if (outcome?.status === "ready") return outcome;
+    firstFailure ??= outcome;
+  }
+  if (firstFailure) return firstFailure;
+  return unavailableProbe(definition, checkedAt);
+}
+
+// Shapes an execFile completion like a spawnSync result so both probe paths share one verdict.
+function runVersionProbe(executable, args = ["--version"], options = VERSION_PROBE_OPTIONS) {
+  return new Promise((resolve) => {
+    execFile(executable, args, options, (error, stdout, stderr) => {
+      if (!error) {
+        resolve({ status: 0, stdout, stderr, error: null });
+        return;
+      }
+      if (typeof error.code === "string") {
+        resolve({ status: null, stdout, stderr, error: { code: error.code } });
+        return;
+      }
+      if (error.killed) {
+        resolve({ status: null, stdout, stderr, error: { code: "ETIMEDOUT" } });
+        return;
+      }
+      resolve({ status: typeof error.code === "number" ? error.code : 1, stdout, stderr, error: null });
+    });
+  });
+}
+
+// Returns a probe when this candidate settles the verdict, or null when the next candidate
+// should be tried (the executable does not exist).
+function versionProbeOutcome(definition, result, checkedAt) {
+  if (result.error?.code === "ENOENT") return null;
+  const version = firstLine(result.stdout) || firstLine(result.stderr);
+  if (result.status === 0 && version) return readyProbe(definition, version, checkedAt);
+  return {
+    id: definition.id,
+    status: "unhealthy",
+    version: version || null,
+    checkedAt,
+    failure: result.error?.code === "ETIMEDOUT" ? "version-probe-timed-out" : "version-probe-failed",
+  };
+}
+
+function readyProbe(definition, version, checkedAt) {
+  return { id: definition.id, status: "ready", version, checkedAt, failure: null };
+}
+
+function publicDriverDefinition({
+  executableCandidates: _,
+  discoverExecutableCandidates: __,
+  ...definition
+}) {
+  return definition;
+}
+
+function driverExecutesTurns(driverId) {
+  return TURN_EXECUTING_DRIVER_IDS.has(driverId) && (driverId !== "claude-code" || claudeCodeModule !== null);
+}
+
+// Stands in for a local driver whose files are not installed.
+function uninstalledDriver(displayName) {
+  const missing = () => { throw new Error(`${displayName} 的 Host 驱动文件还没有安装，请再升级一次 Host`); };
+  return {
+    status: () => "unavailable",
+    refreshExecutable() {},
+    ensureConnected: missing,
+    startTurn: missing,
+    interrupt() {},
+    validateAttachments() {},
+  };
+}
+
+function unavailableProbe(definition, checkedAt) {
+  return {
+    id: definition.id,
+    status: "unavailable",
+    version: null,
+    checkedAt,
+    failure: "command-not-found",
+  };
+}
+
+function firstLine(value) {
+  return String(value ?? "").split(/\r?\n/, 1)[0].trim().slice(0, 160);
+}
+
+export function resolveDriverExecutable(definition) {
+  if (definition.id === "codex") {
+    const selected = selectNewestCodex(driverExecutableCandidates(definition));
+    if (selected) return driverLaunchSpec(selected.executable);
+  }
+  for (const executable of driverExecutableCandidates(definition)) {
+    const result = probeExecutableVersion(definition, executable, {
+      encoding: "utf8",
+      env: { ...process.env, NO_COLOR: "1" },
+      timeout: 3_000,
+      windowsHide: true,
+    });
+    if (result.status === 0) return driverLaunchSpec(executable);
+  }
+  return null;
+}
+
+function driverExecutableCandidates(definition) {
+  const discovered = typeof definition.discoverExecutableCandidates === "function"
+    ? definition.discoverExecutableCandidates()
+    : [];
+  return [...new Set([...definition.executableCandidates, ...discovered])];
+}
+
+export function claudeDesktopExecutableCandidates(
+  homeDirectory = homedir(),
+  readDirectory = readdirSync,
+) {
+  const root = `${homeDirectory}/Library/Application Support/Claude/claude-code`;
+  try {
+    return readDirectory(root, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort((left, right) => right.localeCompare(left, undefined, { numeric: true }))
+      .map((version) => `${root}/${version}/claude.app/Contents/MacOS/claude`);
+  } catch {
+    return [];
+  }
+}
+
+// Package-manager installs that a launchd-trimmed PATH cannot see: npm global
+// prefix, nvm/fnm version directories (newest first), and volta shims. Every
+// returned path is a candidate only; the version probe decides whether it exists.
+export function nodePackageExecutableCandidates(
+  binaryName,
+  {
+    homeDirectory = homedir(),
+    env = process.env,
+    readDirectory = readdirSync,
+  } = {},
+) {
+  const versionDirectories = (root) => {
+    try {
+      return readDirectory(root, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => entry.name)
+        .sort((left, right) => right.localeCompare(left, undefined, { numeric: true }));
+    } catch {
+      return [];
+    }
+  };
+  const candidates = [];
+  for (const prefix of [env.NPM_CONFIG_PREFIX, env.npm_config_prefix]) {
+    if (prefix) candidates.push(`${prefix}/bin/${binaryName}`);
+  }
+  candidates.push(`${homeDirectory}/.npm-global/bin/${binaryName}`);
+  const nvmRoot = `${env.NVM_DIR || `${homeDirectory}/.nvm`}/versions/node`;
+  for (const version of versionDirectories(nvmRoot)) {
+    candidates.push(`${nvmRoot}/${version}/bin/${binaryName}`);
+  }
+  const fnmRoots = [...new Set([
+    env.FNM_DIR,
+    `${homeDirectory}/.local/share/fnm`,
+    `${homeDirectory}/Library/Application Support/fnm`,
+  ].filter(Boolean))].map((root) => `${root}/node-versions`);
+  for (const fnmRoot of fnmRoots) {
+    for (const version of versionDirectories(fnmRoot)) {
+      candidates.push(`${fnmRoot}/${version}/installation/bin/${binaryName}`);
+    }
+  }
+  candidates.push(`${env.VOLTA_HOME || `${homeDirectory}/.volta`}/bin/${binaryName}`);
+  return [...new Set(candidates)];
+}
+
+// Probe installed binaries only; inventory and launch share the same version choice.
+export function selectNewestCodex(candidates, run = (executable, args, options) => { const spec = driverLaunchSpec(executable); return spawnSync(spec.file, [...spec.args, ...args], { ...options, shell: spec.shell }); }) {
+  return pickNewestCodex([...new Set(candidates)].map((executable) => ({
+    executable,
+    result: run(executable, ["--version"], VERSION_PROBE_OPTIONS),
+  })));
+}
+
+export async function selectNewestCodexAsync(candidates, run = (executable, args, options) => { const spec = driverLaunchSpec(executable); return runVersionProbe(spec.file, [...spec.args, ...args], { ...options, shell: spec.shell }); }) {
+  const unique = [...new Set(candidates)];
+  const results = await Promise.all(unique.map((executable) => run(executable, ["--version"], VERSION_PROBE_OPTIONS)));
+  return pickNewestCodex(unique.map((executable, index) => ({ executable, result: results[index] })));
+}
+
+function pickNewestCodex(probed) {
+  let selected = null;
+  for (const { executable, result } of probed) {
+    if (result.status !== 0) continue;
+    const version = firstLine(result.stdout) || firstLine(result.stderr);
+    const match = /^codex-cli (\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\s|$)/.exec(version);
+    if (!match) continue;
+    const parts = match.slice(1, 4).map(Number);
+    const prerelease = match[4] ?? "";
+    let comparison = selected ? 0 : 1;
+    if (selected) {
+      for (let i = 0; i < 3 && comparison === 0; i++) comparison = parts[i] - selected.parts[i];
+      if (comparison === 0 && prerelease !== selected.prerelease) {
+        comparison = !prerelease ? 1 : !selected.prerelease ? -1
+          : prerelease.localeCompare(selected.prerelease, "en", { numeric: true });
+      }
+    }
+    if (comparison > 0) selected = { executable, version, parts, prerelease };
+  }
+  return selected && { executable: selected.executable, version: selected.version };
+}

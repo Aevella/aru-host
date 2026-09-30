@@ -47,11 +47,17 @@ install_instance() {
     --base-url "http://aru-$instance.local:$port" \
     --transport-kind lan \
     --release-version 0.28.0-test \
-    --display-name "Example $instance Mac"
+    --display-name "Example $instance 的 Mac"
 }
 
 install_instance alpha 18787
 alpha="$root/Library/Application Support/Aru Self-Hosted/instances/alpha"
+python3 - "$alpha/config/install.env" <<'CHECK_ENCODING'
+import sys
+from pathlib import Path
+Path(sys.argv[1]).read_text(encoding="utf-8")
+CHECK_ENCODING
+/bin/bash -c 'source "$1"; test "$ARU_INSTALL_DISPLAY_NAME" = "Example alpha 的 Mac"' test "$alpha/config/install.env"
 # A corrupt state must reject upgrades without switching back into an old reader.
 old_pointer="$(readlink "$alpha/current")"
 printf '{broken' > "$alpha/data/state.json"
@@ -151,4 +157,8 @@ done
 tar -xOf "$artifacts/aru-selfhost-macos.tar.gz" release.json \
   | grep -Fq '"version":"0.28.0-test"'
 
+bash "$SELFHOST_DIR/tests/macos-installer-spaces.sh"
+
 echo "ARU_SELFHOST_MACOS_INSTALLER_SMOKE_OK"
+
+bash "$SELFHOST_DIR/tests/macos-installer-spaces.sh"

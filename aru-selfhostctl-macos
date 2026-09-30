@@ -175,6 +175,14 @@ rollback_command() {
   current="$(readlink "$CURRENT_LINK" 2>/dev/null || true)"
   previous="$(readlink "$PREVIOUS_LINK" 2>/dev/null || true)"
   [[ -n "$current" && -n "$previous" ]] || die "no previous release for instance $INSTANCE"
+  load_node_config
+  if [[ -d "$ARU_DATA_DIR/mobile-collaborator-replicas/records-v2" ]]; then
+    "${ARU_NODE_BINARY:-node}" --input-type=module - "$INSTANCE_ROOT/$previous/mobile-collaborator-replicas.mjs" <<'NODE' || die "previous release cannot read migrated execution records; current release unchanged"
+import { pathToFileURL } from 'node:url';
+const module = await import(pathToFileURL(process.argv[2]));
+if (module.replicaStorageVersion !== 2) process.exit(1);
+NODE
+  fi
   launchctl bootout "$DOMAIN/$LABEL" >/dev/null 2>&1 || true
   ln -sfn "$current" "$PREVIOUS_LINK"
   ln -sfn "$previous" "$CURRENT_LINK"

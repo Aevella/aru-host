@@ -1,0 +1,344 @@
+import { spawn } from "node:child_process";
+
+// WebSocket.OPEN. A literal, because Node 18 has no global WebSocket and a
+// status read must not throw there; only connecting requires one.
+const SOCKET_OPEN = 1;
+
+const INITIALIZE_CLIENT = {
+  name: "aru_host",
+  title: "Aru Host",
+  version: "1",
+};
+
+export function createCodexAppServerDriver({ executable, resolveExecutable, log = () => {}, interruptTimeoutMs = 10_000 }) {
+  let process = null;
+  let socket = null;
+  let connecting = null;
+  let knownExecutable = executable ?? null;
+  let requestSequence = 0;
+  const pendingRequests = new Map();
+  const threadHandlers = new Map();
+  const threadTurnIds = new Map();
+  const retiredTurnIds = new Set();
+  const completedTurnIds = new Set();
+  const completionWaiters = new Map();
+
+  function status() {
+    if (socket?.readyState === SOCKET_OPEN) return "running";
+    if (connecting) return "starting";
+    return knownExecutable ? "ready" : "unavailable";
+  }
+
+  async function ensureConnected() {
+    if (socket?.readyState === SOCKET_OPEN) return;
+    const command = refreshExecutable();
+    if (!command) throw new Error("codex executable is unavailable");
+    if (typeof WebSocket !== "function") {
+      throw new Error("Aru Host requires Node.js with WebSocket support");
+    }
+    if (connecting) return connecting;
+    connecting = connect(command);
+    try {
+      await connecting;
+    } finally {
+      connecting = null;
+    }
+  }
+
+  async function connect(command) {
+    // `command` is either a bare executable path or the launch spec resolved
+    // by the Host ({ file, args, shell }), e.g. `node <npm entry>` on Windows.
+    const launch = typeof command === "string"
+      ? { file: command, args: [], shell: false }
+      : command;
+    process = spawn(launch.file, [
+      ...launch.args,
+      "app-server",
+      "-c",
+      "project_doc_max_bytes=0",
+      "--listen",
+      "ws://127.0.0.1:0",
+    ], {
+      env: { ...globalThis.process.env, NO_COLOR: "1" },
+      stdio: ["ignore", "ignore", "pipe"],
+      windowsHide: true,
+      shell: launch.shell === true,
+    });
+    const url = await listeningURL(process);
+    socket = await openSocket(url);
+    socket.addEventListener("message", handleMessage);
+    socket.addEventListener("close", () => handleDisconnect("Codex connection closed"));
+    socket.addEventListener("error", () => handleDisconnect("Codex connection failed"));
+    await request("initialize", {
+      clientInfo: INITIALIZE_CLIENT,
+      capabilities: { experimentalApi: true },
+    });
+    notify("initialized", {});
+    log("computer collaborator Codex driver ready");
+  }
+
+  async function startTurn({
+    threadId,
+    cwd,
+    instructions,
+    historyContext,
+    tools,
+    text,
+    attachments = [],
+    userMessageId,
+    handler,
+  }) {
+    await ensureConnected();
+    let resolvedThreadId = threadId;
+    if (resolvedThreadId) {
+      try {
+        await request("thread/resume", {
+          threadId: resolvedThreadId,
+          cwd,
+          baseInstructions: instructions,
+          approvalPolicy: "on-request",
+          sandbox: "workspace-write",
+        });
+      } catch {
+        resolvedThreadId = null;
+      }
+    }
+    if (!resolvedThreadId) {
+      const started = await request("thread/start", {
+        cwd,
+        runtimeWorkspaceRoots: [cwd],
+        baseInstructions: newThreadInstructions(instructions, historyContext),
+        approvalPolicy: "on-request",
+        sandbox: "workspace-write",
+        dynamicTools: tools,
+        ephemeral: false,
+      });
+      resolvedThreadId = started.thread.id;
+    }
+    threadHandlers.set(resolvedThreadId, handler);
+    threadTurnIds.delete(resolvedThreadId);
+    const startedTurn = await request("turn/start", {
+      threadId: resolvedThreadId,
+      input: codexUserInput(text, attachments),
+      clientUserMessageId: userMessageId,
+    });
+    threadTurnIds.set(resolvedThreadId, startedTurn.turn.id);
+    return { threadId: resolvedThreadId, turnId: startedTurn.turn.id };
+  }
+
+  async function interrupt(threadId, turnId) {
+    await ensureConnected();
+    retiredTurnIds.add(turnId);
+    if (!completedTurnIds.has(turnId)) {
+      let timer;
+      const completed = new Promise((resolve, reject) => {
+        completionWaiters.set(turnId, { resolve, reject });
+        timer = setTimeout(() => reject(new Error("Codex has not confirmed this turn stopped; retry stopping it.")), interruptTimeoutMs);
+        // An RPC acknowledgement alone does not prove execution has ended.
+        request("turn/interrupt", { threadId, turnId }, interruptTimeoutMs).catch(error => {
+          if (!completedTurnIds.has(turnId)) reject(error);
+        });
+      });
+      try { await completed; }
+      finally { clearTimeout(timer); completionWaiters.delete(turnId); }
+    }
+    if (threadTurnIds.get(threadId) === turnId) {
+      threadHandlers.delete(threadId);
+      threadTurnIds.delete(threadId);
+    }
+  }
+
+  function request(method, params, timeoutMs = 0) {
+    if (!socket || socket.readyState !== SOCKET_OPEN) {
+      return Promise.reject(new Error("Codex connection is not open"));
+    }
+    const id = ++requestSequence;
+    return new Promise((resolve, reject) => {
+      const timer = timeoutMs ? setTimeout(() => {
+        pendingRequests.delete(id);
+        reject(new Error("Codex did not acknowledge the stop request; retry stopping this turn."));
+      }, timeoutMs) : null;
+      pendingRequests.set(id, {
+        resolve: value => { clearTimeout(timer); resolve(value); },
+        reject: error => { clearTimeout(timer); reject(error); },
+      });
+      socket.send(JSON.stringify({ id, method, params }));
+    });
+  }
+
+  function notify(method, params) {
+    socket.send(JSON.stringify({ method, params }));
+  }
+
+  async function handleMessage(event) {
+    let message;
+    try {
+      message = JSON.parse(typeof event.data === "string" ? event.data : await event.data.text());
+    } catch {
+      return;
+    }
+    if (message.id !== undefined && !message.method) {
+      const pending = pendingRequests.get(message.id);
+      if (!pending) return;
+      pendingRequests.delete(message.id);
+      if (message.error) pending.reject(new Error(message.error.message ?? "Codex request failed"));
+      else pending.resolve(message.result);
+      return;
+    }
+    const notificationTurnId = message.params?.turnId ?? message.params?.turn?.id;
+    if (message.method === "turn/completed" && notificationTurnId) {
+      completedTurnIds.add(notificationTurnId);
+      completionWaiters.get(notificationTurnId)?.resolve();
+    }
+    if (notificationTurnId && retiredTurnIds.has(notificationTurnId)) return;
+    const activeTurnId = threadTurnIds.get(message.params?.threadId);
+    if (notificationTurnId && activeTurnId && notificationTurnId !== activeTurnId) return;
+    const handler = threadHandlers.get(message.params?.threadId);
+    if (!handler) return;
+    if (message.id !== undefined) {
+      await handleServerRequest(message, handler);
+      return;
+    }
+    await handler.onNotification?.(message.method, message.params ?? {});
+    if (message.method === "turn/completed" &&
+        threadHandlers.get(message.params.threadId) === handler &&
+        threadTurnIds.get(message.params.threadId) === notificationTurnId) {
+      threadHandlers.delete(message.params.threadId);
+      threadTurnIds.delete(message.params.threadId);
+    }
+  }
+
+  async function handleServerRequest(message, handler) {
+    const respond = (result) => {
+      if (socket?.readyState === SOCKET_OPEN) {
+        socket.send(JSON.stringify({ id: message.id, result }));
+      }
+    };
+    if (message.method === "item/tool/call") {
+      try {
+        const result = await handler.onToolCall(message.params);
+        respond({
+          success: true,
+          contentItems: [{ type: "inputText", text: JSON.stringify(result) }],
+        });
+      } catch (error) {
+        respond({
+          success: false,
+          contentItems: [{ type: "inputText", text: error?.message ?? "Tool call failed" }],
+        });
+      }
+      return;
+    }
+    if ([
+      "item/commandExecution/requestApproval",
+      "item/fileChange/requestApproval",
+      "item/permissions/requestApproval",
+    ].includes(message.method)) {
+      await handler.onApproval({
+        method: message.method,
+        params: message.params,
+        respond,
+      });
+      return;
+    }
+    socket.send(JSON.stringify({
+      id: message.id,
+      error: { code: -32601, message: `Unsupported Codex request: ${message.method}` },
+    }));
+  }
+
+  function handleDisconnect(reason) {
+    if (!socket && !process) return;
+    socket = null;
+    process = null;
+    const error = new Error(reason);
+    for (const pending of pendingRequests.values()) pending.reject(error);
+    pendingRequests.clear();
+    for (const handler of threadHandlers.values()) handler.onDisconnect?.(error);
+    threadHandlers.clear();
+    threadTurnIds.clear();
+    retiredTurnIds.clear();
+    completedTurnIds.clear();
+    for (const waiter of completionWaiters.values()) waiter.reject(error);
+    completionWaiters.clear();
+  }
+
+  function refreshExecutable() {
+    if (typeof resolveExecutable === "function") {
+      knownExecutable = resolveExecutable() ?? null;
+    }
+    return knownExecutable;
+  }
+
+  return {
+    status, refreshExecutable, ensureConnected, startTurn, interrupt,
+    validateAttachments,
+  };
+}
+
+function validateAttachments(attachments) {
+  for (const attachment of attachments) {
+    if (!["image", "audio", "file", "video"].includes(attachment.kind)) {
+      throw new Error(`Codex 不支持这种附件：${attachment.filename}`);
+    }
+  }
+}
+
+function codexUserInput(text, attachments) {
+  validateAttachments(attachments);
+  const files = attachments.filter((item) => !["image", "audio"].includes(item.kind));
+  const manifest = files.length ? [
+    "The user attached these immutable files in this collaborator workspace:",
+    ...files.map((item) => `- ${item.filename} (${item.mimeType}, ${item.byteCount} bytes): ${item.path}`),
+  ].join("\n") : "";
+  const input = [];
+  if (text || manifest) input.push({ type: "text", text: [text, manifest].filter(Boolean).join("\n\n") });
+  for (const attachment of attachments) {
+    if (attachment.kind === "image") input.push({ type: "localImage", path: attachment.path });
+    if (attachment.kind === "audio") input.push({ type: "localAudio", path: attachment.path });
+  }
+  return input;
+}
+
+function newThreadInstructions(instructions, historyContext) {
+  if (!historyContext) return instructions;
+  return [
+    instructions,
+    "The Codex transport thread was recreated. The following transcript is the durable Aru Host ledger; continue from it without claiming these messages are new:",
+    historyContext,
+  ].join("\n\n");
+}
+
+function listeningURL(child) {
+  return new Promise((resolve, reject) => {
+    let buffer = "";
+    const onData = (chunk) => {
+      buffer += String(chunk);
+      const match = /listening on:\s*(ws:\/\/127\.0\.0\.1:\d+)/.exec(buffer);
+      if (!match) {
+        if (buffer.length > 16_384) buffer = buffer.slice(-8_192);
+        return;
+      }
+      child.stderr.off("data", onData);
+      child.off("exit", onExit);
+      resolve(match[1]);
+    };
+    const onExit = () => {
+      child.stderr.off("data", onData);
+      reject(new Error("Codex app-server stopped before it became ready"));
+    };
+    child.stderr.on("data", onData);
+    child.once("exit", onExit);
+    child.once("error", reject);
+  });
+}
+
+function openSocket(url) {
+  return new Promise((resolve, reject) => {
+    const value = new WebSocket(url);
+    value.addEventListener("open", () => resolve(value), { once: true });
+    value.addEventListener("error", () => reject(new Error("Could not connect to Codex app-server")), {
+      once: true,
+    });
+  });
+}

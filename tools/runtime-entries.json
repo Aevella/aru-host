@@ -1,0 +1,106 @@
+[
+  {
+    "source": "src/notifications/apns-push.mjs",
+    "output": "apns-push.mjs"
+  },
+  {
+    "source": "src/host/backup-settings.mjs",
+    "output": "backup-settings.mjs"
+  },
+  {
+    "source": "src/drivers/claude-code-driver.mjs",
+    "output": "claude-code-driver.mjs"
+  },
+  {
+    "source": "src/drivers/claude-code-host-bridge.mjs",
+    "output": "claude-code-host-bridge.mjs"
+  },
+  {
+    "source": "src/drivers/claude-code-mcp-bridge.mjs",
+    "output": "claude-code-mcp-bridge.mjs"
+  },
+  {
+    "source": "src/drivers/codex-app-server-driver.mjs",
+    "output": "codex-app-server-driver.mjs"
+  },
+  {
+    "source": "src/host/collaborator-conversation-attachments.mjs",
+    "output": "collaborator-conversation-attachments.mjs"
+  },
+  {
+    "source": "src/host/collaborator-host.mjs",
+    "output": "collaborator-host.mjs"
+  },
+  {
+    "source": "src/host/collaborator-initiative.mjs",
+    "output": "collaborator-initiative.mjs"
+  },
+  {
+    "source": "src/host/collaborator-projects.mjs",
+    "output": "collaborator-projects.mjs"
+  },
+  {
+    "source": "src/host/collaborator-surface-bundles.mjs",
+    "output": "collaborator-surface-bundles.mjs"
+  },
+  {
+    "source": "src/host/collaborator-surfaces.mjs",
+    "output": "collaborator-surfaces.mjs"
+  },
+  {
+    "source": "src/host/container-runtime-setup.mjs",
+    "output": "container-runtime-setup.mjs"
+  },
+  {
+    "source": "src/drivers/direct-api-driver.mjs",
+    "output": "direct-api-driver.mjs"
+  },
+  {
+    "source": "src/host/mobile-collaborator-identities.mjs",
+    "output": "mobile-collaborator-identities.mjs"
+  },
+  {
+    "source": "src/host/node-control.mjs",
+    "output": "node-control.mjs"
+  },
+  {
+    "source": "src/host/node-workspaces.mjs",
+    "output": "node-workspaces.mjs"
+  },
+  {
+    "source": "src/plugins/plugin-supervisor.mjs",
+    "output": "plugin-supervisor.mjs"
+  },
+  {
+    "source": "src/plugins/plugin-workshop.mjs",
+    "output": "plugin-workshop.mjs"
+  },
+  {
+    "source": "src/providers/provider-cli.mjs",
+    "output": "provider-cli.mjs"
+  },
+  {
+    "source": "src/providers/provider-profiles.mjs",
+    "output": "provider-profiles.mjs"
+  },
+  {
+    "source": "src/providers/provider-secret-store.mjs",
+    "output": "provider-secret-store.mjs"
+  },
+  {
+    "source": "src/plugins/source-plugin-runner.mjs",
+    "output": "source-plugin-runner.mjs"
+  },
+  {
+    "source": "src/plugins/source-plugin-runtime.mjs",
+    "output": "source-plugin-runtime.mjs"
+  },
+  {
+    "source": "src/notifications/wake-bridge.mjs",
+    "output": "wake-bridge.mjs"
+  },
+  {
+    "source": "src/notifications/wake-send.mjs",
+    "output": "wake-send.mjs"
+  }
+]

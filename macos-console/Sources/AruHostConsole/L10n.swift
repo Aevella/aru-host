@@ -5,6 +5,18 @@ enum L10n {
         String(localized: String.LocalizationValue(key), bundle: HostConsoleResources.bundle)
     }
 
+    static let hostCoreRepair = value("host.install.repair")
+    static let hostRepairDetail = value("host.install.repair.detail")
+    static let hostChooseInstance = value("host.install.choose")
+    static let hostChooseInstanceDetail = value("host.install.choose.detail")
+    static let hostInstallationChanged = value("host.install.changed")
+    static let hostIndependentRepair = value("host.install.independent.repair")
+    static let hostManagedRepair = value("host.install.managed.repair")
+    static let hostDesktopOwned = value("host.install.desktop")
+    static let hostIndependentOwned = value("host.install.independent")
+    static let hostCoreUpdate = value("host.install.update")
+    static let hostCoreUpdateDetail = value("host.install.update.detail")
+
     static let containerSetupTitle = value("container.setup.title")
     static let containerSetupDetail = value("container.setup.detail")
     static let containerSetupSteps = value("container.setup.steps")
@@ -269,6 +281,7 @@ enum L10n {
     static let drivers = value("drivers")
     static let collaborators = value("collaborators")
     static let agentDrivers = value("agent.drivers")
+    static let refreshDrivers = value("agent.drivers.refresh")
     static let executionReady = value("execution.ready")
     static let executionPending = value("execution.pending")
     static let providerProfiles = value("provider.profiles")

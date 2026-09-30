@@ -43,6 +43,7 @@ Usage: aru-selfhost <command>
   status                 Show service state and installed release.
   pairing                Restart the node and print a fresh 10-minute pairing link.
   doctor                 Check service, container runtime, manifest, and capabilities.
+  provider <command>     Manage model API profiles from this VPS only.
   logs [journal args]    Follow service logs; secrets appear only in the fresh boot block.
   upgrade [--ref REF]    Install the latest stable release; --ref selects this run only.
   reset-provider-keys    Retire saved VPS API keys; keep profiles and conversations.
@@ -50,6 +51,21 @@ Usage: aru-selfhost <command>
   uninstall              Remove program files but preserve encrypted vault data.
   uninstall --purge-data Remove program files and durable server data.
 EOF
+}
+
+provider_command() {
+  need_root
+  load_node_config
+  local cli="/opt/aru-selfhost/current/provider-cli.mjs"
+  [[ -x "$cli" ]] || die "provider manager is missing from the installed release"
+  [[ -r "${ARU_LOCAL_OPERATOR_CREDENTIAL_FILE:-}" ]] \
+    || die "local operator credential is missing; rerun the installer to repair it"
+  systemctl is-active --quiet "$SERVICE" \
+    || die "Host service is not active; start or repair it before managing providers"
+  exec env \
+    ARU_SELFHOST_CLI_BASE_URL="http://127.0.0.1:${ARU_PORT}" \
+    ARU_LOCAL_OPERATOR_CREDENTIAL_FILE="$ARU_LOCAL_OPERATOR_CREDENTIAL_FILE" \
+    "${ARU_NODE_BINARY:-/usr/bin/node}" "$cli" "$@"
 }
 
 installed_release() {
@@ -221,6 +237,13 @@ rollback_command() {
   previous="$(readlink /opt/aru-selfhost/previous 2>/dev/null || true)"
   [[ -n "$current" && -n "$previous" ]] || die "no previous release is installed"
   load_node_config
+  if [[ -d "$ARU_DATA_DIR/mobile-collaborator-replicas/records-v2" ]]; then
+    "${ARU_NODE_BINARY:-node}" --input-type=module - "/opt/aru-selfhost/$previous/mobile-collaborator-replicas.mjs" <<'NODE' || die "previous release cannot read migrated execution records; current release unchanged"
+import { pathToFileURL } from 'node:url';
+const module = await import(pathToFileURL(process.argv[2]));
+if (module.replicaStorageVersion !== 2) process.exit(1);
+NODE
+  fi
   runuser -u aru-selfhost -- "${ARU_NODE_BINARY:-node}" "/opt/aru-selfhost/$previous/server.mjs" --data-dir "$ARU_DATA_DIR" --container-runtime none --check-state || die "previous release cannot read current data; current release unchanged"
   if [[ -n "${ARU_PROVIDER_SECRET_ROOT:-}" ]]; then
     "${ARU_NODE_BINARY:-node}" --input-type=module - "/opt/aru-selfhost/$previous/provider-secret-store.mjs" "$ARU_PROVIDER_SECRET_ROOT" <<'NODE' || die "previous release cannot use current provider credentials; current release unchanged"
@@ -257,6 +280,7 @@ case "$command_name" in
   status) status_command "$@" ;;
   pairing) pairing_command "$@" ;;
   doctor) doctor_command "$@" ;;
+  provider) provider_command "$@" ;;
   logs) exec journalctl -u "$SERVICE" -f "$@" ;;
   upgrade) upgrade_command "$@" ;;
   reset-provider-keys) reset_provider_keys_command "$@" ;;

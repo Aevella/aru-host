@@ -3,7 +3,13 @@ import Security
 
 struct HostCredentialVault: Sendable {
     private let service = "cn.aelion.aru.host-console.v2"
-    private let account = "home"
+    // Keep the original home account so existing installations retain their credential.
+    // Other instances must never read or invalidate that installation's secret.
+    private var account: String { Self.account(homeDirectory: FileManager.default.homeDirectoryForCurrentUser) }
+
+    static func account(homeDirectory: URL) -> String {
+        LocalHostInstance(homeDirectory: homeDirectory).name
+    }
 
     private var identity: [String: Any] {
         [

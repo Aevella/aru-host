@@ -1980,6 +1980,7 @@ const config = {
   displayName: args["display-name"] ?? "Aru Stub Server",
   nodeKind: args["node-kind"] ?? "local-device",
   fixedPairingToken: args["pairing-token"] ?? null,
+  localOperatorCredentialSHA256: optionalSHA256(args["local-operator-credential-sha256"], "local-operator-credential-sha256"),
   maxPackageBytes: Number(args["max-package-mb"] ?? 2048) * 1024 * 1024,
   maxWorkspaceBytes: Number(args["max-workspace-mb"] ?? 512) * 1024 * 1024,
   maxWorkspaceOutputBytes: Number(args["max-workspace-output-mb"] ?? 32) * 1024 * 1024,
@@ -2011,6 +2012,12 @@ function nonnegativeInteger(value, name) {
     throw new Error(`--${name} must be a non-negative integer`);
   }
   return parsed;
+}
+
+function optionalSHA256(value, name) {
+  if (value === undefined || value === null || value === "") return null;
+  if (!/^[a-f0-9]{64}$/.test(value)) throw new Error(`--${name} must be a lowercase SHA-256 digest`);
+  return value;
 }
 
 const PAIRING_TOKEN_TTL_MS = 10 * 60 * 1000;
@@ -2579,10 +2586,28 @@ function requireDevice(req) {
   const match = /^Bearer\s+(.+)$/i.exec(header.trim());
   if (!match) throw new HttpError(401, "credential.missing", "bearer credential required");
   const hash = sha256Hex(match[1].trim());
+  if (config.localOperatorCredentialSHA256
+      && safeEqual(config.localOperatorCredentialSHA256, hash)) {
+    if (!isLoopbackRequest(req)) {
+      throw new HttpError(403, "credential.loopback_required", "本机 operator credential 不能通过网络使用");
+    }
+    return {
+      deviceId: "local-operator",
+      label: "Aru Host local operator",
+      deviceRole: "host-console",
+      issuedAt: null,
+      revokedAt: null,
+    };
+  }
   const device = state.devices.find((d) => safeEqual(d.credentialSHA256, hash));
   if (!device) throw new HttpError(401, "credential.unknown", "credential rejected");
   if (device.revokedAt) throw new HttpError(403, "credential.revoked", "device revoked");
   return device;
+}
+
+function isLoopbackRequest(req) {
+  const address = String(req.socket?.remoteAddress ?? "");
+  return address === "::1" || address === "127.0.0.1" || address.startsWith("::ffff:127.");
 }
 
 function requireLocalHostConsole(req) {

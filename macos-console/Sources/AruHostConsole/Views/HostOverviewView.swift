@@ -27,6 +27,9 @@ struct HostOverviewView: View {
                 }
 
                 hero
+                if let core = runtime.corePreparation {
+                    HostCoreInstallationPanel(runtime: runtime, preparation: core)
+                }
                 gettingStartedPanel
                 if runtime.managesLocalHost && runtime.capability("workspace-runtime")?.enabled == false {
                     ContainerRuntimeSetupPanel(runtime: runtime)

@@ -3,7 +3,10 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createCollaboratorHost } from "../collaborator-host.mjs";
+import {
+  claudeDesktopExecutableCandidates,
+  createCollaboratorHost,
+} from "../collaborator-host.mjs";
 
 class HttpError extends Error {
   constructor(status, code, message) {
@@ -24,6 +27,29 @@ const state = {
 };
 let secretReadCount = 0;
 let conversationOptions;
+let clock = 20;
+let probeCalls = 0;
+const probeStatuses = { codex: "unavailable", "claude-code": "ready" };
+const probeLocalDriver = (definition, checkedAt) => {
+  probeCalls += 1;
+  const status = probeStatuses[definition.id];
+  return status === "ready"
+    ? { id: definition.id, status, version: "1.0", checkedAt, failure: null }
+    : { id: definition.id, status, version: null, checkedAt, failure: "command-not-found" };
+};
+// Background retries stay pending until the test releases them, so the read that triggers
+// a retry and any concurrent reads can be observed before the result lands.
+const pendingRetries = [];
+const retryLocalDriverProbe = (definition, checkedAt) => new Promise((resolve) => {
+  const status = probeStatuses[definition.id];
+  pendingRetries.push(() => {
+    const currentStatus = probeStatuses[definition.id];
+    probeStatuses[definition.id] = status;
+    const result = probeLocalDriver(definition, checkedAt);
+    probeStatuses[definition.id] = currentStatus;
+    resolve(result);
+  });
+});
 const secretStore = {
   availability: () => ({ supported: true, storage: "test", failure: null }),
   read: () => { secretReadCount += 1; return "test-key"; },
@@ -31,6 +57,13 @@ const secretStore = {
   remove() {},
 };
 const root = mkdtempSync(join(tmpdir(), "aru-collaborator-host-"));
+const desktopClaudeRoot = join(root, "Library/Application Support/Claude/claude-code");
+mkdirSync(join(desktopClaudeRoot, "2.1.99"), { recursive: true });
+mkdirSync(join(desktopClaudeRoot, "2.1.246"), { recursive: true });
+assert.deepEqual(claudeDesktopExecutableCandidates(root), [
+  join(desktopClaudeRoot, "2.1.246/claude.app/Contents/MacOS/claude"),
+  join(desktopClaudeRoot, "2.1.99/claude.app/Contents/MacOS/claude"),
+]);
 const host = createCollaboratorHost({
   dataDir: root,
   state,
@@ -58,12 +91,82 @@ const host = createCollaboratorHost({
       status: () => ({ conversationCount: 0, activeTurnCount: 0, pendingApprovalCount: 0 }),
     };
   },
-  now: () => 20,
+  now: () => clock,
+  probeLocalDriver,
+  retryLocalDriverProbe,
 });
+
+// Startup re-probes local drivers instead of trusting the persisted result.
+assert.equal(probeCalls, 2);
+assert.equal(state.agentDriverProbes.every((probe) => probe.checkedAt === 20), true);
 
 const claudeOnly = host.driverInventory();
 assert.equal(claudeOnly.drivers.find((driver) => driver.id === "claude-code").status, "ready");
 assert.equal(claudeOnly.execution.enabled, true);
+
+// A CLI installed after the last probe is picked up on read once the old result is stale.
+const readDrivers = async () => {
+  const response = {};
+  assert.equal(await host.route(
+    { method: "GET", url: "/aru/v1/agent-drivers" },
+    response,
+    "/aru/v1/agent-drivers",
+    () => ({ deviceId: "device_test" }),
+    () => {},
+  ), true);
+  assert.equal(response.status, 200);
+  return response.body;
+};
+const driverStatus = (inventory, id) => inventory.drivers.find((driver) => driver.id === id).status;
+probeStatuses.codex = "ready";
+probeCalls = 0;
+assert.equal(driverStatus(await readDrivers(), "codex"), "unavailable");
+assert.equal(pendingRetries.length, 0, "a fresh unavailable probe is not retried on read");
+clock += 30_000;
+assert.equal(driverStatus(await readDrivers(), "codex"), "unavailable", "the triggering read answers without waiting");
+assert.equal(driverStatus(await readDrivers(), "codex"), "unavailable");
+assert.equal(pendingRetries.length, 1, "only the stale unready driver is retried, and concurrent reads share one retry");
+pendingRetries.splice(0).forEach((release) => release());
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.equal(probeCalls, 1, "ready drivers are not re-probed by the retry");
+const retried = await readDrivers();
+assert.equal(driverStatus(retried, "codex"), "ready");
+assert.equal(driverStatus(retried, "claude-code"), "ready");
+assert.equal(state.agentDriverProbes.find((probe) => probe.id === "claude-code").checkedAt, 20);
+assert.equal(state.agentDriverProbes.find((probe) => probe.id === "codex").checkedAt, 30_020);
+assert.equal(pendingRetries.length, 0, "ready drivers are not retried on later reads");
+// An older automatic probe must not overwrite a newer manual result, even
+// when both attempts have the same clock timestamp. Concurrent manual refreshes
+// share their work, and GET plus the event loop remain responsive while they wait.
+state.agentDriverProbes.find((probe) => probe.id === "codex").status = "unavailable";
+probeStatuses.codex = "unavailable";
+clock += 30_000;
+await readDrivers();
+assert.equal(pendingRetries.length, 1);
+const releaseOldRetry = pendingRetries.shift();
+probeStatuses.codex = "ready";
+let manualCompleted = false;
+const refreshDrivers = async () => {
+  const response = {};
+  await host.route({ method: "POST" }, response, "/aru/v1/agent-drivers/refresh",
+    () => ({ deviceId: "device_test" }), () => {});
+  return response.body;
+};
+const firstManual = refreshDrivers().then((value) => { manualCompleted = true; return value; });
+const secondManual = refreshDrivers();
+await new Promise((resolve) => setImmediate(resolve));
+assert.equal(manualCompleted, false, "manual response waits without blocking the event loop");
+assert.equal(pendingRetries.length, 2, "concurrent manual refreshes share a single full probe");
+assert.equal(driverStatus(await readDrivers(), "codex"), "unavailable");
+assert.equal(pendingRetries.length, 2, "GET does not start another retry during manual refresh");
+pendingRetries.splice(0).forEach((release) => release());
+assert.equal(driverStatus(await firstManual, "codex"), "ready");
+assert.equal(driverStatus(await secondManual, "codex"), "ready");
+const manualResult = structuredClone(state.agentDriverProbes);
+releaseOldRetry();
+await new Promise((resolve) => setImmediate(resolve));
+assert.deepEqual(state.agentDriverProbes, manualResult, "late old result cannot undo a manual refresh");
+clock = 20;
 
 state.providerProfiles.push({
   profileId,
@@ -253,7 +356,7 @@ await assert.rejects(
 console.log("ARU_COLLABORATOR_HOST_SMOKE_OK");
 
 const createRequest = {
-  method: "POST", body: { displayName: "Phone-created", driverId: "codex",
+  method: "POST", body: { displayName: "Phone-created", driverId: "claude-code",
     requestId: "33333333-3333-4333-8333-333333333333" },
 };
 const firstCreate = {}, repeatedCreate = {};
