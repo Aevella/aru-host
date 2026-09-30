@@ -43,3 +43,44 @@ test('failed address persistence cannot publish a different mode', () => {
   assert.throws(() => owner.updateSettings({ schema: 'aru.selfhost.node-settings.v1', expectedRevision: 1, displayName: 'Host', addressMode: 'automatic-lan' }, {}), /disk full/);
   assert.equal(config.addressMode, 'fixed'); assert.equal(owner.publicSettings().revision, 1);
 });
+test('additional routes persist, retain LAN, survive rename-only clients and can be removed', () => {
+  let disk;
+  const state = {};
+  const config = { displayName: 'Example Host', transportKind: 'lan', baseUrl: 'http://example.local:8787' };
+  const make = state => createNodeControl({ config, state, saveState: () => disk = JSON.stringify(state), log() {},
+    HttpError: class extends Error { constructor(status, code, message) { super(message); this.status = status; } } });
+  const owner = make(state);
+  const update = (expectedRevision, extra = {}) => ({ schema: 'aru.selfhost.node-settings.v1', displayName: 'Example Host', expectedRevision, ...extra });
+  const additionalTransports = [{ id: 'tailnet', kind: 'tailscale', baseUrl: 'http://100.100.100.100:8787/', priority: 20 },
+    { id: 'web', kind: 'public-https', baseUrl: 'https://host.example.com', priority: 20 }];
+  owner.updateSettings(update(1, { additionalTransports }), { deviceId: 'example-device' });
+  assert.equal(owner.transportProfiles().length, 3);
+  assert.equal(owner.transportProfiles()[0].baseUrl, config.baseUrl);
+  const reopened = JSON.parse(disk); const restarted = make(reopened);
+  assert.deepEqual(restarted.transportProfiles(), owner.transportProfiles());
+  restarted.updateSettings(update(2, { displayName: 'Renamed Host' }), { deviceId: 'old-client' });
+  assert.equal(restarted.transportProfiles().length, 3);
+  assert.throws(() => restarted.updateSettings(update(2, { additionalTransports: [] }), {}), /changed/);
+  restarted.updateSettings(update(3, { additionalTransports: [] }), {});
+  assert.equal(restarted.transportProfiles().length, 1);
+});
+test('invalid or failed route saves retain the previous durable projection', () => {
+  const state = {}, config = { displayName: 'Host', transportKind: 'lan', baseUrl: 'http://example.local:8787' };
+  let fail = false;
+  const owner = createNodeControl({ state, config, log() {}, saveState() { if (fail) throw new Error('disk full'); },
+    HttpError: class extends Error { constructor(status, code, message) { super(message); } } });
+  const body = additionalTransports => ({ schema: 'aru.selfhost.node-settings.v1', displayName: 'Host', expectedRevision: 1, additionalTransports });
+  for (const entry of [
+    { id: 'x', kind: 'public-https', baseUrl: 'http://example.com' },
+    { id: 'x', kind: 'tailscale', baseUrl: 'http://example.com' },
+    { id: 'primary', kind: 'tailscale', baseUrl: 'http://100.100.100.100:8787' },
+    { id: 'x', kind: 'public-https', baseUrl: 'https://name:secret@example.com' },
+    { id: 'x', kind: 'public-https', baseUrl: 'https://example.com/path' },
+  ]) assert.throws(() => owner.updateSettings(body([entry]), {}));
+  const route = { id: 'x', kind: 'tailscale', baseUrl: 'http://100.100.100.100:8787' };
+  assert.throws(() => owner.updateSettings(body([route, route]), {}));
+  fail = true;
+  assert.throws(() => owner.updateSettings(body([route]), {}), /disk full/);
+  assert.equal(owner.publicSettings().revision, 1);
+  assert.equal(owner.transportProfiles().length, 1);
+});

@@ -32,6 +32,7 @@ PURGE_DATA="false"
 INSTALL_ROOT=""
 EXPLICIT_PORT="false"
 EXPLICIT_BASE_URL="false"
+EXPLICIT_TRANSPORT_KIND="false"
 
 usage() {
   cat <<'EOF'
@@ -86,7 +87,7 @@ while (($#)); do
   case "$1" in
     --instance) INSTANCE="${2:?missing value for --instance}"; shift 2 ;;
     --base-url) BASE_URL="${2:?missing value for --base-url}"; EXPLICIT_BASE_URL="true"; shift 2 ;;
-    --transport-kind) TRANSPORT_KIND="${2:?missing value for --transport-kind}"; shift 2 ;;
+    --transport-kind) EXPLICIT_TRANSPORT_KIND="true"; TRANSPORT_KIND="${2:?missing value for --transport-kind}"; shift 2 ;;
     --display-name) DISPLAY_NAME="${2:?missing value for --display-name}"; shift 2 ;;
     --port) PORT="${2:?missing value for --port}"; EXPLICIT_PORT="true"; shift 2 ;;
     --source-dir) SOURCE_DIR="${2:?missing value for --source-dir}"; shift 2 ;;
@@ -189,6 +190,7 @@ if [[ -r "$INSTALL_ENV" ]]; then
   existing_port="${ARU_INSTALL_PORT:-}"
   [[ "$EXPLICIT_PORT" == "true" ]] || PORT="$existing_port"
   [[ "$EXPLICIT_BASE_URL" == "true" ]] || BASE_URL="${ARU_INSTALL_BASE_URL:-}"
+  [[ "$EXPLICIT_TRANSPORT_KIND" == "true" ]] || TRANSPORT_KIND="${ARU_INSTALL_TRANSPORT_KIND:-lan}"
 fi
 
 port_is_reserved_by_instance() {
@@ -300,15 +302,24 @@ install_managed_node() {
 NODE_BINARY="$(resolve_node_binary)"
 
 detect_usable_container_runtime() {
-  if command -v podman >/dev/null 2>&1 && podman info >/dev/null 2>&1; then
-    printf podman
-  elif command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
-    printf docker
-  else
-    printf none
-  fi
+  local candidate executable
+  for candidate in podman docker /opt/podman/bin/podman /opt/homebrew/bin/podman /opt/homebrew/bin/docker /usr/local/bin/podman /usr/local/bin/docker /Applications/Docker.app/Contents/Resources/bin/docker; do
+    executable="$(command -v "$candidate" 2>/dev/null || true)"
+    if [[ -n "$executable" ]] && "$executable" info >/dev/null 2>&1; then
+      printf '%s' "$executable"
+      return
+    fi
+  done
+  printf none
 }
-CONTAINER_RUNTIME="$(detect_usable_container_runtime)"
+# A temporarily stopped engine or a GUI PATH must not erase the user's choice.
+CONTAINER_RUNTIME=""
+if [[ -r "$NODE_ENV" ]]; then
+  CONTAINER_RUNTIME="$(/bin/bash -c 'source "$1"; printf "%s" "${ARU_CONTAINER_RUNTIME:-}"' _ "$NODE_ENV")"
+fi
+if [[ -z "$CONTAINER_RUNTIME" || "$CONTAINER_RUNTIME" == "none" ]]; then
+  CONTAINER_RUNTIME="$(detect_usable_container_runtime)"
+fi
 
 SOURCE_TMP=""
 ROLLBACK_TMP=""
@@ -482,14 +493,21 @@ ARU_TRANSPORT_KIND="$TRANSPORT_KIND"
 ARU_DISPLAY_NAME="$DISPLAY_NAME"
 ARU_NODE_KIND="home-mac"
 ARU_CONTAINER_RUNTIME="$CONTAINER_RUNTIME"
-ARU_MAX_PACKAGE_MB="2048"
-ARU_MAX_WORKSPACE_MB="512"
-ARU_MAX_WORKSPACE_OUTPUT_MB="32"
-ARU_CONTAINER_MEMORY="1g"
-ARU_CONTAINER_CPUS="2"
-ARU_NODE_IMAGE="node:22-alpine"
-ARU_PYTHON_IMAGE="python:3.13-alpine"
-ARU_SHELL_IMAGE="alpine:3.22"
+preserved_runtime_setting() {
+  local name="$1" fallback="$2" previous=""
+  if [[ -r "$NODE_ENV" ]]; then
+    previous="$(/bin/bash -c 'source "$1"; name="$2"; printf "%s" "${!name}"' _ "$NODE_ENV" "$name")"
+  fi
+  printf '%s' "${previous:-$fallback}"
+}
+ARU_MAX_PACKAGE_MB="$(preserved_runtime_setting ARU_MAX_PACKAGE_MB 2048)"
+ARU_MAX_WORKSPACE_MB="$(preserved_runtime_setting ARU_MAX_WORKSPACE_MB 512)"
+ARU_MAX_WORKSPACE_OUTPUT_MB="$(preserved_runtime_setting ARU_MAX_WORKSPACE_OUTPUT_MB 32)"
+ARU_CONTAINER_MEMORY="$(preserved_runtime_setting ARU_CONTAINER_MEMORY 1g)"
+ARU_CONTAINER_CPUS="$(preserved_runtime_setting ARU_CONTAINER_CPUS 2)"
+ARU_NODE_IMAGE="$(preserved_runtime_setting ARU_NODE_IMAGE node:22-alpine)"
+ARU_PYTHON_IMAGE="$(preserved_runtime_setting ARU_PYTHON_IMAGE python:3.13-alpine)"
+ARU_SHELL_IMAGE="$(preserved_runtime_setting ARU_SHELL_IMAGE alpine:3.22)"
 write_env "$NODE_ENV" ARU_SERVER_ENTRY ARU_NODE_BINARY ARU_LISTEN_HOST ARU_PORT \
   ARU_DATA_DIR ARU_MANAGED_WORKSPACE_ROOT ARU_BASE_URL ARU_TRANSPORT_KIND ARU_DISPLAY_NAME ARU_NODE_KIND \
   ARU_CONTAINER_RUNTIME ARU_MAX_PACKAGE_MB ARU_MAX_WORKSPACE_MB \

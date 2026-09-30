@@ -151,3 +151,24 @@ A pre-record-store release is rejected without stopping the current instance.
 Same-format rollback remains available. The old ledger backup is recovery evidence,
 not a safe replacement for new executions admitted after migration. No automatic
 lossless downgrade to the v1 ledger is claimed.
+
+2026-09-30 connection settings: the revision-checked node settings owner now stores
+additional Tailscale and public HTTPS origins. The public manifest retains its
+primary route and projects the saved additional routes immediately. Rename-only
+older clients preserve these routes; removal is explicit. Failed writes restore
+the previous projection. Console gates editing on the advertised capability,
+checks the public manifest identity without sending credentials, and saves using
+the revision captured when the editor opened. A check from the Mac does not prove
+phone reachability. This is manual address configuration, not automatic Tailscale
+detection or reverse-proxy provisioning.
+
+macOS upgrades retain the configured container executable, images and resource
+settings when the engine is stopped or absent from the installer environment.
+Fresh detection checks standard macOS CLI locations and saves an absolute path.
+Core readiness remains the execution authority; Console distinguishes checking,
+configured-but-unavailable, execution failure and an unconfigured environment.
+Focused owner and real-process HTTP tests cover authenticated edits, conflict,
+restart persistence, removal, validation and write failure; the spaced-path
+installer fixture covers a missing engine with retained images and memory settings.
+Console model tests and the local UI build passed. These changes are source/local
+proof, not a newly published release or customer-device acceptance.

@@ -28,7 +28,7 @@ jobs:
 
       - name: Verify Host Core and Console
         run: |
-          node --test tests/state-save.test.mjs
+          node --test tests/state-save.test.mjs tests/runtime-truth.test.mjs tests/connection-addresses-http.test.mjs
           node tests/state-startup-smoke.mjs
           node tests/wake-bridge-smoke.mjs
           node tests/wake-send-smoke.mjs
@@ -131,6 +131,7 @@ jobs:
         run: |
           npm ci --prefix desktop-console
           npm audit --prefix desktop-console --omit=dev
+          node --test tests/runtime-truth.test.mjs tests/connection-addresses-http.test.mjs
           node tests/provider-profiles-smoke.mjs
           node tests/wake-bridge-smoke.mjs
           node tests/wake-send-smoke.mjs

@@ -57,6 +57,7 @@ final class HostConsoleRuntime {
             return try await self.dataRequest(path, method: method, body: body, authenticated: true).0
         }, didUpdate: { [weak self] in self?.lastUpdated = Date() })
 
+    @ObservationIgnored private let verificationSession: URLSession
     private let transport: HostHTTPTransport
     private let vault: HostCredentialVault
     private let configuredBaseURL: URL?
@@ -70,6 +71,7 @@ final class HostConsoleRuntime {
         baseURL: URL? = nil,
         hostCoreInstaller: any HostCoreInstalling = BundledHostCoreInstaller()
     ) {
+        self.verificationSession = session
         self.transport = HostHTTPTransport(session: session)
         self.vault = vault
         self.configuredBaseURL = baseURL
@@ -82,6 +84,17 @@ final class HostConsoleRuntime {
 
     var readyDriverCount: Int {
         driverInventory?.drivers.filter { $0.status == .ready }.count ?? 0
+    }
+
+    var workspaceRuntimeDescription: String {
+        let capability = capability("workspace-runtime")
+        if capability?.enabled == true { return L10n.runtimeReadyDescription }
+        switch capability?.readiness?.status {
+        case "checking": return L10n.containerChecking
+        case "failed": return capability?.readiness?.reason == "engine-unavailable"
+            ? L10n.containerEngineUnavailable : L10n.containerExecutionFailed
+        default: return L10n.containerRuntimeMissingDescription
+        }
     }
 
     var executionEnabled: Bool {
@@ -351,13 +364,14 @@ final class HostConsoleRuntime {
         lastUpdated = Date()
     }
 
-    func updateNodeDisplayName(_ displayName: String) async throws {
+    func updateNodeDisplayName(_ displayName: String, additionalTransports: [HostConnectionAddress]? = nil, expectedRevision: Int? = nil) async throws {
         guard !isUpdatingNodeSettings, let nodeSettings else { return }
         isUpdatingNodeSettings = true
         defer { isUpdatingNodeSettings = false }
         let body = try JSONEncoder().encode(HostNodeSettingsUpdate(
             displayName: displayName.trimmingCharacters(in: .whitespacesAndNewlines),
-            expectedRevision: nodeSettings.revision
+            expectedRevision: expectedRevision ?? nodeSettings.revision,
+            additionalTransports: additionalTransports
         ))
         self.nodeSettings = try await request(
             "/aru/v1/node-settings",
@@ -371,6 +385,10 @@ final class HostConsoleRuntime {
         diagnostics = try? await request("/aru/v1/diagnostics", authenticated: true)
         sectionErrors[.overview] = nil
         lastUpdated = Date()
+    }
+
+    func verifyConnectionAddress(_ address: String) async throws {
+        try await HostConnectionVerifier.verify(address, expectedServerId: manifest?.serverId, session: verificationSession)
     }
 
     func revokeDevice(_ device: HostPairedDevice) async throws {

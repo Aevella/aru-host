@@ -2386,14 +2386,7 @@ function manifest() {
     releaseVersion: RELEASE_VERSION,
     networkAddress: config.networkAddress(),
     minClientVersion: "1.0",
-    transportProfiles: [
-      {
-        id: "primary",
-        kind: config.transportKind,
-        baseUrl: config.baseUrl,
-        priority: 10,
-      },
-    ],
+    transportProfiles: nodeControl.transportProfiles(),
     capabilities: {
       "backup-vault": {
         enabled: true,
