@@ -695,3 +695,45 @@ private final class DriverRefreshURLProtocol: URLProtocol, @unchecked Sendable {
 
     override func stopLoading() {}
 }
+
+@Test func connectionAddressesDecodeOldHostsAndValidateRemoteOrigins() throws {
+    let legacy = try JSONDecoder().decode(HostNodeSettings.self, from: Data(#"{"schema":"aru.selfhost.node-settings.v1","displayName":"Example Host","revision":1,"updatedAt":0}"#.utf8))
+    #expect(legacy.additionalTransports == nil)
+    #expect(try HostConnectionAddress(id: "tailnet", kind: "tailscale", baseUrl: "http://100.100.100.100:8787/").validated().baseUrl == "http://100.100.100.100:8787")
+    #expect(throws: (any Error).self) { try HostConnectionAddress(id: "web", kind: "public-https", baseUrl: "http://example.com").validated() }
+    #expect(throws: (any Error).self) { try HostConnectionAddress(id: "tailnet", kind: "tailscale", baseUrl: "http://example.com").validated() }
+    #expect(throws: (any Error).self) { try HostConnectionAddress(id: "web", kind: "public-https", baseUrl: "https://example.com/path").validated() }
+    let current = try JSONDecoder().decode(HostNodeSettings.self, from: Data(#"{"schema":"aru.selfhost.node-settings.v1","displayName":"Example Host","revision":2,"updatedAt":0,"additionalTransports":[{"id":"tailnet","kind":"tailscale","baseUrl":"http://100.100.100.100:8787","priority":20}]}"#.utf8))
+    #expect(current.additionalTransports?.count == 1)
+}
+
+@Test func publicConnectionCheckRejectsAnotherHostAndSendsNoCredential() async throws {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [ConnectionCheckURLProtocol.self]
+    let session = URLSession(configuration: configuration)
+    try await HostConnectionVerifier.verify("https://example.com", expectedServerId: "example-host", session: session)
+    #expect(ConnectionCheckURLProtocol.authorization.withLock { $0 } == nil)
+    do {
+        try await HostConnectionVerifier.verify("https://example.com", expectedServerId: "another-host", session: session)
+        Issue.record("Another Host identity was accepted")
+    } catch HostAddressCheckError.differentHost { }
+    do {
+        try await HostConnectionVerifier.verify("https://example.com/path", expectedServerId: "example-host", session: session)
+        Issue.record("A non-origin address was accepted")
+    } catch HostAddressCheckError.invalid { }
+}
+
+private final class ConnectionCheckURLProtocol: URLProtocol, @unchecked Sendable {
+    static let authorization = Mutex<String?>(nil)
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        Self.authorization.withLock { $0 = request.value(forHTTPHeaderField: "Authorization") }
+        let payload = #"{"schema":"aru.selfhost.manifest.v1","serverId":"example-host","nodeKind":"home-mac","displayName":"Example Host","serverVersion":"stub","capabilities":{}}"#
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: [:])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(payload.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() { }
+}

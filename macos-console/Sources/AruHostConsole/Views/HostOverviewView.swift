@@ -98,7 +98,7 @@ struct HostOverviewView: View {
                             .foregroundStyle(HostPalette.secondaryInk.opacity(0.65))
                     }
                     Spacer()
-                    Button(L10n.rename) { presentsRename = true }
+                    Button(L10n.nodeSettingsTitle) { presentsRename = true }
                         .buttonStyle(FloatingGlassButtonStyle(tint: HostPalette.lavender.opacity(0.20)))
                         .disabled(runtime.nodeSettings == nil || runtime.isUpdatingNodeSettings)
                 }
@@ -480,66 +480,17 @@ private enum HostPairingQRCodeRenderer {
 private struct RenameNodeSheet: View {
     let runtime: HostConsoleRuntime
     @Environment(\.dismiss) private var dismiss
-    @State private var displayName = ""
-    @State private var errorMessage: String?
 
     var body: some View {
-        ZStack {
-            BorrowedLightWeather()
-            VStack(alignment: .leading, spacing: 22) {
-                VStack(alignment: .leading, spacing: 7) {
-                    Text(L10n.renameNode)
-                        .font(.system(size: 25, weight: .light, design: .rounded))
-                        .foregroundStyle(HostPalette.ink)
-                    Text(L10n.renameNodeDescription)
-                        .font(.system(size: 12, design: .rounded))
-                        .foregroundStyle(HostPalette.secondaryInk.opacity(0.72))
-                }
-
-                TextField(L10n.nodeName, text: $displayName)
-                    .textFieldStyle(.roundedBorder)
-
-                if let errorMessage {
-                    Text(errorMessage)
-                        .font(.system(size: 11, design: .rounded))
-                        .foregroundStyle(HostPalette.rose)
-                }
-
-                HStack {
-                    Button(L10n.cancel) { dismiss() }
-                        .buttonStyle(FloatingGlassButtonStyle())
-                    Spacer()
-                    Button {
-                        Task {
-                            do {
-                                try await runtime.updateNodeDisplayName(displayName)
-                                dismiss()
-                            } catch {
-                                errorMessage = error.localizedDescription
-                            }
-                        }
-                    } label: {
-                        HStack(spacing: 8) {
-                            if runtime.isUpdatingNodeSettings { ProgressView().controlSize(.small) }
-                            Text(L10n.saveSettings)
-                        }
-                    }
-                    .buttonStyle(FloatingGlassButtonStyle(tint: HostPalette.lavender.opacity(0.28)))
-                    .disabled(displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || runtime.isUpdatingNodeSettings)
-                }
-            }
-            .padding(30)
-            .background {
-                RoundedRectangle(cornerRadius: 34, style: .continuous)
-                    .fill(Color.white.opacity(0.27))
-                    .glassEffect(.regular.tint(Color.white.opacity(0.12)), in: RoundedRectangle(cornerRadius: 34))
-            }
-            .padding(18)
-        }
-        .frame(width: 480, height: 330)
-        .preferredColorScheme(.light)
-        .onAppear {
-            displayName = runtime.nodeSettings?.displayName ?? runtime.manifest?.displayName ?? ""
-        }
+        HostNodeSettingsEditor(
+            settings: runtime.nodeSettings,
+            supportsAddresses: runtime.capability("node-settings")?.additionalTransports == true,
+            save: { name, addresses, revision in
+                try await runtime.updateNodeDisplayName(name, additionalTransports: addresses, expectedRevision: revision)
+                dismiss()
+            },
+            verify: { address in try await runtime.verifyConnectionAddress(address) },
+            cancel: { dismiss() }
+        )
     }
 }

@@ -44,16 +44,51 @@ export function createNodeControl({
       schema: NODE_SETTINGS_SCHEMA,
       displayName: displayName(),
       networkAddress: config.networkAddress?.(),
+      additionalTransports: state.nodeSettings.additionalTransports ?? [],
+      transportProfiles: transportProfiles(),
       revision: state.nodeSettings.revision,
       updatedAt: state.nodeSettings.updatedAt,
     };
   }
+
+  function transportProfiles() {
+    return [{ id: "primary", kind: config.transportKind, baseUrl: config.baseUrl, priority: 10 },
+      ...(state.nodeSettings.additionalTransports ?? [])];
+  }
+
+  function validateTransports(value) {
+    if (!Array.isArray(value)) throw new HttpError(400, "node.transports_invalid", "Connection addresses must be an array");
+    const ids = new Set(["primary"]), origins = new Set();
+    return value.map(entry => {
+      if (!entry || typeof entry.id !== "string" || !/^[A-Za-z0-9_-]+$/.test(entry.id) || ids.has(entry.id))
+        throw new HttpError(400, "node.transport_id_invalid", "Connection address identifiers must be unique");
+      ids.add(entry.id);
+      let url;
+      try { url = new URL(entry.baseUrl); } catch { throw new HttpError(400, "node.transport_url_invalid", "Enter a complete connection address"); }
+      if (!["tailscale", "public-https"].includes(entry.kind) || !["http:", "https:"].includes(url.protocol) ||
+          url.username || url.password || url.pathname !== "/" || url.search || url.hash ||
+          (entry.kind === "public-https" && url.protocol !== "https:"))
+        throw new HttpError(400, "node.transport_url_invalid", "Use a Tailscale origin or a public HTTPS origin without a path or credentials");
+      const parts = url.hostname.split('.').map(Number);
+      const tailnet = (parts.length === 4 && parts.every(x => Number.isInteger(x) && x >= 0 && x <= 255) && parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127) || url.hostname.endsWith('.ts.net');
+      if (url.protocol === "http:" && !tailnet)
+        throw new HttpError(400, "node.transport_insecure", "HTTP is only allowed for Tailscale addresses; public addresses need HTTPS");
+      if (origins.has(url.origin)) throw new HttpError(400, "node.transport_duplicate", "This connection address has already been added");
+      origins.add(url.origin);
+      return { id: entry.id, kind: entry.kind, baseUrl: url.origin, priority: 20 };
+    });
+  }
+
+  // Durable configuration is admitted at startup, not silently dropped on corruption.
+  if (state.nodeSettings.additionalTransports !== undefined)
+    state.nodeSettings.additionalTransports = validateTransports(state.nodeSettings.additionalTransports);
 
   function manifestCapability() {
     return {
       enabled: true,
       endpoint: "/aru/v1/node-settings",
       update: "expected-revision",
+      additionalTransports: true,
       access: "paired-device-administration",
     };
   }
@@ -124,12 +159,14 @@ export function createNodeControl({
         (addressMode === "automatic-lan" && config.transportKind !== "lan")) {
       throw new HttpError(400, "node.address_mode_invalid", "Automatic LAN is only available for LAN transport");
     }
-    if (nextDisplayName === state.nodeSettings.displayName && addressMode === (state.nodeSettings.addressMode ?? config.addressMode ?? "fixed")) return publicSettings();
+    const additionalTransports = validateTransports(body.additionalTransports ?? state.nodeSettings.additionalTransports ?? []);
+    if (JSON.stringify(additionalTransports) === JSON.stringify(state.nodeSettings.additionalTransports ?? []) && nextDisplayName === state.nodeSettings.displayName && addressMode === (state.nodeSettings.addressMode ?? config.addressMode ?? "fixed")) return publicSettings();
     const previous = state.nodeSettings;
     state.nodeSettings = {
       schema: NODE_SETTINGS_SCHEMA,
       displayName: nextDisplayName,
       addressMode,
+      additionalTransports,
       revision: state.nodeSettings.revision + 1,
       updatedAt: now(),
       updatedByDeviceId: device.deviceId,
@@ -153,6 +190,7 @@ export function createNodeControl({
     route,
     displayName,
     publicSettings,
+    transportProfiles,
     manifestCapability,
     deviceInventory,
     updateSettings,

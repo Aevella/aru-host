@@ -506,3 +506,26 @@
 "host.install.update.detail" = "有随此 App 提供的新版后台。更新会短暂重启 Host，请在当前任务结束后操作。";
 "host.install.repair" = "修复并重启 Host";
 "host.install.repair.detail" = "Host 程序文件缺失。修复会保留数据并重启服务，请在当前任务结束后操作。";
+
+"node.settings.title" = "节点设置";
+"node.settings.detail" = "为这台电脑取个名字，再告诉手机可以从哪里连接。";
+"node.connections.title" = "连接地址";
+"node.connections.detail" = "局域网地址会保留。添加远程地址后，手机在外面也能找到这台 Host。";
+"node.connections.local" = "局域网 · 当前地址";
+"node.connections.empty" = "还没有远程地址";
+"node.connections.add" = "添加远程地址";
+"node.connections.address" = "地址，例如 http://100.100.100.100:8787";
+"node.connections.check" = "检查连接";
+"node.connections.checked" = "已连接到这台 Host";
+"node.connections.note" = "检查只确认这台 Mac 可以访问该地址；手机也需要连接 Tailscale，或能访问你的 HTTPS 服务。";
+"node.connections.remove" = "移除地址";
+"node.connections.upgrade" = "更新 Host Core 后，就可以在这里添加远程地址。";
+"node.connections.invalid" = "请输入完整地址，不要包含路径、账号或密码。";
+"node.connections.unavailable" = "这个地址没有返回 Host 清单，请检查地址和服务。";
+"node.connections.different" = "这个地址连接的是另一台 Host，请检查后再保存。";
+
+"container.checking" = "正在检查已配置的容器环境。";
+"container.engine.unavailable" = "容器配置已保留，但引擎暂时不可用。请启动 Docker 或 Podman 后重新验证。";
+"container.execution.failed" = "容器配置已保留，但运行检查未通过。请检查镜像与工作目录权限后重新验证。";
+
+"node.connections.primary" = "当前连接地址";

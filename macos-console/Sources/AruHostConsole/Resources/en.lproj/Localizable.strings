@@ -506,3 +506,26 @@
 "host.install.update.detail" = "A newer bundled Core is available. Updating restarts Host briefly; apply it after your current tasks finish.";
 "host.install.repair" = "Repair and restart Host";
 "host.install.repair.detail" = "Host program files are missing. Repair preserves your data and restarts the service. Apply it after current tasks finish.";
+
+"node.settings.title" = "Node settings";
+"node.settings.detail" = "Name this computer and choose how your phone can reach it.";
+"node.connections.title" = "Connection addresses";
+"node.connections.detail" = "Your local address stays available. Add a remote address to reach this Host away from home.";
+"node.connections.local" = "Local network · current address";
+"node.connections.empty" = "No remote addresses yet";
+"node.connections.add" = "Add remote address";
+"node.connections.address" = "Address, e.g. http://100.100.100.100:8787";
+"node.connections.check" = "Check connection";
+"node.connections.checked" = "Connected to this Host";
+"node.connections.note" = "The check confirms access from this Mac. Your phone also needs Tailscale or access to your HTTPS service.";
+"node.connections.remove" = "Remove address";
+"node.connections.upgrade" = "Update Host Core to add remote addresses here.";
+"node.connections.invalid" = "Enter a complete origin without a path, username or password.";
+"node.connections.unavailable" = "This address did not return a Host manifest. Check the address and service.";
+"node.connections.different" = "This address belongs to another Host. Check it before saving.";
+
+"container.checking" = "Checking the configured container environment.";
+"container.engine.unavailable" = "Your container configuration is saved, but the engine is unavailable. Start Docker or Podman and verify again.";
+"container.execution.failed" = "Your container configuration is saved, but execution checks failed. Check images and workspace permissions, then verify again.";
+
+"node.connections.primary" = "Current connection address";

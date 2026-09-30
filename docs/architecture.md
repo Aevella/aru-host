@@ -193,3 +193,15 @@ modules; the existing fixed conversation deployment payload still contains them.
 Mac protocol declarations are grouped by surface. HTTP response handling and MCP
 session/catalog retrieval have separate stateless helpers; Console remains the owner
 of credential selection and observable connection state.
+
+## Connection-address settings
+
+`src/host/node-control.mjs` owns the durable, revision-checked additional origins
+inside node settings. Server manifest assembly consumes its route projection;
+Console only edits drafts and submits changes. The primary installation route is
+retained. Additional Tailscale/HTTPS origins can be added and explicitly removed;
+older name-only updates preserve them. `HostNodeSettingsEditor` renders this
+contract, and `HostConsoleRuntime` checks a public manifest against the connected
+Host identity without forwarding credentials. There is no interface polling,
+automatic tunnel setup, or implicit route deletion. macOS installation retains
+container configuration independently of runtime readiness.

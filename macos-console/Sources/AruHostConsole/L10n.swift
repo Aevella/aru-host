@@ -1,6 +1,28 @@
 import Foundation
 
 enum L10n {
+    static let connectionPrimary = value("node.connections.primary")
+    static let containerChecking = value("container.checking")
+    static let containerEngineUnavailable = value("container.engine.unavailable")
+    static let containerExecutionFailed = value("container.execution.failed")
+
+    static let nodeSettingsTitle = value("node.settings.title")
+    static let nodeSettingsDetail = value("node.settings.detail")
+    static let connectionsTitle = value("node.connections.title")
+    static let connectionsDetail = value("node.connections.detail")
+    static let connectionLocal = value("node.connections.local")
+    static let connectionEmpty = value("node.connections.empty")
+    static let connectionAdd = value("node.connections.add")
+    static let connectionAddress = value("node.connections.address")
+    static let connectionCheck = value("node.connections.check")
+    static let connectionChecked = value("node.connections.checked")
+    static let connectionNote = value("node.connections.note")
+    static let connectionRemove = value("node.connections.remove")
+    static let connectionUpgrade = value("node.connections.upgrade")
+    static let connectionInvalid = value("node.connections.invalid")
+    static let connectionUnavailable = value("node.connections.unavailable")
+    static let connectionDifferentHost = value("node.connections.different")
+
     private static func value(_ key: String) -> String {
         String(localized: String.LocalizationValue(key), bundle: HostConsoleResources.bundle)
     }

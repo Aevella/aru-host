@@ -53,9 +53,7 @@ struct WorkspaceRuntimeView: View {
                     Text(L10n.workspaceRuntime)
                         .font(.system(size: 16, weight: .semibold, design: .rounded))
                         .foregroundStyle(HostPalette.ink)
-                    Text(runtime.capability("workspace-runtime")?.enabled == true
-                         ? L10n.runtimeReadyDescription
-                         : L10n.containerRuntimeMissingDescription)
+                    Text(runtime.workspaceRuntimeDescription)
                         .font(.system(size: 11, design: .rounded))
                         .foregroundStyle(HostPalette.secondaryInk.opacity(0.64))
                 }

@@ -1,8 +1,14 @@
 import Foundation
 
 struct HostManifest: Decodable, Equatable, Sendable {
+    struct Readiness: Decodable, Equatable, Sendable {
+        let status: String
+        let reason: String?
+    }
     struct Capability: Decodable, Equatable, Sendable {
         let enabled: Bool
+        var readiness: Readiness? = nil
+        var additionalTransports: Bool? = nil
         let turnExecution: Bool?
         let phase: String?
         let endpoint: String?
@@ -101,17 +107,45 @@ struct HostDiagnostics: Decodable, Equatable, Sendable {
     let deviceCount: Int
 }
 
+struct HostConnectionAddress: Codable, Equatable, Sendable, Identifiable {
+    var id: String
+    var kind: String
+    var baseUrl: String
+    var priority: Int = 20
+
+    func validated() throws -> Self {
+        guard let url = URL(string: baseUrl.trimmingCharacters(in: .whitespacesAndNewlines)),
+              let host = url.host, url.user == nil, url.password == nil,
+              url.path.isEmpty || url.path == "/", url.query == nil, url.fragment == nil,
+              ["http", "https"].contains(url.scheme), ["tailscale", "public-https"].contains(kind) else {
+            throw HostAddressCheckError.invalid
+        }
+        let parts = host.split(separator: ".").compactMap { Int($0) }
+        let tailnet = (host.split(separator: ".").count == 4 && parts.count == 4 && parts.allSatisfy { (0...255).contains($0) }
+            && parts[0] == 100 && (64...127).contains(parts[1])) || host.hasSuffix(".ts.net")
+        guard url.scheme == "https" || (kind == "tailscale" && tailnet) else {
+            throw HostAddressCheckError.invalid
+        }
+        var copy = self
+        copy.baseUrl = url.absoluteString.hasSuffix("/") ? String(url.absoluteString.dropLast()) : url.absoluteString
+        return copy
+    }
+}
+
 struct HostNodeSettings: Decodable, Equatable, Sendable {
     let schema: String
     let displayName: String
     let revision: Int
     let updatedAt: Int64
+    var additionalTransports: [HostConnectionAddress]? = nil
+    var transportProfiles: [HostConnectionAddress]? = nil
 }
 
 struct HostNodeSettingsUpdate: Encodable, Sendable {
     let schema = "aru.selfhost.node-settings.v1"
     let displayName: String
     let expectedRevision: Int
+    var additionalTransports: [HostConnectionAddress]? = nil
 }
 
 struct HostPairedDevice: Decodable, Equatable, Identifiable, Sendable {
