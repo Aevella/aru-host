@@ -2,9 +2,19 @@
 
 ## Unreleased
 
+## 0.34.0
+
 - Run computer collaborators with Claude Code. Host drives an installed Claude Code CLI under the same operating-system user through print mode, stream-json, session resume and a per-turn stdio MCP bridge for Host tools, approvals and attachments; the CLI owns login (`claude auth login`). `claude-code` now reports `executesTurns: true` and can be chosen for new and existing collaborators. Accepted with a real subscription login for replies, approvals, session resume and cancellation; see the [integration record](docs/claude-code-integration.md).
 - A Host upgraded by a pre-0.32 fixed-list upgrader starts without the Claude Code adapter files and reports the driver as `driver-files-missing` instead of failing to start; the next upgrade installs them.
 - Respect a computer collaborator's proactive rule `notificationsEnabled`: a rule with notifications off no longer alerts registered phones when its turn completes; the reply stays in the Host conversation. Each proactive turn records the choice as `notify`. Proactive turns run for a phone collaborator are unchanged, since their push also carries the delivery.
+
+
+- Keep accepted executions and completed replies available after phone disconnection, with paged execution history. Restart recovery retains uncertain results without automatically replaying external actions.
+- Move execution and delivery records to independent durable storage, retaining the original ledger backup and supporting interrupted migration recovery. Migrated instances refuse rollback to older Hosts that cannot read the new format; the original backup does not include tasks created after upgrade.
+- Separate connecting to an existing Host from updating Console-managed Core on macOS; show the running version and isolate credentials per instance. Fix installation paths, driver refresh and streaming chat stability.
+- Consolidate canonical sources and generated runtime payloads while preserving pairing, collaborators, conversations, provider profiles and encrypted credentials. Import legacy Linux credentials once, with existing credentials taking precedence; failed imports do not silently clear keys.
+- Include release identity metadata in Linux Core archives. Windows remains an unsigned preview; installed lifecycle CI does not replace real Windows Claude Code subscription-account acceptance.
+- See [installation, upgrade and validation details](docs/releases/0.34.0.md). Phone and Host updates are separate.
 
 ## 0.33.1
 
