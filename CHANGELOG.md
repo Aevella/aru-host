@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.34.1
+
+- Keep the configured macOS container executable, images and resource settings across upgrades when Docker/Podman is stopped or absent from the installer PATH. Fresh detection resolves standard macOS CLI locations to an absolute path. Console distinguishes unconfigured, checking and configured-but-unavailable environments.
+- Add remote connection addresses in Mac Console's Overview → Node settings. Additional Tailscale and public HTTPS origins are revision-checked, durable and published alongside the primary LAN route. Older name-only clients preserve them; removal is explicit.
+- Check a remote address against the connected Host's public manifest identity without sending the paired credential. A check from the Mac does not prove phone reachability. No automatic Tailscale detection or tunnel/reverse-proxy setup is added.
+- See [upgrade steps and validation](docs/releases/0.34.1.md). Phone and Host updates remain separate.
+
 ## 0.34.0
 
 - Run computer collaborators with Claude Code. Host drives an installed Claude Code CLI under the same operating-system user through print mode, stream-json, session resume and a per-turn stdio MCP bridge for Host tools, approvals and attachments; the CLI owns login (`claude auth login`). `claude-code` now reports `executesTurns: true` and can be chosen for new and existing collaborators. Accepted with a real subscription login for replies, approvals, session resume and cancellation; see the [integration record](docs/claude-code-integration.md).
