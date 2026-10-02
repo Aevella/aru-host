@@ -1,3 +1,4 @@
+import { SYNC_SCHEMA, messagePage, syncProjection } from "./conversation-sync.mjs";
 import { replicaInstructions, proactiveReplicaSeed, messageContentWithTime, historyRoleLabel, isoTimestamp, validatedReplicaRole, dynamicTool, driverConfigurationFingerprint, collaboratorInstructions, driverApprovalKind, driverApprovalTitle, publicApprovalDetail, driverApprovalResponse, publicDriverItem, publicWorkspacePath } from "./driver-projection.mjs";
 import { createCollaboratorConversationAttachmentHost } from "./attachments.mjs";
 import { createReplicaDeliveryRecovery } from "./replica-delivery-recovery.mjs";
@@ -76,7 +77,7 @@ export function createCollaboratorConversationHost({
       }
       if (req.method === "POST") {
         const body = await readJSONBody(req, 64 * 1024);
-        sendJSON(res, 201, clientInput(() => createConversation(collaborator, body, device)));
+        sendJSON(res, 201, wireConversation(clientInput(() => createConversation(collaborator, body, device)), req));
         return true;
       }
       return false;
@@ -90,7 +91,32 @@ export function createCollaboratorConversationHost({
     const conversationId = clientInput(() => validatedId(match[2], "conversation"));
     const suffix = match[3] || "";
     const device = requireDevice();
+    const query = new URL(req.url, "http://host").searchParams;
+    if (suffix === "/sync" && req.method === "GET") {
+      const path = conversationPath(collaborator.collaboratorId, conversationId);
+      if (!existsSync(path)) throw new HttpError(404, "conversation.unknown", "unknown conversation");
+      // Atomic ledger replacement makes file identity a change token without a second registry.
+      const stat = statSync(path, { bigint: true });
+      const version = `${stat.ino}-${stat.mtimeNs}-${stat.size}`;
+      if (query.get("version") === version) {
+        sendJSON(res, 200, { schema: SYNC_SCHEMA, collaboratorId: collaborator.collaboratorId,
+          conversationId, version, unchanged: true });
+        return true;
+      }
+      const afterText = query.get("after");
+      const after = afterText === null ? null : Number(afterText);
+      if (after !== null && (!Number.isSafeInteger(after) || after < 0)) {
+        throw new HttpError(400, "conversation.cursor_invalid", "invalid event cursor");
+      }
+      const value = loadConversation(collaborator.collaboratorId, conversationId);
+      sendJSON(res, 200, syncProjection(value, publicConversation(value, false), version, after));
+      return true;
+    }
     const conversation = loadConversation(collaborator.collaboratorId, conversationId);
+    if (suffix === "/messages" && req.method === "GET") {
+      sendJSON(res, 200, messagePage(conversation, query.get("before"), HttpError));
+      return true;
+    }
 
     if (suffix.startsWith("/attachments")) {
       try {
@@ -107,11 +133,11 @@ export function createCollaboratorConversationHost({
       const body = await readJSONBody(req, 64 * 1024);
       mutateConversationLifecycle({ conversation, body, deleting: req.method === "DELETE",
         deviceId: device.deviceId, now, save: saveConversation, HttpError });
-      sendJSON(res, 200, publicConversation(conversation, true));
+      sendJSON(res, 200, wireConversation(publicConversation(conversation, true), req));
       return true;
     }
     if (!suffix && req.method === "GET") {
-      sendJSON(res, 200, publicConversation(conversation, true));
+      sendJSON(res, 200, wireConversation(publicConversation(conversation, true), req));
       return true;
     }
     if (suffix === "/events" && req.method === "GET") {
@@ -127,30 +153,36 @@ export function createCollaboratorConversationHost({
     }
     if (suffix === "/messages" && req.method === "POST") {
       const body = await readJSONBody(req, 256 * 1024);
-      sendJSON(res, 202, clientInput(() => enqueueMessage(conversation, collaborator, body, device)));
+      sendJSON(res, 202, wireConversation(clientInput(() => enqueueMessage(conversation, collaborator, body, device)), req));
       return true;
     }
     const approvalMatch = suffix.match(/^\/approvals\/([^/]+)$/);
     if (approvalMatch && req.method === "POST") {
       const body = await readJSONBody(req, 64 * 1024);
-      sendJSON(res, 200, clientInput(() => resolveApproval(
+      sendJSON(res, 200, wireConversation(clientInput(() => resolveApproval(
         conversation,
         validatedId(approvalMatch[1], "approval"),
         body,
         device,
-      )));
+      )), req));
       return true;
     }
     const cancelMatch = suffix.match(/^\/turns\/([^/]+)\/cancel$/);
     if (cancelMatch && req.method === "POST") {
-      sendJSON(res, 202, await cancelTurn(
+      sendJSON(res, 202, wireConversation(await cancelTurn(
         conversation,
         clientInput(() => validatedId(cancelMatch[1], "turn")),
         device,
-      ));
+      ), req));
       return true;
     }
     return false;
+  }
+
+  function wireConversation(value, req) {
+    if (new URL(req.url, "http://host").searchParams.get("window") !== "1") return value;
+    return { ...value, messages: value.messages.slice(-64),
+      approvals: value.approvals.filter(item => item.state === "pending") };
   }
 
   function clientInput(operation) {
@@ -870,8 +902,8 @@ export function createCollaboratorConversationHost({
     };
     if (includeBody) {
       value.messages = conversation.messages
-        .filter((item) => item.role !== "system")
-        .map(({ clientRequestId: _, driverText: __, ...item }) => item);
+        .map(({ clientRequestId: _, driverText: __, ...item }, position) => ({ ...item, position }))
+        .filter((item) => item.role !== "system");
       value.approvals = conversation.approvals.map(publicApproval);
     }
     return value;

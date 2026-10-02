@@ -172,3 +172,42 @@ restart persistence, removal, validation and write failure; the spaced-path
 installer fixture covers a missing engine with retained images and memory settings.
 Console model tests and the local UI build passed. These changes are source/local
 proof, not a newly published release or customer-device acceptance.
+
+## Foreground conversation sync
+
+The authenticated `/conversations/:id/sync` projection uses the existing atomic
+ledger file identity as an opaque version token. An unchanged token returns before
+reading/parsing the ledger; it never bypasses device/collaborator admission or
+turns a missing file into an empty conversation. Changed pages carry metadata,
+all currently pending approvals, affected message rows and up to 128 ordered
+event positions. Text deltas advance the cursor but are projected as the current
+changed message row, avoiding a second client text/event ledger. Clients drain
+backlogs before caching the conditional version. Initial presentation contains
+64 recent messages and recent current-turn activity, with the durable tail cursor.
+
+`GET /messages?before=:messageId` loads the preceding 64 non-system messages,
+using stable message identity rather than a changing array offset. Unknown
+anchors fail explicitly. Each message includes its canonical ledger position;
+arrival order and equal timestamps cannot reorder recovered replies. These are
+transport/display batch sizes, not history retention or model context limits.
+Mutation requests may opt into `?window=1` for a recent-message/pending-approval
+response. The default complete projection and internal execution/recovery paths
+retain their established semantics for installed clients.
+
+The native foreground session owns only read projections, page cursors and
+request admission. Dismissing observation cancels reads without cancelling Host
+execution. Read failures preserve existing messages, history anchors and pending
+approvals. Only explicit `404 route.unknown` admits interoperability with Hosts
+predating sync; it is retried on the next foreground opening. Other 404s, 401s,
+malformed pages and ledger failures remain errors. Retirement depends on the
+installed Host upgrade floor; this branch is external-version interoperability.
+
+Focused synthetic tests cover 5,000-message initial paging, 20 unchanged polls
+without another ledger read, stable older anchors, backlog draining, terminal
+updates of earlier turns, authentication before conditional reads, unreadable
+and missing ledgers, native identity/page admission, stale revisions/cursors,
+node removal and cancelled late reads. Conversation smoke and generated-runtime
+checks cover the installed fixed-name payload. This is source/local test proof;
+no release, deployed upgrade or phone interaction acceptance is implied. Whole
+ledger writes remain owned by the existing persistence path; this sync change
+is not a storage-format migration or measured thermal/battery acceptance.

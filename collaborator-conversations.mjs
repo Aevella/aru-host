@@ -4,8 +4,100 @@ import * as node1 from 'node:path';
 import * as node2 from 'node:fs';
 import * as node3 from 'node:events';
 
-// src/conversations/driver-projection.mjs
+// src/conversations/conversation-sync.mjs
 const module1 = (() => {
+// Read-only wire projections. The conversation ledger remains the sole durable owner.
+const SYNC_SCHEMA = "aru.selfhost.collaborator-conversation-sync.v1";
+const PAGE_SCHEMA = "aru.selfhost.collaborator-conversation-message-page.v1";
+const pageSize = 64;
+const eventPageSize = 128;
+const publicMessage = ({ clientRequestId: _, driverText: __, ...value }, position) => ({ ...value, position });
+
+function messagePage(conversation, before, HttpError) {
+  const source = conversation.messages;
+  const end = before ? source.findLastIndex(item => item.role !== "system" && item.messageId === before) : source.length;
+  if (end < 0) throw new HttpError(409, "conversation.anchor_unknown", "history anchor no longer exists");
+  const messages = [];
+  let hasMore = false;
+  for (let i = end - 1; i >= 0; i--) {
+    if (source[i].role === "system") continue;
+    if (messages.length === pageSize) { hasMore = true; break; }
+    messages.push(publicMessage(source[i], i));
+  }
+  messages.reverse();
+  return { schema: PAGE_SCHEMA, collaboratorId: conversation.collaboratorId,
+    conversationId: conversation.conversationId, messages,
+    before: messages[0]?.messageId ?? null, hasMore };
+}
+
+function eventsAfter(events, after) {
+  let low = 0, high = events.length;
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    if (events[middle].sequence <= after) low = middle + 1; else high = middle;
+  }
+  return events.slice(low, low + eventPageSize);
+}
+
+function changedMessages(conversation, ids) {
+  const remaining = new Set(ids);
+  const messages = [];
+  for (let i = conversation.messages.length - 1; i >= 0 && remaining.size; i--) {
+    const item = conversation.messages[i];
+    if (remaining.delete(item.messageId) && item.role !== "system") messages.push(publicMessage(item, i));
+  }
+  return messages.reverse();
+}
+
+function syncProjection(conversation, metadata, version, after) {
+  const tail = conversation.events.at(-1)?.sequence ?? 0;
+  const reset = after === null || after > tail;
+  const history = reset ? messagePage(conversation, null) : null;
+  // Initial presentation needs current activity, not every historical text delta.
+  const initialEvents = [];
+  if (reset && conversation.activeTurn) {
+    for (let i = conversation.events.length - 1; i >= 0; i--) {
+      const event = conversation.events[i];
+      if (event.payload?.turnId !== conversation.activeTurn.turnId) continue;
+      if (event.kind !== "assistant.delta") initialEvents.push(event);
+      if (initialEvents.length === eventPageSize || event.kind === "message.accepted") break;
+    }
+    initialEvents.reverse();
+  }
+  const page = reset ? initialEvents : eventsAfter(conversation.events, after);
+  const cursor = reset ? tail : (page.at(-1)?.sequence ?? after);
+  const ids = new Set();
+  for (const event of page) {
+    for (const key of ["messageId", "userMessageId", "assistantMessageId"]) {
+      if (event.payload?.[key]) ids.add(event.payload[key]);
+    }
+  }
+  const turns = new Set(page.map(event => event.payload?.turnId).filter(Boolean));
+  for (let i = conversation.events.length - 1; i >= 0 && turns.size; i--) {
+    const event = conversation.events[i];
+    if (event.kind === "message.accepted" && turns.has(event.payload?.turnId)) {
+      ids.add(event.payload.userMessageId); ids.add(event.payload.assistantMessageId);
+      turns.delete(event.payload.turnId);
+    }
+  }
+  if (conversation.activeTurn) {
+    ids.add(conversation.activeTurn.userMessageId);
+    ids.add(conversation.activeTurn.assistantMessageId);
+  }
+  return { schema: SYNC_SCHEMA, collaboratorId: conversation.collaboratorId,
+    conversationId: conversation.conversationId, version, unchanged: false, reset,
+    conversation: { ...metadata,
+      messages: reset ? history.messages : changedMessages(conversation, ids),
+      approvals: conversation.approvals.filter(item => item.state === "pending")
+        .map(({ resolvedByDeviceId: _, ...item }) => item) },
+    events: page.filter(event => event.kind !== "assistant.delta"), cursor, hasMore: cursor < tail,
+    history: history ? { before: history.before, hasMore: history.hasMore } : null };
+}
+return { SYNC_SCHEMA, PAGE_SCHEMA, messagePage, syncProjection };
+})();
+
+// src/conversations/driver-projection.mjs
+const module2 = (() => {
 const { createHash } = node0;
 const { isAbsolute, relative, resolve } = node1;
 function replicaInstructions(replica) {
@@ -179,7 +271,7 @@ return { replicaInstructions, proactiveReplicaSeed, messageContentWithTime, hist
 })();
 
 // src/conversations/attachments.mjs
-const module2 = (() => {
+const module3 = (() => {
 const { createHash, randomUUID } = node0;
 const {
   chmodSync,
@@ -627,7 +719,7 @@ return { createCollaboratorConversationAttachmentHost };
 })();
 
 // src/conversations/replica-delivery-recovery.mjs
-const module3 = (() => {
+const module4 = (() => {
 function createReplicaDeliveryRecovery({ loadConversations, publicConversation, publicTurn, message }) {
   // Startup-only reconciliation of the delivery owner's outstanding attempts.
   // Conversation storage owns completion evidence; callers never read its files.
@@ -652,7 +744,7 @@ return { createReplicaDeliveryRecovery };
 })();
 
 // src/conversations/turn-execution.mjs
-const module4 = (() => {
+const module5 = (() => {
 // Runtime of one admitted turn. Durable state and projection stay in the
 // conversation owner; this object only holds cancellable work and its receipts.
 function createTurnExecution() {
@@ -696,7 +788,7 @@ return { createTurnExecution, waitForTurnStop };
 })();
 
 // src/conversations/collaborator-conversation-lifecycle.mjs
-const module5 = (() => {
+const module6 = (() => {
 // Metadata lifecycle, independent of message execution. A running turn must be
 // stopped through its owner before its conversation can leave the live list.
 function mutateConversationLifecycle({ conversation, body, deleting, deviceId, now, save, HttpError }) {
@@ -721,11 +813,12 @@ return { mutateConversationLifecycle };
 
 // src/conversations/collaborator-conversations.mjs
 const module0 = (() => {
-const { replicaInstructions, proactiveReplicaSeed, messageContentWithTime, historyRoleLabel, isoTimestamp, validatedReplicaRole, dynamicTool, driverConfigurationFingerprint, collaboratorInstructions, driverApprovalKind, driverApprovalTitle, publicApprovalDetail, driverApprovalResponse, publicDriverItem, publicWorkspacePath } = module1;
-const { createCollaboratorConversationAttachmentHost } = module2;
-const { createReplicaDeliveryRecovery } = module3;
-const { createTurnExecution, waitForTurnStop } = module4;
-const { mutateConversationLifecycle } = module5;
+const { SYNC_SCHEMA, messagePage, syncProjection } = module1;
+const { replicaInstructions, proactiveReplicaSeed, messageContentWithTime, historyRoleLabel, isoTimestamp, validatedReplicaRole, dynamicTool, driverConfigurationFingerprint, collaboratorInstructions, driverApprovalKind, driverApprovalTitle, publicApprovalDetail, driverApprovalResponse, publicDriverItem, publicWorkspacePath } = module2;
+const { createCollaboratorConversationAttachmentHost } = module3;
+const { createReplicaDeliveryRecovery } = module4;
+const { createTurnExecution, waitForTurnStop } = module5;
+const { mutateConversationLifecycle } = module6;
 const { createHash, randomUUID } = node0;
 const {
   chmodSync,
@@ -799,7 +892,7 @@ function createCollaboratorConversationHost({
       }
       if (req.method === "POST") {
         const body = await readJSONBody(req, 64 * 1024);
-        sendJSON(res, 201, clientInput(() => createConversation(collaborator, body, device)));
+        sendJSON(res, 201, wireConversation(clientInput(() => createConversation(collaborator, body, device)), req));
         return true;
       }
       return false;
@@ -813,7 +906,32 @@ function createCollaboratorConversationHost({
     const conversationId = clientInput(() => validatedId(match[2], "conversation"));
     const suffix = match[3] || "";
     const device = requireDevice();
+    const query = new URL(req.url, "http://host").searchParams;
+    if (suffix === "/sync" && req.method === "GET") {
+      const path = conversationPath(collaborator.collaboratorId, conversationId);
+      if (!existsSync(path)) throw new HttpError(404, "conversation.unknown", "unknown conversation");
+      // Atomic ledger replacement makes file identity a change token without a second registry.
+      const stat = statSync(path, { bigint: true });
+      const version = `${stat.ino}-${stat.mtimeNs}-${stat.size}`;
+      if (query.get("version") === version) {
+        sendJSON(res, 200, { schema: SYNC_SCHEMA, collaboratorId: collaborator.collaboratorId,
+          conversationId, version, unchanged: true });
+        return true;
+      }
+      const afterText = query.get("after");
+      const after = afterText === null ? null : Number(afterText);
+      if (after !== null && (!Number.isSafeInteger(after) || after < 0)) {
+        throw new HttpError(400, "conversation.cursor_invalid", "invalid event cursor");
+      }
+      const value = loadConversation(collaborator.collaboratorId, conversationId);
+      sendJSON(res, 200, syncProjection(value, publicConversation(value, false), version, after));
+      return true;
+    }
     const conversation = loadConversation(collaborator.collaboratorId, conversationId);
+    if (suffix === "/messages" && req.method === "GET") {
+      sendJSON(res, 200, messagePage(conversation, query.get("before"), HttpError));
+      return true;
+    }
 
     if (suffix.startsWith("/attachments")) {
       try {
@@ -830,11 +948,11 @@ function createCollaboratorConversationHost({
       const body = await readJSONBody(req, 64 * 1024);
       mutateConversationLifecycle({ conversation, body, deleting: req.method === "DELETE",
         deviceId: device.deviceId, now, save: saveConversation, HttpError });
-      sendJSON(res, 200, publicConversation(conversation, true));
+      sendJSON(res, 200, wireConversation(publicConversation(conversation, true), req));
       return true;
     }
     if (!suffix && req.method === "GET") {
-      sendJSON(res, 200, publicConversation(conversation, true));
+      sendJSON(res, 200, wireConversation(publicConversation(conversation, true), req));
       return true;
     }
     if (suffix === "/events" && req.method === "GET") {
@@ -850,30 +968,36 @@ function createCollaboratorConversationHost({
     }
     if (suffix === "/messages" && req.method === "POST") {
       const body = await readJSONBody(req, 256 * 1024);
-      sendJSON(res, 202, clientInput(() => enqueueMessage(conversation, collaborator, body, device)));
+      sendJSON(res, 202, wireConversation(clientInput(() => enqueueMessage(conversation, collaborator, body, device)), req));
       return true;
     }
     const approvalMatch = suffix.match(/^\/approvals\/([^/]+)$/);
     if (approvalMatch && req.method === "POST") {
       const body = await readJSONBody(req, 64 * 1024);
-      sendJSON(res, 200, clientInput(() => resolveApproval(
+      sendJSON(res, 200, wireConversation(clientInput(() => resolveApproval(
         conversation,
         validatedId(approvalMatch[1], "approval"),
         body,
         device,
-      )));
+      )), req));
       return true;
     }
     const cancelMatch = suffix.match(/^\/turns\/([^/]+)\/cancel$/);
     if (cancelMatch && req.method === "POST") {
-      sendJSON(res, 202, await cancelTurn(
+      sendJSON(res, 202, wireConversation(await cancelTurn(
         conversation,
         clientInput(() => validatedId(cancelMatch[1], "turn")),
         device,
-      ));
+      ), req));
       return true;
     }
     return false;
+  }
+
+  function wireConversation(value, req) {
+    if (new URL(req.url, "http://host").searchParams.get("window") !== "1") return value;
+    return { ...value, messages: value.messages.slice(-64),
+      approvals: value.approvals.filter(item => item.state === "pending") };
   }
 
   function clientInput(operation) {
@@ -1593,8 +1717,8 @@ function createCollaboratorConversationHost({
     };
     if (includeBody) {
       value.messages = conversation.messages
-        .filter((item) => item.role !== "system")
-        .map(({ clientRequestId: _, driverText: __, ...item }) => item);
+        .map(({ clientRequestId: _, driverText: __, ...item }, position) => ({ ...item, position }))
+        .filter((item) => item.role !== "system");
       value.approvals = conversation.approvals.map(publicApproval);
     }
     return value;
