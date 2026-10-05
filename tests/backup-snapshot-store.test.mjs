@@ -74,7 +74,8 @@ test("corrupt index or content never permits false success or orphan collection"
   const original = readFileSync(file);
   const corrupt = Buffer.from(original); corrupt[corrupt.length - 1] ^= 1;
   writeFileSync(file, corrupt);
-  assert.throws(() => s.retainChunk(draft.id, draft.deviceId, chunk.id), /chunk_corrupt/);
+  // Admission checks header/size only; full authentication remains a publication gate.
+  assert.equal(s.retainChunk(draft.id, draft.deviceId, chunk.id).id, chunk.id);
   await assert.rejects(async () => await s.commit(draft.id, draft.deviceId, body(s, [chunk.id]), {}));
   assert.equal(s.inventory().length, 0);
   writeFileSync(join(f.directory, "drafts", `${draft.id}.json`), "malformed");
@@ -116,4 +117,39 @@ test("deleted snapshot cannot be resurrected by a lost receipt retry", async t =
   s.remove(draft.id);
   await assert.rejects(s.commit(draft.id, draft.deviceId, bytes, {}), /snapshot.deleted/);
   assert.equal(s.inventory().length, 0);
+});
+
+test('batch admission appends linear references and full verification gates publication', async t => {
+  const f = fixture(t), s = f.store;
+  const draft = s.begin('writer');
+  const ids = Array.from({ length: 512 }, (_, i) => hash(Buffer.from(String(i))));
+  for (const id of ids) upload(s, draft, id);
+  const base = readFileSync(join(f.directory, 'drafts', `${draft.id}.json`));
+  const log = readFileSync(join(f.directory, 'drafts', `${draft.id}.refs`));
+  assert.ok(base.length < 1024);
+  assert.ok(log.length < ids.length * 400);
+  await s.commit(draft.id, draft.deviceId, body(s, ids), {});
+  const next = s.begin('writer');
+  for (let i = 0; i < ids.length; i += 128) assert.equal(s.retainChunks(next.id, next.deviceId, ids.slice(i, i + 128)).length, 128);
+  const lines = readFileSync(join(f.directory, 'drafts', `${next.id}.refs`), 'utf8').trim().split('\n');
+  assert.equal(lines.length, 4);
+  const reopened = f.reopen();
+  assert.equal(reopened.begin('writer').chunks.length, 512);
+  await reopened.commit(next.id, next.deviceId, body(reopened, ids, 2), {});
+  reopened.remove(draft.id);
+  assert.equal(reopened.getChunk(next.id, ids[0]).length, 90);
+});
+
+test('unacknowledged torn reference tail recovers; malformed committed lines fail closed', t => {
+  const f = fixture(t), s = f.store, draft = s.begin('writer');
+  const chunk = upload(s, draft);
+  const path = join(f.directory, 'drafts', `${draft.id}.refs`);
+  const complete = readFileSync(path);
+  writeFileSync(path, Buffer.concat([complete, Buffer.from('[{"id":')]));
+  assert.equal(f.reopen().begin('writer').chunks[0].id, chunk.id);
+  assert.deepEqual(readFileSync(path), complete);
+  const damaged = Buffer.from(complete); damaged[0] = 33;
+  writeFileSync(path, damaged);
+  assert.throws(() => f.reopen().collect());
+  assert.ok(existsSync(join(f.directory, 'chunks', chunk.id)));
 });

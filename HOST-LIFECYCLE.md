@@ -228,3 +228,10 @@ writes; cover shared-reference deletion, damaged indexes, yielding commit cancel
 deleted-root retries and exact replay. The local HTTP fixture proves first/incremental
 transfer and lost receipts against native restore. Source tests are not evidence of
 installed Host upgrade, Windows filesystem durability or real-phone background survival.
+
+Snapshot draft reference writes are append-only and checksummed, with a durable
+committed-length checkpoint. Recovery discards only unacknowledged tail bytes;
+missing or damaged acknowledged bytes stop recovery/collection. Fault tests cover
+both cases. Batch retain admission reads headers/sizes; publishing verifies each
+complete ciphertext once before exposing the recovery point. The repository
+advertises `batchRetain` and snapshot version 2; old v1 requests remain supported.

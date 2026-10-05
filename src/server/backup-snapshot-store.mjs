@@ -1,5 +1,6 @@
+import { createDraftReferences } from "./backup-snapshot-references.mjs";
 import { randomBytes, randomUUID, createHash } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync, openSync, closeSync, fsyncSync, renameSync, unlinkSync, readdirSync, lstatSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync, openSync, closeSync, readSync, fsyncSync, renameSync, unlinkSync, readdirSync, lstatSync } from "node:fs";
 import { join } from "node:path";
 import { setImmediate as yieldEventLoop } from "node:timers/promises";
 
@@ -16,6 +17,8 @@ export function createBackupSnapshotStore({ directory, fault = () => {} }) {
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   for (const name of ["chunks", "snapshots", "drafts", "deleted"]) mkdirSync(join(directory, name), { recursive: true, mode: 0o700 });
   const repositoryPath = join(directory, "repository.json");
+  const references = createDraftReferences({ atomic });
+  const referencePath = id => join(directory, "drafts", `${id}.refs`);
   let repository;
   try { repository = JSON.parse(readFileSync(repositoryPath, "utf8")); }
   catch (error) {
@@ -52,8 +55,13 @@ export function createBackupSnapshotStore({ directory, fault = () => {} }) {
     if (!digest(id)) fail("chunk_identity_invalid");
     return join(directory, "chunks", id);
   }
-  function readRecord(folder, id) {
+  function readRecord(folder, id, includeReferences = true) {
     const record = JSON.parse(readFileSync(path(folder, id), "utf8"));
+    if (folder === "drafts" && includeReferences) {
+      const merged = new Map(record.chunks.map(item => [item.id, item]));
+      for (const item of references.read(referencePath(id))) merged.set(item.id, item);
+      record.chunks = [...merged.values()];
+    }
     validateRecord(record, folder === "snapshots");
     if (record.id !== id) fail("record_identity_mismatch");
     return record;
@@ -83,8 +91,8 @@ export function createBackupSnapshotStore({ directory, fault = () => {} }) {
     validateRecord(record, folder === "snapshots");
     atomic(path(folder, record.id), Buffer.from(JSON.stringify(record)));
   }
-  function ownDraft(id, deviceId) {
-    const draft = readRecord("drafts", id);
+  function ownDraft(id, deviceId, includeReferences = true) {
+    const draft = readRecord("drafts", id, includeReferences);
     if (draft.deviceId !== deviceId) fail("wrong_device");
     return draft;
   }
@@ -105,11 +113,17 @@ export function createBackupSnapshotStore({ directory, fault = () => {} }) {
     save("drafts", draft);
     return draft;
   }
-  function chunkInfo(id) {
+  function chunkInfo(id, verify = true) {
     const file = chunkPath(id);
     try {
       const stat = lstatSync(file);
       if (!stat.isFile() || stat.size <= 60 || stat.size > maxChunkBytes + 32) fail("chunk_invalid");
+      if (!verify) {
+        const fd = openSync(file, "r");
+        const prefix = Buffer.alloc(32);
+        try { if (readSync(fd, prefix, 0, 32, 0) !== 32) fail("chunk_invalid"); } finally { closeSync(fd); }
+        return { id, byteCount: stat.size - 32, sha256: prefix.toString("hex") };
+      }
       const stored = readFileSync(file);
       const data = stored.subarray(32);
       const expected = stored.subarray(0, 32).toString("hex");
@@ -117,25 +131,31 @@ export function createBackupSnapshotStore({ directory, fault = () => {} }) {
       return { id, byteCount: data.length, sha256: expected };
     } catch (error) { if (error.code === "ENOENT") return null; throw error; }
   }
-  function retainChunk(draftId, deviceId, id) {
-    const draft = ownDraft(draftId, deviceId);
-    const info = chunkInfo(id);
-    if (!info) return null;
-    const old = draft.chunks.find((item) => item.id === id);
-    if (old && (old.sha256 !== info.sha256 || old.byteCount !== info.byteCount)) fail("chunk_changed");
-    if (!old) { draft.chunks.push(info); save("drafts", draft); }
-    return info;
+  function retainChunks(draftId, deviceId, ids) {
+    if (!Array.isArray(ids) || !ids.every(digest)) fail("chunk_identity_invalid");
+    const draft = ownDraft(draftId, deviceId, false);
+    const previous = new Map([...draft.chunks, ...references.lookup(referencePath(draftId), ids)].map(item => [item.id, item]));
+    const retained = [], added = [];
+    for (const id of new Set(ids)) {
+      const info = chunkInfo(id, false);
+      if (!info) continue;
+      const old = previous.get(id);
+      if (old && (old.sha256 !== info.sha256 || old.byteCount !== info.byteCount)) fail("chunk_changed");
+      retained.push(info);
+      if (!old) added.push(info);
+    }
+    references.append(referencePath(draftId), added);
+    return retained;
   }
+  function retainChunk(draftId, deviceId, id) { return retainChunks(draftId, deviceId, [id])[0] ?? null; }
   function putChunk(draftId, deviceId, id, data, expectedHash) {
-    const draft = ownDraft(draftId, deviceId);
+    ownDraft(draftId, deviceId, false);
     if (!Buffer.isBuffer(data) || data.length <= 28 || data.length > maxChunkBytes || hash(data) !== expectedHash) fail("chunk_invalid");
     const file = chunkPath(id);
-    const existing = chunkInfo(id);
+    const existing = chunkInfo(id, false);
     if (existing) return retainChunk(draftId, deviceId, id);
     const info = { id, byteCount: data.length, sha256: expectedHash };
-    draft.chunks = draft.chunks.filter((item) => item.id !== id);
-    draft.chunks.push(info);
-    save("drafts", draft); // Durable reference first; a missing file blocks commit.
+    references.append(referencePath(draftId), [info]); // Durable reference first; a missing file blocks commit.
     fault("after-chunk-reference");
     atomic(file, Buffer.concat([Buffer.from(expectedHash, "hex"), data]));
     fault("after-chunk-file");
@@ -233,13 +253,21 @@ export function createBackupSnapshotStore({ directory, fault = () => {} }) {
     const snapshotIDs = new Set([...snapshots, ...drafts].map((item) => item.id));
     for (const folder of ["chunks", "snapshots", "drafts"]) {
       for (const name of readdirSync(join(directory, folder))) {
+        const referenceOwner = name.endsWith(".refs-head") ? name.slice(0, -10)
+          : name.endsWith(".refs") ? name.slice(0, -5) : null;
+        const orphanReferences = folder === "drafts" && referenceOwner !== null
+          && !drafts.some(item => item.id === referenceOwner);
         const temporary = /\.[a-f0-9-]{36}\.tmp$/.test(name);
         const orphanManifest = folder === "snapshots" && name.endsWith(".arusnapshot")
           && !snapshotIDs.has(name.slice(0, -12));
-        if (temporary || orphanManifest) unlinkSync(join(directory, folder, name));
+        if (temporary || orphanManifest || orphanReferences) {
+          const file = join(directory, folder, name);
+          unlinkSync(file);
+          if (orphanReferences) references.forget(referencePath(referenceOwner));
+        }
       }
     }
     return removed;
   }
-  return { repository: () => ({ ...repository }), begin, retainChunk, putChunk, commit, inventory, manifest, getChunk, remove, cancel, collect };
+  return { repository: () => ({ ...repository }), begin, retainChunk, retainChunks, putChunk, commit, inventory, manifest, getChunk, remove, cancel, collect };
 }

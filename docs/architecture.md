@@ -222,3 +222,10 @@ writes; cover shared-reference deletion, damaged indexes, yielding commit cancel
 deleted-root retries and exact replay. The local HTTP fixture proves first/incremental
 transfer and lost receipts against native restore. Source tests are not evidence of
 installed Host upgrade, Windows filesystem durability or real-phone background survival.
+
+`backup-snapshot-references.mjs` owns draft-only append journals and atomic durable
+length checkpoints. Existing immutable chunk admission is batched, avoiding full
+content reads until commit. `backup-snapshot-store.mjs` remains the only authority
+for publishing complete snapshots and collecting unreferenced ciphertext. Repository
+metadata advertises batch admission and snapshot v2; Host never interprets plaintext
+record boundaries or obtains the client's backup password.

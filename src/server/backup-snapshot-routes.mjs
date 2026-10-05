@@ -38,9 +38,12 @@ export function createBackupSnapshotRoutes({ config, serverId, sendJSON, HttpErr
     try {
       if (!parts.length && req.method === "GET") sendJSON(res, 200, inventory());
       else if (parts.length === 1 && parts[0] === "repository" && req.method === "GET") {
-        sendJSON(res, 200, { ...store().repository(), serverId });
+        sendJSON(res, 200, { ...store().repository(), serverId, batchRetain: true, snapshotVersion: 2 });
       } else if (parts.length === 1 && parts[0] === "drafts" && req.method === "POST") {
         sendJSON(res, 200, { id: store().begin(device.deviceId).id });
+      } else if (parts.length === 2 && parts[1] === "retain" && req.method === "POST") {
+        const ids = JSON.parse((await body(req, 1024 * 1024)).toString("utf8")).chunks;
+        sendJSON(res, 200, { retained: store().retainChunks(parts[0], device.deviceId, ids).map(item => item.id) });
       } else if (parts.length === 3 && parts[1] === "chunks" && req.method === "POST") {
         const value = store().retainChunk(parts[0], device.deviceId, parts[2]);
         sendJSON(res, value ? 200 : 404, value ?? { missing: true });
@@ -57,7 +60,7 @@ export function createBackupSnapshotRoutes({ config, serverId, sendJSON, HttpErr
         const metadata = JSON.parse(Buffer.from(String(req.headers["x-aru-snapshot-metadata"] ?? ""), "base64").toString("utf8"));
         if (metadata.schema !== "aru.selfhost.backup-package-metadata.v1" || metadata.packageId !== parts[0]
             || metadata.serverId !== serverId || metadata.envelopeFormat !== "aru-native-backup-snapshot"
-            || metadata.envelopeVersion !== 1 || metadata.packageSHA256Hex !== hash(bytes)
+            || ![1, 2].includes(metadata.envelopeVersion) || metadata.packageSHA256Hex !== hash(bytes)
             || metadata.packageByteCount !== bytes.length || metadata.restorePolicy !== "manual-staging-only"
             || metadata.encryptionMode !== "full-package-client-password") throw new Error("backup.snapshot.metadata_invalid");
         const record = await store().commit(parts[0], device.deviceId, bytes, metadata,
