@@ -6,6 +6,11 @@ struct BackupPackageMetadata: Decodable, Equatable, Sendable {
     let packageByteCount: Int64
     let objectCounts: [String: Int]
     let binaryCount: Int
+    let envelopeFormat: String?
+    let plaintextByteCount: Int64?
+
+    var isIncremental: Bool { envelopeFormat == "aru-native-backup-snapshot" }
+    var contentByteCount: Int64 { plaintextByteCount ?? packageByteCount }
 }
 
 struct BackupPackage: Decodable, Equatable, Identifiable, Sendable {

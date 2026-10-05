@@ -8,6 +8,7 @@ export function createBackupSettings({
   sendJSON,
   HttpError,
   deletePackage,
+  packageInventory = () => state.packages,
   log,
   now = Date.now,
 }) {
@@ -125,13 +126,17 @@ export function createBackupSettings({
     return value;
   }
 
-  function applyRetention(actor = "retention-policy") {
+  function applyRetention(actor = "retention-policy", verifiedPackageId = null) {
     const settings = state.backupSettings;
     let deletedCount = 0;
     if (settings.retentionMode === "keep-latest") {
-      const overflow = [...state.packages]
-        .sort((left, right) => right.uploadedAt - left.uploadedAt
-          || left.remotePackageId.localeCompare(right.remotePackageId))
+      const overflow = [...packageInventory()]
+        .sort((left, right) => {
+          if (left.remotePackageId === verifiedPackageId) return -1;
+          if (right.remotePackageId === verifiedPackageId) return 1;
+          return right.uploadedAt - left.uploadedAt
+            || left.remotePackageId.localeCompare(right.remotePackageId);
+        })
         .slice(settings.keepLatestCount);
       for (const entry of overflow) {
         deletePackage(entry.remotePackageId, actor);

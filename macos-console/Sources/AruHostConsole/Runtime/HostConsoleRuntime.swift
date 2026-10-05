@@ -424,7 +424,7 @@ final class HostConsoleRuntime {
             method: "PUT",
             body: body,
             authenticated: true)
-        let inventory: BackupInventory = try await request("/aru/v1/backups", authenticated: true)
+        let inventory: BackupInventory = try await request("/aru/v1/backups?includeSnapshots=1", authenticated: true)
         backups = inventory.packages.sorted { $0.uploadedAt > $1.uploadedAt }
         sectionErrors[.backups] = nil
         lastUpdated = Date()
@@ -724,7 +724,7 @@ final class HostConsoleRuntime {
             assignIfChanged(nextSettings, to: \HostConsoleRuntime.nodeSettings)
             assignIfChanged(nextDevices, to: \HostConsoleRuntime.pairedDevices)
         case .backups:
-            async let inventoryRequest: BackupInventory = request("/aru/v1/backups", authenticated: true)
+            async let inventoryRequest: BackupInventory = request("/aru/v1/backups?includeSnapshots=1", authenticated: true)
             async let settingsRequest: HostBackupSettings = request(
                 "/aru/v1/backups/settings",
                 authenticated: true)

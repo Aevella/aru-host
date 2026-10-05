@@ -737,3 +737,12 @@ private final class ConnectionCheckURLProtocol: URLProtocol, @unchecked Sendable
     }
     override func stopLoading() { }
 }
+
+@Test func decodesIncrementalSnapshotContentSeparatelyFromRootBytes() throws {
+    let metadata = try JSONDecoder().decode(BackupPackageMetadata.self, from: Data(#"""
+    {"sourceName":"Aru","createdAt":1,"packageByteCount":42,"objectCounts":{"messages":2},"binaryCount":1,"envelopeFormat":"aru-native-backup-snapshot","plaintextByteCount":5242977}
+    """#.utf8))
+    #expect(metadata.isIncremental)
+    #expect(metadata.contentByteCount == 5_242_977)
+    #expect(metadata.packageByteCount == 42)
+}

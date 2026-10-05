@@ -529,3 +529,9 @@
 "container.execution.failed" = "容器配置已保留，但运行检查未通过。请检查镜像与工作目录权限后重新验证。";
 
 "node.connections.primary" = "当前连接地址";
+
+"backup.content" = "备份内容";
+
+"backup.content.detail" = "包含历史版本，不代表实际磁盘占用";
+
+"backup.incremental" = "增量快照";

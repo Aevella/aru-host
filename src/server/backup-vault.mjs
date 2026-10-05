@@ -2,7 +2,7 @@ import { randomUUID, createHash } from "node:crypto";
 import { createWriteStream, createReadStream, existsSync, renameSync, unlinkSync, statSync, openSync, closeSync, readSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { once } from "node:events";
-export function createBackupVault({ config, state, saveState, sendJSON, HttpError, log, applyRetention, ENCRYPTED_PACKAGE_CONTENT_TYPE, ENCRYPTED_PACKAGE_MAGIC, ENCRYPTED_PACKAGE_VERSION, ENVELOPE_FORMAT, MAX_ENCRYPTED_PACKAGE_CHUNK_BYTES, MAX_ENCRYPTED_PACKAGE_HEADER_BYTES, VAULT_METADATA_SCHEMA }) {
+export function createBackupVault({ config, state, displayName = () => config.displayName, saveState, sendJSON, HttpError, log, applyRetention, ENCRYPTED_PACKAGE_CONTENT_TYPE, ENCRYPTED_PACKAGE_MAGIC, ENCRYPTED_PACKAGE_VERSION, ENVELOPE_FORMAT, MAX_ENCRYPTED_PACKAGE_CHUNK_BYTES, MAX_ENCRYPTED_PACKAGE_HEADER_BYTES, VAULT_METADATA_SCHEMA }) {
 async function handleUpload(req, res, device) {
   const temporaryFile = join(resolve(config.dataDir, "packages"), `.upload-${randomUUID()}.tmp`);
   const received = await streamRequestToFile(req, temporaryFile, config.maxPackageBytes);
@@ -25,7 +25,7 @@ async function handleUpload(req, res, device) {
       packageId: clientPackageId,
       nodeId: String(req.headers["x-aru-node-id"] ?? "").trim(),
       serverId: state.serverId,
-      displayName: nodeControl.displayName(),
+      displayName: displayName(),
       restorePolicy: "manual-staging-only",
       encryptionMode: "full-package-client-password",
       envelopeFormat: envelope.format,
@@ -55,7 +55,7 @@ async function handleUpload(req, res, device) {
     state.packages = state.packages.filter((p) => p.remotePackageId !== remotePackageId);
     state.packages.push({ remotePackageId, uploadedAt, deviceId: device.deviceId, metadata });
     saveState();
-    applyRetention(`upload:${device.deviceId}`);
+    applyRetention(`upload:${device.deviceId}`, remotePackageId);
     log(`stored package ${remotePackageId} (${received.byteCount} bytes) from ${device.deviceId}`);
 
     sendJSON(res, 200, { remotePackageId, uploadedAt });

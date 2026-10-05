@@ -3,6 +3,7 @@ import { resolveHostAddress } from "./network-address.mjs";
 import { createMCPGateway } from "./mcp-gateway.mjs";
 import { createWorkspaceJobs } from "./workspace-jobs.mjs";
 import { createArtifactVault } from "./artifact-vault.mjs";
+import { createBackupSnapshotRoutes } from "./backup-snapshot-routes.mjs";
 import { createBackupVault } from "./backup-vault.mjs";
 import { createMCPCatalog } from "./mcp-catalog.mjs";
 import { createHostStateStore } from "./state-store.mjs";
@@ -239,17 +240,26 @@ const wakeBridge = createWakeBridge({
   log,
 });
 const { handleUpload, inventory, handleDownload, handleDelete, deleteBackupPackage } = createBackupVault({
-  config, state: { get packages() { return state.packages; }, set packages(value) { state.packages = value; } }, saveState, sendJSON, HttpError, log,
-  applyRetention: actor => backupSettings.applyRetention(actor),
+  config, displayName: () => nodeControl.displayName(), state: { get serverId() { return state.serverId; }, get packages() { return state.packages; }, set packages(value) { state.packages = value; } }, saveState, sendJSON, HttpError, log,
+  applyRetention: (actor, verifiedPackageId) => backupSettings.applyRetention(actor, verifiedPackageId),
   ENCRYPTED_PACKAGE_CONTENT_TYPE, ENCRYPTED_PACKAGE_MAGIC, ENCRYPTED_PACKAGE_VERSION, ENVELOPE_FORMAT, MAX_ENCRYPTED_PACKAGE_CHUNK_BYTES, MAX_ENCRYPTED_PACKAGE_HEADER_BYTES, VAULT_METADATA_SCHEMA
 });
+const backupSnapshots = createBackupSnapshotRoutes({
+  config, serverId: state.serverId, sendJSON, HttpError,
+  applyRetention: (actor, verifiedPackageId) => backupSettings.applyRetention(actor, verifiedPackageId),
+});
+const backupInventory = () => [...state.packages, ...backupSnapshots.inventory().packages];
+const removeBackup = (id, actor) => id.startsWith("r_")
+  ? deleteBackupPackage(id, actor) : backupSnapshots.remove(id);
 const backupSettings = createBackupSettings({
   state,
   saveState,
   readJSONBody,
   sendJSON,
   HttpError,
-  deletePackage: (remotePackageId, actor) => deleteBackupPackage(remotePackageId, actor, false),
+  packageInventory: backupInventory,
+  deletePackage: (remotePackageId, actor) => remotePackageId.startsWith("r_")
+    ? deleteBackupPackage(remotePackageId, actor, false) : backupSnapshots.remove(remotePackageId),
   log,
 });
 const conversationTurnRelay = createConversationTurnRelay({
@@ -301,6 +311,8 @@ const { handleMCP, executeMCPTool } = createMCPGateway({
   state,
   nodeControl,
   backupSettings,
+  backupInventory,
+  deleteBackupPackage: removeBackup,
   HttpError,
   readJSONBody,
   sendJSON,
@@ -430,9 +442,11 @@ async function route(req, res) {
   }
   if (path === "/aru/v1/backups" && req.method === "GET") {
     requireDevice(req);
-    return sendJSON(res, 200, inventory());
+    return sendJSON(res, 200, url.searchParams.get("includeSnapshots") === "1"
+      ? { ...inventory(), packages: backupInventory() } : inventory());
   }
   if (await backupSettings.route(req, res, path, () => requireDevice(req))) return;
+  if (await backupSnapshots.route(req, res, path, requireDevice)) return;
   if (await conversationTurnRelay.route(req, res, path, requireDevice)) return;
   if (await remotePush.route(req, res, path, () => requireDevice(req))) return;
   if (await wakeBridge.route(req, res, path)) return;
@@ -472,7 +486,8 @@ async function route(req, res) {
     return handleDownload(req, res, decodeURIComponent(path.split("/").pop()));
   }
   if (req.method === "DELETE" && path.startsWith("/aru/v1/backups/")) {
-    return handleDelete(req, res, decodeURIComponent(path.split("/").pop()), requireDevice(req));
+    const device = requireDevice(req);
+    return sendJSON(res, 200, removeBackup(decodeURIComponent(path.split("/").pop()), device.deviceId));
   }
   if (req.method === "GET" && path.startsWith("/aru/v1/artifacts/")) {
     requireDevice(req);
@@ -519,7 +534,8 @@ function manifest() {
         endpoint: "/aru/v1/backups",
         encryption: ["full-package-client-password"],
         restore: "manual-staging-only",
-        packageFormats: ["aru-native-encrypted-package-v2"],
+        packageFormats: ["aru-native-encrypted-package-v2", "aru-native-backup-snapshot-v1"],
+        incrementalVersion: 1,
         ...backupSettings.manifestCapability(),
       },
       "sync-ledger": {

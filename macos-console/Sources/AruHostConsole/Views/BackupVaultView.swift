@@ -18,7 +18,7 @@ struct BackupVaultView: View {
 
                 HStack(spacing: 12) {
                     StatTile(label: L10n.encryptedPackages, value: "\(runtime.backups.count)", detail: L10n.clientEncrypted)
-                    StatTile(label: L10n.totalStorage, value: HostFormat.bytes(totalBytes), detail: L10n.remoteCiphertext)
+                    StatTile(label: L10n.backupContent, value: HostFormat.bytes(totalBytes), detail: L10n.backupContentDetail)
                     StatTile(label: L10n.latestBackup, value: latestDate, detail: runtime.backups.first?.metadata.sourceName)
                 }
 
@@ -69,7 +69,7 @@ struct BackupVaultView: View {
     }
 
     private var totalBytes: Int64 {
-        runtime.backups.reduce(0) { $0 + $1.metadata.packageByteCount }
+        runtime.backups.reduce(0) { $0 + $1.metadata.contentByteCount }
     }
 
     private var latestDate: String {
@@ -201,7 +201,7 @@ private struct BackupPackageRow: View {
                         .font(.system(size: 11, design: .rounded))
                         .foregroundStyle(HostPalette.secondaryInk.opacity(0.61))
                     HStack(spacing: 15) {
-                        Label(HostFormat.bytes(package.metadata.packageByteCount), systemImage: "lock.doc")
+                        Label((package.metadata.isIncremental ? L10n.incrementalSnapshot + " · " : "") + HostFormat.bytes(package.metadata.contentByteCount), systemImage: "lock.doc")
                         Label(L10n.objectCount(package.metadata.objectCounts.values.reduce(0, +)), systemImage: "square.stack.3d.up")
                         Label(L10n.attachmentCount(package.metadata.binaryCount), systemImage: "paperclip")
                     }

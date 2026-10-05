@@ -529,3 +529,9 @@
 "container.execution.failed" = "Your container configuration is saved, but execution checks failed. Check images and workspace permissions, then verify again.";
 
 "node.connections.primary" = "Current connection address";
+
+"backup.content" = "Backup content";
+
+"backup.content.detail" = "Includes historical versions; not disk usage";
+
+"backup.incremental" = "Incremental snapshot";

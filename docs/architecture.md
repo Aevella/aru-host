@@ -205,3 +205,20 @@ contract, and `HostConsoleRuntime` checks a public manifest against the connecte
 Host identity without forwarding credentials. There is no interface polling,
 automatic tunnel setup, or implicit route deletion. macOS installation retains
 container configuration independently of runtime readiness.
+
+## Incremental backup recovery points (2026-10-05)
+
+`src/server/backup-snapshot-store.mjs` owns the random repository salt, per-device
+durable draft, immutable encrypted chunks, published manifest references and deletion
+tombstones. `backup-snapshot-routes.mjs` exposes paired-device transfer under
+`/aru/v1/backups/snapshots`; manifest capability `incrementalVersion: 1` admits it.
+Legacy inventory stays unchanged unless a Console requests `includeSnapshots=1`.
+Retention and MCP inventory/deletion combine both owners without duplicating state.
+Root byte size and logical content size are distinct; Console snapshot restoration
+is handed to Aru, which has the password and verifies all dependencies.
+
+Fault tests reopen disk state after reference, chunk, manifest and publication
+writes; cover shared-reference deletion, damaged indexes, yielding commit cancellation,
+deleted-root retries and exact replay. The local HTTP fixture proves first/incremental
+transfer and lost receipts against native restore. Source tests are not evidence of
+installed Host upgrade, Windows filesystem durability or real-phone background survival.

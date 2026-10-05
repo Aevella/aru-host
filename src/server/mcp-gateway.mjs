@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-export function createMCPGateway({ config, state, nodeControl, backupSettings, HttpError, readJSONBody, sendJSON, sendEmpty, officialMCPTools, workspaceJobInventory, workspaceJob, publicWorkspaceJob, cancelWorkspaceJob, retryWorkspaceJob, artifactInventory, deleteArtifact, MCP_PROTOCOL_VERSION, SERVER_VERSION, WORKSPACE_JOB_EVENTS_SCHEMA, getPluginSupervisor, getCollaboratorHost, getNodeWorkspaceHost }) {
+export function createMCPGateway({ config, state, nodeControl, backupSettings, backupInventory, deleteBackupPackage, HttpError, readJSONBody, sendJSON, sendEmpty, officialMCPTools, workspaceJobInventory, workspaceJob, publicWorkspaceJob, cancelWorkspaceJob, retryWorkspaceJob, artifactInventory, deleteArtifact, MCP_PROTOCOL_VERSION, SERVER_VERSION, WORKSPACE_JOB_EVENTS_SCHEMA, getPluginSupervisor, getCollaboratorHost, getNodeWorkspaceHost }) {
 const mcpSessions = new Map();
 async function handleMCP(req, res, device) {
   const body = await readJSONBody(req, config.maxWorkspaceBytes);
@@ -113,7 +113,7 @@ async function executeMCPTool(name, args, device) {
       }, device);
     } else if (name === "aru_backup_inventory") {
       structuredContent = {
-        packages: [...state.packages]
+        packages: [...backupInventory()]
           .sort((left, right) => right.uploadedAt - left.uploadedAt ||
             left.remotePackageId.localeCompare(right.remotePackageId))
           .map((entry) => ({
@@ -123,6 +123,8 @@ async function executeMCPTool(name, args, device) {
           createdAt: entry.metadata?.createdAt ?? 0,
           objectCounts: entry.metadata?.objectCounts ?? {},
           packageByteCount: entry.metadata?.packageByteCount ?? 0,
+          envelopeFormat: entry.metadata?.envelopeFormat ?? "",
+          plaintextByteCount: entry.metadata?.plaintextByteCount ?? null,
         })),
       };
     } else if (name === "aru_backup_settings") {

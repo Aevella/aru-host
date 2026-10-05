@@ -6,18 +6,19 @@ import * as node2 from 'node:crypto';
 import * as node3 from 'node:fs';
 import * as node4 from 'node:child_process';
 import * as node5 from 'node:path';
-import * as node6 from 'node:events';
-import * as node7 from 'node:http';
-import * as node8 from 'node:url';
-import * as node9 from './plugin-supervisor.mjs';
-import * as node10 from './source-plugin-runtime.mjs';
-import * as node11 from './collaborator-host.mjs';
-import * as node12 from './node-workspaces.mjs';
-import * as node13 from './node-control.mjs';
-import * as node14 from './backup-settings.mjs';
-import * as node15 from './conversation-turn-relay.mjs';
-import * as node16 from './apns-push.mjs';
-import * as node17 from './wake-bridge.mjs';
+import * as node6 from 'node:timers/promises';
+import * as node7 from 'node:events';
+import * as node8 from 'node:http';
+import * as node9 from 'node:url';
+import * as node10 from './plugin-supervisor.mjs';
+import * as node11 from './source-plugin-runtime.mjs';
+import * as node12 from './collaborator-host.mjs';
+import * as node13 from './node-workspaces.mjs';
+import * as node14 from './node-control.mjs';
+import * as node15 from './backup-settings.mjs';
+import * as node16 from './conversation-turn-relay.mjs';
+import * as node17 from './apns-push.mjs';
+import * as node18 from './wake-bridge.mjs';
 
 // src/server/container-readiness.mjs
 const module1 = (() => {
@@ -77,7 +78,7 @@ return { resolveHostAddress };
 // src/server/mcp-gateway.mjs
 const module3 = (() => {
 const { randomUUID } = node2;
-function createMCPGateway({ config, state, nodeControl, backupSettings, HttpError, readJSONBody, sendJSON, sendEmpty, officialMCPTools, workspaceJobInventory, workspaceJob, publicWorkspaceJob, cancelWorkspaceJob, retryWorkspaceJob, artifactInventory, deleteArtifact, MCP_PROTOCOL_VERSION, SERVER_VERSION, WORKSPACE_JOB_EVENTS_SCHEMA, getPluginSupervisor, getCollaboratorHost, getNodeWorkspaceHost }) {
+function createMCPGateway({ config, state, nodeControl, backupSettings, backupInventory, deleteBackupPackage, HttpError, readJSONBody, sendJSON, sendEmpty, officialMCPTools, workspaceJobInventory, workspaceJob, publicWorkspaceJob, cancelWorkspaceJob, retryWorkspaceJob, artifactInventory, deleteArtifact, MCP_PROTOCOL_VERSION, SERVER_VERSION, WORKSPACE_JOB_EVENTS_SCHEMA, getPluginSupervisor, getCollaboratorHost, getNodeWorkspaceHost }) {
 const mcpSessions = new Map();
 async function handleMCP(req, res, device) {
   const body = await readJSONBody(req, config.maxWorkspaceBytes);
@@ -191,7 +192,7 @@ async function executeMCPTool(name, args, device) {
       }, device);
     } else if (name === "aru_backup_inventory") {
       structuredContent = {
-        packages: [...state.packages]
+        packages: [...backupInventory()]
           .sort((left, right) => right.uploadedAt - left.uploadedAt ||
             left.remotePackageId.localeCompare(right.remotePackageId))
           .map((entry) => ({
@@ -201,6 +202,8 @@ async function executeMCPTool(name, args, device) {
           createdAt: entry.metadata?.createdAt ?? 0,
           objectCounts: entry.metadata?.objectCounts ?? {},
           packageByteCount: entry.metadata?.packageByteCount ?? 0,
+          envelopeFormat: entry.metadata?.envelopeFormat ?? "",
+          plaintextByteCount: entry.metadata?.plaintextByteCount ?? null,
         })),
       };
     } else if (name === "aru_backup_settings") {
@@ -1145,13 +1148,351 @@ return { persistWorkspaceArtifacts, persistDirectArtifact, artifactInventory, ha
 return { createArtifactVault };
 })();
 
-// src/server/backup-vault.mjs
+// src/server/backup-snapshot-store.mjs
+const module7 = (() => {
+const { randomBytes, randomUUID, createHash } = node2;
+const { mkdirSync, readFileSync, writeFileSync, openSync, closeSync, fsyncSync, renameSync, unlinkSync, readdirSync, lstatSync } = node3;
+const { join } = node5;
+const { setImmediate : yieldEventLoop } = node6;
+
+const digest = (value) => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
+const identity = (value) => typeof value === "string" && /^[a-zA-Z0-9_-]{1,128}$/.test(value);
+const hash = (data) => createHash("sha256").update(data).digest("hex");
+const fail = (code) => { throw new Error(`backup.snapshot.${code}`); };
+const maxChunkBytes = 4 * 1024 * 1024 + 28;
+
+/** Opaque encrypted snapshot storage. Reference admission, publication and
+ * collection are synchronous. Full verification yields between bounded chunks,
+ * then re-admits the draft before publishing, so backup cannot monopolize Host. */
+function createBackupSnapshotStore({ directory, fault = () => {} }) {
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  for (const name of ["chunks", "snapshots", "drafts", "deleted"]) mkdirSync(join(directory, name), { recursive: true, mode: 0o700 });
+  const repositoryPath = join(directory, "repository.json");
+  let repository;
+  try { repository = JSON.parse(readFileSync(repositoryPath, "utf8")); }
+  catch (error) {
+    if (error.code !== "ENOENT") throw error;
+    if (exists(repositoryPath)) fail("repository_unreadable");
+    if (["chunks", "snapshots", "drafts", "deleted"].some((folder) => readdirSync(join(directory, folder)).length > 0)) fail("repository_missing");
+    repository = { format: "aru.backup.repository.v1", saltHex: randomBytes(16).toString("hex") };
+    atomic(repositoryPath, Buffer.from(JSON.stringify(repository)));
+  }
+  if (repository.format !== "aru.backup.repository.v1" || !/^[a-f0-9]{32}$/.test(repository.saltHex)) fail("repository_invalid");
+
+  function atomic(path, data) {
+    const temporary = `${path}.${randomUUID()}.tmp`;
+    const fd = openSync(temporary, "wx", 0o600);
+    try { writeFileSync(fd, data); fsyncSync(fd); }
+    finally { closeSync(fd); }
+    try { renameSync(temporary, path); syncDirectory(path.slice(0, path.lastIndexOf("/"))); }
+    finally { if (exists(temporary)) unlinkSync(temporary); }
+  }
+  function syncDirectory(path) {
+    if (process.platform === "win32") return;
+    const fd = openSync(path, "r");
+    try { fsyncSync(fd); } finally { closeSync(fd); }
+  }
+  function exists(path) {
+    try { lstatSync(path); return true; }
+    catch (error) { if (error.code === "ENOENT") return false; throw error; }
+  }
+  function path(folder, id) {
+    if (!identity(id)) fail("identity_invalid");
+    return join(directory, folder, `${id}.json`);
+  }
+  function chunkPath(id) {
+    if (!digest(id)) fail("chunk_identity_invalid");
+    return join(directory, "chunks", id);
+  }
+  function readRecord(folder, id) {
+    const record = JSON.parse(readFileSync(path(folder, id), "utf8"));
+    validateRecord(record, folder === "snapshots");
+    if (record.id !== id) fail("record_identity_mismatch");
+    return record;
+  }
+  function validateRecord(record, published) {
+    if (!record || record.format !== "aru.backup.snapshot-record.v1" || !identity(record.id)
+        || typeof record.deviceId !== "string" || !record.deviceId || !Array.isArray(record.chunks)
+        || !record.chunks.every((item) => digest(item.id) && digest(item.sha256)
+          && Number.isSafeInteger(item.byteCount) && item.byteCount > 28 && item.byteCount <= maxChunkBytes)
+        || new Set(record.chunks.map((item) => item.id)).size !== record.chunks.length) fail("record_invalid");
+    if (published && (!digest(record.manifestSHA256) || !Number.isSafeInteger(record.manifestByteCount)
+        || record.manifestByteCount <= 52 || !Number.isSafeInteger(record.publishedAt))) fail("record_invalid");
+  }
+  function records(folder) {
+    return readdirSync(join(directory, folder)).filter((name) => name.endsWith(".json"))
+      .map((name) => {
+        const record = readRecord(folder, name.slice(0, -5));
+        if (folder === "snapshots") {
+          const envelope = JSON.parse(manifest(record.id).toString("utf8"));
+          if (!Array.isArray(envelope.chunks) || !envelope.chunks.every(digest)
+              || [...new Set(envelope.chunks)].sort().join(",") !== record.chunks.map((item) => item.id).sort().join(",")) fail("references_corrupt");
+        }
+        return record;
+      });
+  }
+  function save(folder, record) {
+    validateRecord(record, folder === "snapshots");
+    atomic(path(folder, record.id), Buffer.from(JSON.stringify(record)));
+  }
+  function ownDraft(id, deviceId) {
+    const draft = readRecord("drafts", id);
+    if (draft.deviceId !== deviceId) fail("wrong_device");
+    return draft;
+  }
+  function begin(deviceId) {
+    if (typeof deviceId !== "string" || !deviceId) fail("wrong_device");
+    for (const draft of records("drafts")) {
+      if (exists(path("deleted", draft.id))) {
+        unlinkSync(path("drafts", draft.id));
+      } else if (exists(path("snapshots", draft.id))) {
+        manifest(draft.id);
+        unlinkSync(path("drafts", draft.id));
+      }
+    }
+    collect();
+    const current = records("drafts").find((item) => item.deviceId === deviceId);
+    if (current) return current;
+    const draft = { format: "aru.backup.snapshot-record.v1", id: randomUUID(), deviceId, createdAt: Date.now(), chunks: [] };
+    save("drafts", draft);
+    return draft;
+  }
+  function chunkInfo(id) {
+    const file = chunkPath(id);
+    try {
+      const stat = lstatSync(file);
+      if (!stat.isFile() || stat.size <= 60 || stat.size > maxChunkBytes + 32) fail("chunk_invalid");
+      const stored = readFileSync(file);
+      const data = stored.subarray(32);
+      const expected = stored.subarray(0, 32).toString("hex");
+      if (hash(data) !== expected) fail("chunk_corrupt");
+      return { id, byteCount: data.length, sha256: expected };
+    } catch (error) { if (error.code === "ENOENT") return null; throw error; }
+  }
+  function retainChunk(draftId, deviceId, id) {
+    const draft = ownDraft(draftId, deviceId);
+    const info = chunkInfo(id);
+    if (!info) return null;
+    const old = draft.chunks.find((item) => item.id === id);
+    if (old && (old.sha256 !== info.sha256 || old.byteCount !== info.byteCount)) fail("chunk_changed");
+    if (!old) { draft.chunks.push(info); save("drafts", draft); }
+    return info;
+  }
+  function putChunk(draftId, deviceId, id, data, expectedHash) {
+    const draft = ownDraft(draftId, deviceId);
+    if (!Buffer.isBuffer(data) || data.length <= 28 || data.length > maxChunkBytes || hash(data) !== expectedHash) fail("chunk_invalid");
+    const file = chunkPath(id);
+    const existing = chunkInfo(id);
+    if (existing) return retainChunk(draftId, deviceId, id);
+    const info = { id, byteCount: data.length, sha256: expectedHash };
+    draft.chunks = draft.chunks.filter((item) => item.id !== id);
+    draft.chunks.push(info);
+    save("drafts", draft); // Durable reference first; a missing file blocks commit.
+    fault("after-chunk-reference");
+    atomic(file, Buffer.concat([Buffer.from(expectedHash, "hex"), data]));
+    fault("after-chunk-file");
+    return info;
+  }
+  async function commit(draftId, deviceId, body, metadata, didPublish = () => {}) {
+    const manifestSHA256 = hash(body);
+    const envelope = JSON.parse(body.toString("utf8"));
+    const encryptedManifest = Buffer.from(envelope.manifest ?? "", "base64");
+    const chunkIDs = envelope.chunks;
+    if (exists(path("deleted", draftId))) fail("deleted");
+    const publishedPath = path("snapshots", draftId);
+    if (exists(publishedPath)) {
+      const published = readRecord("snapshots", draftId);
+      if (published.deviceId !== deviceId || published.manifestSHA256 !== manifestSHA256) fail("commit_conflict");
+      if (exists(path("drafts", draftId))) unlinkSync(path("drafts", draftId));
+      return published;
+    }
+    const draft = ownDraft(draftId, deviceId);
+    if (!Buffer.isBuffer(encryptedManifest) || encryptedManifest.length <= 52
+        || encryptedManifest.subarray(0, 8).toString() !== "ARUSNAP1"
+        || encryptedManifest.subarray(8, 24).toString("hex") !== repository.saltHex
+        || !Array.isArray(chunkIDs) || !chunkIDs.every(digest)) fail("manifest_invalid");
+    const references = new Map(draft.chunks.map((item) => [item.id, item]));
+    const chunks = [];
+    for (const id of new Set(chunkIDs)) {
+      const expected = references.get(id);
+      const actual = chunkInfo(id);
+      if (!expected || !actual || actual.sha256 !== expected.sha256 || actual.byteCount !== expected.byteCount) fail("chunk_unavailable");
+      chunks.push(expected);
+      await yieldEventLoop();
+    }
+    // Draft references protect blocks while verification yields to other Host
+    // work. Cancellation/deletion and a competing commit are re-admitted here.
+    if (exists(path("deleted", draftId))) fail("deleted");
+    if (exists(publishedPath)) {
+      const published = readRecord("snapshots", draftId);
+      if (published.deviceId !== deviceId || published.manifestSHA256 !== manifestSHA256) fail("commit_conflict");
+      return published;
+    }
+    ownDraft(draftId, deviceId);
+    const record = { ...draft, chunks, manifestSHA256, manifestByteCount: body.length,
+      publishedAt: Date.now(), metadata };
+    atomic(join(directory, "snapshots", `${draftId}.arusnapshot`), body);
+    fault("after-manifest-file");
+    save("snapshots", record); // Publication point; inventory only reads these records.
+    fault("after-publication");
+    unlinkSync(path("drafts", draftId));
+    didPublish(record);
+    return record;
+  }
+  function inventory() { return records("snapshots"); }
+  function manifest(id) {
+    const record = readRecord("snapshots", id);
+    const data = readFileSync(join(directory, "snapshots", `${id}.arusnapshot`));
+    if (hash(data) !== record.manifestSHA256 || data.length !== record.manifestByteCount) fail("manifest_corrupt");
+    return data;
+  }
+  function getChunk(snapshotId, id) {
+    const record = readRecord("snapshots", snapshotId);
+    const expected = record.chunks.find((item) => item.id === id);
+    if (!expected) fail("unreferenced_chunk");
+    const data = readFileSync(chunkPath(id)).subarray(32);
+    if (data.length !== expected.byteCount || hash(data) !== expected.sha256) fail("chunk_corrupt");
+    return data;
+  }
+  function remove(id) {
+    atomic(path("deleted", id), Buffer.from(JSON.stringify({ id, deletedAt: Date.now() })));
+    const file = path("snapshots", id);
+    if (exists(file)) {
+      readRecord("snapshots", id); // Corruption is not permission to erase.
+      unlinkSync(file);
+      syncDirectory(join(directory, "snapshots"));
+    }
+    const manifestFile = join(directory, "snapshots", `${id}.arusnapshot`);
+    if (exists(manifestFile)) unlinkSync(manifestFile);
+    collect();
+  }
+  function cancel(id, deviceId) {
+    ownDraft(id, deviceId);
+    unlinkSync(path("drafts", id));
+    syncDirectory(join(directory, "drafts"));
+    collect();
+  }
+  function collect() {
+    // Read and validate every owner before deleting anything. An unreadable index
+    // cannot be interpreted as an empty set of references.
+    const snapshots = records("snapshots");
+    const drafts = records("drafts");
+    const live = new Set([...snapshots, ...drafts].flatMap((item) => item.chunks.map((chunk) => chunk.id)));
+    let removed = 0;
+    for (const name of readdirSync(join(directory, "chunks"))) {
+      if (digest(name) && !live.has(name)) { unlinkSync(chunkPath(name)); removed += 1; }
+    }
+    const snapshotIDs = new Set([...snapshots, ...drafts].map((item) => item.id));
+    for (const folder of ["chunks", "snapshots", "drafts"]) {
+      for (const name of readdirSync(join(directory, folder))) {
+        const temporary = /\.[a-f0-9-]{36}\.tmp$/.test(name);
+        const orphanManifest = folder === "snapshots" && name.endsWith(".arusnapshot")
+          && !snapshotIDs.has(name.slice(0, -12));
+        if (temporary || orphanManifest) unlinkSync(join(directory, folder, name));
+      }
+    }
+    return removed;
+  }
+  return { repository: () => ({ ...repository }), begin, retainChunk, putChunk, commit, inventory, manifest, getChunk, remove, cancel, collect };
+}
+return { createBackupSnapshotStore };
+})();
+
+// src/server/backup-snapshot-routes.mjs
 const module6 = (() => {
+const { createHash } = node2;
+const { createBackupSnapshotStore } = module7;
+const { join } = node5;
+
+function createBackupSnapshotRoutes({ config, serverId, sendJSON, HttpError, applyRetention }) {
+  let snapshotStore;
+  const store = () => snapshotStore ??= createBackupSnapshotStore({ directory: join(config.dataDir, "backup-snapshots") });
+  const base = "/aru/v1/backups/snapshots";
+  const idPattern = /^[a-zA-Z0-9_-]{1,128}$/;
+  const hash = (data) => createHash("sha256").update(data).digest("hex");
+  async function body(req, maximum) {
+    const parts = [];
+    let length = 0;
+    for await (const part of req) {
+      length += part.length;
+      if (length > maximum) throw new HttpError(413, "snapshot.body_too_large", "snapshot request exceeds format budget");
+      parts.push(part);
+    }
+    return Buffer.concat(parts, length);
+  }
+  function publicRecord(record) {
+    return { remotePackageId: record.id, uploadedAt: record.publishedAt, metadata: record.metadata };
+  }
+  function remove(id) {
+    store().remove(id);
+    return { remotePackageId: id, deleted: true, deletedAt: Date.now() };
+  }
+  function inventory() { return { packages: store().inventory().map(publicRecord) }; }
+  function sendBytes(res, bytes) {
+    res.writeHead(200, { "content-type": "application/octet-stream", "content-length": bytes.length });
+    res.end(bytes);
+  }
+  async function route(req, res, path, requireDevice) {
+    if (path !== base && !path.startsWith(`${base}/`)) return false;
+    const device = requireDevice(req);
+    const parts = path.slice(base.length).split("/").filter(Boolean);
+    if (parts.some((item) => !idPattern.test(item))) throw new HttpError(400, "snapshot.path_invalid", "invalid snapshot path");
+    try {
+      if (!parts.length && req.method === "GET") sendJSON(res, 200, inventory());
+      else if (parts.length === 1 && parts[0] === "repository" && req.method === "GET") {
+        sendJSON(res, 200, { ...store().repository(), serverId });
+      } else if (parts.length === 1 && parts[0] === "drafts" && req.method === "POST") {
+        sendJSON(res, 200, { id: store().begin(device.deviceId).id });
+      } else if (parts.length === 3 && parts[1] === "chunks" && req.method === "POST") {
+        const value = store().retainChunk(parts[0], device.deviceId, parts[2]);
+        sendJSON(res, value ? 200 : 404, value ?? { missing: true });
+      } else if (parts.length === 3 && parts[1] === "chunks" && req.method === "PUT") {
+        const bytes = await body(req, 4 * 1024 * 1024 + 28);
+        const value = store().putChunk(parts[0], device.deviceId, parts[2], bytes,
+          String(req.headers["x-aru-vault-package-sha256"] ?? ""));
+        sendJSON(res, 200, value);
+      } else if (parts.length === 3 && parts[1] === "chunks" && req.method === "GET") {
+        sendBytes(res, store().getChunk(parts[0], parts[2]));
+      } else if (parts.length === 1 && req.method === "POST") {
+        const bytes = await body(req, 256 * 1024 * 1024);
+        if (hash(bytes) !== req.headers["x-aru-vault-package-sha256"]) throw new Error("backup.snapshot.body_hash");
+        const metadata = JSON.parse(Buffer.from(String(req.headers["x-aru-snapshot-metadata"] ?? ""), "base64").toString("utf8"));
+        if (metadata.schema !== "aru.selfhost.backup-package-metadata.v1" || metadata.packageId !== parts[0]
+            || metadata.serverId !== serverId || metadata.envelopeFormat !== "aru-native-backup-snapshot"
+            || metadata.envelopeVersion !== 1 || metadata.packageSHA256Hex !== hash(bytes)
+            || metadata.packageByteCount !== bytes.length || metadata.restorePolicy !== "manual-staging-only"
+            || metadata.encryptionMode !== "full-package-client-password") throw new Error("backup.snapshot.metadata_invalid");
+        const record = await store().commit(parts[0], device.deviceId, bytes, metadata,
+          (published) => applyRetention(`snapshot:${device.deviceId}`, published.id));
+        store().collect();
+        sendJSON(res, 200, { remotePackageId: record.id, uploadedAt: record.publishedAt });
+      } else if (parts.length === 1 && req.method === "GET") sendBytes(res, store().manifest(parts[0]));
+      else if (parts.length === 1 && req.method === "DELETE") {
+        sendJSON(res, 200, remove(parts[0]));
+      } else if (parts.length === 2 && parts[0] === "drafts" && req.method === "DELETE") {
+        store().cancel(parts[1], device.deviceId);
+        sendJSON(res, 200, { cancelled: true });
+      } else throw new HttpError(404, "snapshot.route_unknown", "unknown snapshot route");
+    } catch (error) {
+      if (error instanceof HttpError) throw error;
+      if (error.message === "backup.snapshot.deleted") throw new HttpError(410, "snapshot.deleted", "snapshot was explicitly deleted");
+      if (error.code === "ENOENT") throw new HttpError(404, "snapshot.missing", "snapshot or chunk is unavailable");
+      throw new HttpError(409, "snapshot.unavailable", "snapshot could not be validated or committed");
+    }
+    return true;
+  }
+  return { route, inventory, remove };
+}
+return { createBackupSnapshotRoutes };
+})();
+
+// src/server/backup-vault.mjs
+const module8 = (() => {
 const { randomUUID, createHash } = node2;
 const { createWriteStream, createReadStream, existsSync, renameSync, unlinkSync, statSync, openSync, closeSync, readSync } = node3;
 const { join, resolve, sep } = node5;
-const { once } = node6;
-function createBackupVault({ config, state, saveState, sendJSON, HttpError, log, applyRetention, ENCRYPTED_PACKAGE_CONTENT_TYPE, ENCRYPTED_PACKAGE_MAGIC, ENCRYPTED_PACKAGE_VERSION, ENVELOPE_FORMAT, MAX_ENCRYPTED_PACKAGE_CHUNK_BYTES, MAX_ENCRYPTED_PACKAGE_HEADER_BYTES, VAULT_METADATA_SCHEMA }) {
+const { once } = node7;
+function createBackupVault({ config, state, displayName = () => config.displayName, saveState, sendJSON, HttpError, log, applyRetention, ENCRYPTED_PACKAGE_CONTENT_TYPE, ENCRYPTED_PACKAGE_MAGIC, ENCRYPTED_PACKAGE_VERSION, ENVELOPE_FORMAT, MAX_ENCRYPTED_PACKAGE_CHUNK_BYTES, MAX_ENCRYPTED_PACKAGE_HEADER_BYTES, VAULT_METADATA_SCHEMA }) {
 async function handleUpload(req, res, device) {
   const temporaryFile = join(resolve(config.dataDir, "packages"), `.upload-${randomUUID()}.tmp`);
   const received = await streamRequestToFile(req, temporaryFile, config.maxPackageBytes);
@@ -1174,7 +1515,7 @@ async function handleUpload(req, res, device) {
       packageId: clientPackageId,
       nodeId: String(req.headers["x-aru-node-id"] ?? "").trim(),
       serverId: state.serverId,
-      displayName: nodeControl.displayName(),
+      displayName: displayName(),
       restorePolicy: "manual-staging-only",
       encryptionMode: "full-package-client-password",
       envelopeFormat: envelope.format,
@@ -1204,7 +1545,7 @@ async function handleUpload(req, res, device) {
     state.packages = state.packages.filter((p) => p.remotePackageId !== remotePackageId);
     state.packages.push({ remotePackageId, uploadedAt, deviceId: device.deviceId, metadata });
     saveState();
-    applyRetention(`upload:${device.deviceId}`);
+    applyRetention(`upload:${device.deviceId}`, remotePackageId);
     log(`stored package ${remotePackageId} (${received.byteCount} bytes) from ${device.deviceId}`);
 
     sendJSON(res, 200, { remotePackageId, uploadedAt });
@@ -1407,7 +1748,7 @@ return { createBackupVault };
 })();
 
 // src/server/mcp-catalog.mjs
-const module7 = (() => {
+const module9 = (() => {
 function createMCPCatalog({  }) {
 const MCP_TOOLS = [
   {
@@ -1760,7 +2101,7 @@ return { createMCPCatalog };
 })();
 
 // src/server/state-store.mjs
-const module8 = (() => {
+const module10 = (() => {
 const { readFileSync, lstatSync, openSync, writeFileSync, fsyncSync, closeSync, renameSync } = node3;
 const { randomBytes } = node2;
 function createHostStateStore({ statePath, WORKSPACE_JOB_POLICY_SCHEMA, OFFICIAL_DEFAULT_MAXIMUM_RUNTIME_SECONDS }) {
@@ -1877,9 +2218,10 @@ const { resolveHostAddress } = module2;
 const { createMCPGateway } = module3;
 const { createWorkspaceJobs } = module4;
 const { createArtifactVault } = module5;
-const { createBackupVault } = module6;
-const { createMCPCatalog } = module7;
-const { createHostStateStore } = module8;
+const { createBackupSnapshotRoutes } = module6;
+const { createBackupVault } = module8;
+const { createMCPCatalog } = module9;
+const { createHostStateStore } = module10;
 // Aru self-hosted reference stub server.
 //
 // Implements the SELF-HOSTED-VPS-BRANCH.md contracts that native Aru already
@@ -1912,7 +2254,7 @@ const { createHostStateStore } = module8;
 // envelopes); workspace code only runs inside a hardened disposable container;
 // nothing here logs secrets after the initial pairing printout.
 
-const { createServer } = node7;
+const { createServer } = node8;
 const { createHash, randomBytes, randomUUID, timingSafeEqual } = node2;
 const {
   chmodSync,
@@ -1934,23 +2276,23 @@ const {
   unlinkSync,
   writeFileSync,
 } = node3;
-const { once } = node6;
+const { once } = node7;
 const { spawn, spawnSync } = node4;
 const { dirname, extname, isAbsolute, join, relative, resolve, sep } = node5;
 const { homedir, tmpdir } = node1;
-const { fileURLToPath } = node8;
-const { createPluginSupervisor } = node9;
-const { createSourcePluginRuntime } = node10;
-const { createCollaboratorHost } = node11;
-const { createNodeWorkspaceHost } = node12;
-const { createNodeControl } = node13;
-const { createBackupSettings } = node14;
+const { fileURLToPath } = node9;
+const { createPluginSupervisor } = node10;
+const { createSourcePluginRuntime } = node11;
+const { createCollaboratorHost } = node12;
+const { createNodeWorkspaceHost } = node13;
+const { createNodeControl } = node14;
+const { createBackupSettings } = node15;
 const {
   createConversationTurnRelay,
   SUPPORTED_CONVERSATION_TURN_PROTOCOLS,
-} = node15;
-const { createAPNsCredentialStore, createAPNsPushHost } = node16;
-const { createWakeBridge } = node17;
+} = node16;
+const { createAPNsCredentialStore, createAPNsPushHost } = node17;
+const { createWakeBridge } = node18;
 
 class HttpError extends Error {
   constructor(status, code, message, { issues = [], recovery = null } = {}) {
@@ -2113,17 +2455,26 @@ const wakeBridge = createWakeBridge({
   log,
 });
 const { handleUpload, inventory, handleDownload, handleDelete, deleteBackupPackage } = createBackupVault({
-  config, state: { get packages() { return state.packages; }, set packages(value) { state.packages = value; } }, saveState, sendJSON, HttpError, log,
-  applyRetention: actor => backupSettings.applyRetention(actor),
+  config, displayName: () => nodeControl.displayName(), state: { get serverId() { return state.serverId; }, get packages() { return state.packages; }, set packages(value) { state.packages = value; } }, saveState, sendJSON, HttpError, log,
+  applyRetention: (actor, verifiedPackageId) => backupSettings.applyRetention(actor, verifiedPackageId),
   ENCRYPTED_PACKAGE_CONTENT_TYPE, ENCRYPTED_PACKAGE_MAGIC, ENCRYPTED_PACKAGE_VERSION, ENVELOPE_FORMAT, MAX_ENCRYPTED_PACKAGE_CHUNK_BYTES, MAX_ENCRYPTED_PACKAGE_HEADER_BYTES, VAULT_METADATA_SCHEMA
 });
+const backupSnapshots = createBackupSnapshotRoutes({
+  config, serverId: state.serverId, sendJSON, HttpError,
+  applyRetention: (actor, verifiedPackageId) => backupSettings.applyRetention(actor, verifiedPackageId),
+});
+const backupInventory = () => [...state.packages, ...backupSnapshots.inventory().packages];
+const removeBackup = (id, actor) => id.startsWith("r_")
+  ? deleteBackupPackage(id, actor) : backupSnapshots.remove(id);
 const backupSettings = createBackupSettings({
   state,
   saveState,
   readJSONBody,
   sendJSON,
   HttpError,
-  deletePackage: (remotePackageId, actor) => deleteBackupPackage(remotePackageId, actor, false),
+  packageInventory: backupInventory,
+  deletePackage: (remotePackageId, actor) => remotePackageId.startsWith("r_")
+    ? deleteBackupPackage(remotePackageId, actor, false) : backupSnapshots.remove(remotePackageId),
   log,
 });
 const conversationTurnRelay = createConversationTurnRelay({
@@ -2175,6 +2526,8 @@ const { handleMCP, executeMCPTool } = createMCPGateway({
   state,
   nodeControl,
   backupSettings,
+  backupInventory,
+  deleteBackupPackage: removeBackup,
   HttpError,
   readJSONBody,
   sendJSON,
@@ -2304,9 +2657,11 @@ async function route(req, res) {
   }
   if (path === "/aru/v1/backups" && req.method === "GET") {
     requireDevice(req);
-    return sendJSON(res, 200, inventory());
+    return sendJSON(res, 200, url.searchParams.get("includeSnapshots") === "1"
+      ? { ...inventory(), packages: backupInventory() } : inventory());
   }
   if (await backupSettings.route(req, res, path, () => requireDevice(req))) return;
+  if (await backupSnapshots.route(req, res, path, requireDevice)) return;
   if (await conversationTurnRelay.route(req, res, path, requireDevice)) return;
   if (await remotePush.route(req, res, path, () => requireDevice(req))) return;
   if (await wakeBridge.route(req, res, path)) return;
@@ -2346,7 +2701,8 @@ async function route(req, res) {
     return handleDownload(req, res, decodeURIComponent(path.split("/").pop()));
   }
   if (req.method === "DELETE" && path.startsWith("/aru/v1/backups/")) {
-    return handleDelete(req, res, decodeURIComponent(path.split("/").pop()), requireDevice(req));
+    const device = requireDevice(req);
+    return sendJSON(res, 200, removeBackup(decodeURIComponent(path.split("/").pop()), device.deviceId));
   }
   if (req.method === "GET" && path.startsWith("/aru/v1/artifacts/")) {
     requireDevice(req);
@@ -2393,7 +2749,8 @@ function manifest() {
         endpoint: "/aru/v1/backups",
         encryption: ["full-package-client-password"],
         restore: "manual-staging-only",
-        packageFormats: ["aru-native-encrypted-package-v2"],
+        packageFormats: ["aru-native-encrypted-package-v2", "aru-native-backup-snapshot-v1"],
+        incrementalVersion: 1,
         ...backupSettings.manifestCapability(),
       },
       "sync-ledger": {
