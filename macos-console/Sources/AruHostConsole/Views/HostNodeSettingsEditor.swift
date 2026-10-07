@@ -129,7 +129,7 @@ struct HostNodeSettingsEditor: View {
             .padding(28)
             .background {
                 RoundedRectangle(cornerRadius: 30).fill(Color.white.opacity(0.27))
-                    .glassEffect(.regular.tint(Color.white.opacity(0.12)), in: RoundedRectangle(cornerRadius: 30))
+                    .hostGlassEffect(tint: Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 30))
             }.padding(18)
         }.foregroundStyle(HostPalette.ink)
         .frame(width: 620, height: 700).preferredColorScheme(.light)

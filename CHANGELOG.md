@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Lower the Mac Console deployment and package minimum to macOS 15 (Sequoia). Keep Liquid Glass on macOS 26 and use system material with the same shape, tint and button feedback on macOS 15. CI now exercises Console tests and rendering on both OS generations. This change is not included in the existing 0.34.1 download.
+
 ## 0.34.1
 
 - Keep the configured macOS container executable, images and resource settings across upgrades when Docker/Podman is stopped or absent from the installer PATH. Fresh detection resolves standard macOS CLI locations to an absolute path. Console distinguishes unconfigured, checking and configured-but-unavailable environments.

@@ -227,7 +227,7 @@ struct HostOverviewView: View {
                 ZStack {
                     Circle()
                         .fill(Color.white.opacity(0.30))
-                        .glassEffect(.regular.tint(Color.white.opacity(0.12)), in: Circle())
+                        .hostGlassEffect(tint: Color.white.opacity(0.12), in: Circle())
                     Image(systemName: "server.rack")
                         .font(.system(size: 34, weight: .ultraLight))
                         .foregroundStyle(HostPalette.lavenderDeep)

@@ -305,8 +305,9 @@ private struct CollaboratorScopeButtonStyle: ButtonStyle {
                             )
                             : LinearGradient(colors: [Color.white.opacity(0.22)], startPoint: .leading, endPoint: .trailing)
                     )
-                    .glassEffect(
-                        .regular.tint(isSelected ? HostPalette.lavender.opacity(0.10) : Color.white.opacity(0.05)).interactive(),
+                    .hostGlassEffect(
+                        tint: isSelected ? HostPalette.lavender.opacity(0.10) : Color.white.opacity(0.05),
+                        interactive: true,
                         in: Capsule()
                     )
                     .overlay {

@@ -348,7 +348,7 @@ private struct CreateCollaboratorSheet: View {
             .background {
                 RoundedRectangle(cornerRadius: 34, style: .continuous)
                     .fill(Color.white.opacity(0.27))
-                    .glassEffect(.regular.tint(Color.white.opacity(0.12)), in: RoundedRectangle(cornerRadius: 34))
+                    .hostGlassEffect(tint: Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 34))
             }
             .padding(18)
         }
@@ -428,7 +428,7 @@ private struct CollaboratorDriverBindingSheet: View {
             .background {
                 RoundedRectangle(cornerRadius: 34, style: .continuous)
                     .fill(Color.white.opacity(0.27))
-                    .glassEffect(.regular.tint(Color.white.opacity(0.12)), in: RoundedRectangle(cornerRadius: 34))
+                    .hostGlassEffect(tint: Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 34))
             }
             .padding(18)
         }

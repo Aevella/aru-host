@@ -79,7 +79,7 @@ Host 是电脑协作者的唯一数据真相；手机只保存配对凭证与可
 
 ## Mac：普通用户安装
 
-需要 macOS 26。打开 [最新版本页面](https://github.com/Aevella/aru-host/releases/latest)，下载 `aru-host-macos-<版本>.dmg`，把 **Aru Host** 拖进“应用程序”后打开即可。应用第一次启动时会自动安装同版本 Host Core，并把它作为当前用户的后台服务启动；不需要 Xcode、Node.js、Homebrew、终端命令或开发者证书。
+当前已发布的 0.34.1 安装包仍需 macOS 26；源码主线已将最低要求降到 macOS 15（Sequoia），兼容改动见 [Unreleased](CHANGELOG.md#unreleased)。打开 [最新版本页面](https://github.com/Aevella/aru-host/releases/latest)，下载 `aru-host-macos-<版本>.dmg`，把 **Aru Host** 拖进“应用程序”后打开即可。应用第一次启动时会自动安装同版本 Host Core，并把它作为当前用户的后台服务启动；不需要 Xcode、Node.js、Homebrew、终端命令或开发者证书。
 
 已有安装请替换应用后打开概览，按提示更新 Host Core。进入电脑名称旁的「节点设置」，可以保留原局域网地址并添加 Tailscale 或 HTTPS 远程地址。先配置好相应网络或 HTTPS 服务，再填入不带路径的地址并检查连接；Mac 检查成功不代表手机一定可达。Tailscale 地址可使用 `http://100.100.100.100:8787` 这样的地址，公网地址必须使用 HTTPS。这是手动配置入口，不会自动安装或识别 Tailscale。
 

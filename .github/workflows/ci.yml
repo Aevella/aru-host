@@ -55,13 +55,24 @@ jobs:
         run: ./package-release.sh dist/aru-host-linux.tar.gz
 
   macos:
-    runs-on: macos-26
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-26]
+    runs-on: ${{ matrix.os }}
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     steps:
       - uses: actions/checkout@v7
       - name: Host installer smoke test
         run: bash tests/macos-installer-smoke.sh
-      - name: Console tests
+      - name: Console tests (including native surface rendering)
         run: swift test --package-path macos-console
+      - name: Verify minimum deployment target
+        run: |
+          binary="$(swift build --package-path macos-console --show-bin-path)/AruHostConsole"
+          xcrun vtool -show-build "$binary" | tee /tmp/aru-console-build-version.txt
+          grep -Eq 'minos[[:space:]]+15\.0' /tmp/aru-console-build-version.txt
       - name: Build macOS Host Core payload
         run: ./package-macos-release.sh dist/aru-host-macos.tar.gz
 

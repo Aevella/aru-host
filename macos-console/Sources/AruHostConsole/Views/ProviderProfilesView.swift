@@ -328,7 +328,7 @@ private struct ProviderProfileEditorSheet: View {
             .background {
                 RoundedRectangle(cornerRadius: 34, style: .continuous)
                     .fill(Color.white.opacity(0.24))
-                    .glassEffect(.regular.tint(Color.white.opacity(0.10)), in: RoundedRectangle(cornerRadius: 34))
+                    .hostGlassEffect(tint: Color.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 34))
             }
             .padding(18)
         }

@@ -1,5 +1,11 @@
 # Aru Host Console
 
+The source deployment minimum is macOS 15 (Sequoia), for Apple Silicon and Intel.
+Build with Xcode 26 / Swift 6.2 or newer so the guarded Liquid Glass branch can
+compile; this build-tool requirement does not raise the runtime minimum. macOS 15
+uses system material, with the same layout, tint and button feedback.
+Published-package availability is tracked in [the changelog](../CHANGELOG.md).
+
 This is the native macOS control surface for a locally installed Aru Host. It
 does not read `state.json`, own collaborator truth, or keep the Host alive.
 Instead it pairs as an ordinary local device, keeps that device credential in

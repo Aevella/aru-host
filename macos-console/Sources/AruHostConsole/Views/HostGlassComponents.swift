@@ -1,6 +1,22 @@
 import AppKit
 import SwiftUI
 
+extension View {
+    /// Preserve the shared surface shape and tint on Sequoia while using Liquid
+    /// Glass on systems that provide it. Layout and button feedback stay shared.
+    @ViewBuilder
+    func hostGlassEffect<S: Shape>(tint: Color, interactive: Bool = false, in shape: S) -> some View {
+        if #available(macOS 26.0, *) {
+            self.glassEffect(.regular.tint(tint).interactive(interactive), in: shape)
+        } else {
+            self.background {
+                shape.fill(.ultraThinMaterial)
+                    .overlay(shape.fill(tint))
+            }
+        }
+    }
+}
+
 enum HostPalette {
     static let ink = Color(red: 0.105, green: 0.105, blue: 0.14)
     static let secondaryInk = Color(red: 0.25, green: 0.25, blue: 0.32)
@@ -48,8 +64,8 @@ struct FoundationGlass<Content: View>: View {
             .background {
                 RoundedRectangle(cornerRadius: 42, style: .continuous)
                     .fill(Color.white.opacity(0.22))
-                    .glassEffect(
-                        .regular.tint(Color.white.opacity(0.12)),
+                    .hostGlassEffect(
+                        tint: Color.white.opacity(0.12),
                         in: RoundedRectangle(cornerRadius: 42, style: .continuous)
                     )
                     .overlay {
@@ -73,7 +89,7 @@ struct FloatingGlassButtonStyle: ButtonStyle {
             .background {
                 Capsule()
                     .fill(Color.white.opacity(configuration.isPressed ? 0.25 : 0.14))
-                    .glassEffect(.regular.tint(tint).interactive(), in: Capsule())
+                    .hostGlassEffect(tint: tint, interactive: true, in: Capsule())
                     .overlay(Capsule().stroke(Color.white.opacity(0.58), lineWidth: 0.7))
             }
             .scaleEffect(configuration.isPressed ? 0.97 : 1)

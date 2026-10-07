@@ -49,7 +49,7 @@ Phone-local collaborators and computer collaborators never share a database. The
 
 | Platform | Package | Notes |
 | --- | --- | --- |
-| macOS 26+ | `aru-host-macos-<version>.dmg` from the [latest release](https://github.com/Aevella/aru-host/releases/latest) | Drag **Aru Host** into Applications. First launch installs Host Core as a per-user background service. No Xcode, Node.js, or Homebrew needed. |
+| macOS 26+ (published 0.34.1); 15+ on source main ([Unreleased](CHANGELOG.md#unreleased)) | `aru-host-macos-<version>.dmg` from the [latest release](https://github.com/Aevella/aru-host/releases/latest) | Drag **Aru Host** into Applications. First launch installs Host Core as a per-user background service. No Xcode, Node.js, or Homebrew needed. |
 | Windows 10/11 x64 (preview) | `aru-host-windows-<version>-x64.exe` plus its `.sha256` | Per-user install, credentials protected by DPAPI. Unsigned: expect a SmartScreen prompt. If the firewall blocks LAN pairing, the Console offers a one-click fix. |
 | Debian/Ubuntu desktop | `aru-host-linux-<version>-x64.deb` or `-arm64.deb` | Install with the system package installer, then launch **Aru Host**. Console credentials use Secret Service. |
 | Linux VPS | `curl -fsSL https://raw.githubusercontent.com/Aevella/aru-host/main/install.sh \| sudo bash -s -- --domain aru.example.com` | Debian/Ubuntu with a domain pointing at the VPS. Creates a service user, versioned releases, and Caddy HTTPS. |

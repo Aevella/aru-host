@@ -6,7 +6,7 @@ let package = Package(
     name: "AruHostConsole",
     defaultLocalization: "zh-Hans",
     platforms: [
-        .macOS(.v26),
+        .macOS(.v15),
     ],
     products: [
         .executable(name: "AruHostConsole", targets: ["AruHostConsole"]),

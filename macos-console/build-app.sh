@@ -70,7 +70,7 @@ trap 'rm -rf "$BUILD_ROOT"' EXIT
 SDK="$(xcrun --sdk macosx --show-sdk-path)"
 
 build_architecture() {
-  local architecture="$1" scratch="$BUILD_ROOT/$1" triple="$1-apple-macosx26.0"
+  local architecture="$1" scratch="$BUILD_ROOT/$1" triple="$1-apple-macosx15.0"
   swift build \
     --package-path "$SCRIPT_DIR" \
     --scratch-path "$scratch" \
@@ -134,7 +134,7 @@ cat > "$plist" <<EOF
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>CFBundleVersion</key><string>$BUILD_NUMBER</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
-  <key>LSMinimumSystemVersion</key><string>26.0</string>
+  <key>LSMinimumSystemVersion</key><string>15.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSHumanReadableCopyright</key><string>Copyright © 2026 Aru · Apache License 2.0</string>
 </dict>
