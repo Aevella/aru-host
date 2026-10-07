@@ -536,4 +536,4 @@
 
 "backup.incremental" = "增量快照";
 
-"plugin.publisher" = "作者署名（选填）";
+"plugin.publisher" = "作者信息（选填）";

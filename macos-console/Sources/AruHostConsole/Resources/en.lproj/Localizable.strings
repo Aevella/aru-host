@@ -536,4 +536,4 @@
 
 "backup.incremental" = "Incremental snapshot";
 
-"plugin.publisher" = "Author credit (optional)";
+"plugin.publisher" = "Author information (optional)";
