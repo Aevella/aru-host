@@ -225,6 +225,7 @@ enum L10n {
     static let pluginEditorEdit = value("plugin.editor.edit")
     static let pluginEditorDescription = value("plugin.editor.description")
     static let pluginID = value("plugin.id")
+    static let pluginPublisher = value("plugin.publisher")
     static let pluginDisplayName = value("plugin.display.name")
     static let pluginVersion = value("plugin.version")
     static let pluginSourceCode = value("plugin.source.code")

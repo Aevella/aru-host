@@ -112,6 +112,7 @@ struct HostPluginDraft: Decodable, Equatable, Identifiable, Sendable {
     let schema: String
     let pluginId: String
     let displayName: String
+    var publisher: String? = nil
     let version: String
     let sourceCode: String?
     let capabilities: [String]
@@ -135,6 +136,7 @@ struct HostPluginSource: Decodable, Equatable, Sendable {
     let schema: String
     let pluginId: String
     let displayName: String
+    var publisher: String? = nil
     let version: String
     let sourceCode: String
     let capabilities: [String]
@@ -145,6 +147,7 @@ struct HostPluginSource: Decodable, Equatable, Sendable {
 struct HostPluginSourceMutation: Encodable, Equatable, Sendable {
     let pluginId: String
     let displayName: String
+    var publisher: String? = nil
     let version: String
     let sourceCode: String
     let capabilities: [String]

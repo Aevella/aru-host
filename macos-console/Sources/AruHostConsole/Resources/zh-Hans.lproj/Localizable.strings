@@ -535,3 +535,5 @@
 "backup.content.detail" = "包含历史版本，不代表实际磁盘占用";
 
 "backup.incremental" = "增量快照";
+
+"plugin.publisher" = "作者署名（选填）";

@@ -125,6 +125,7 @@ export function createPluginWorkshop({
       schema: DRAFT_SCHEMA,
       pluginId: request.pluginId,
       displayName: request.displayName,
+      publisher: request.publisher,
       version: request.version,
       sourceCode: request.sourceCode,
       capabilities: request.capabilities,
@@ -175,7 +176,7 @@ export function createPluginWorkshop({
     if (installed && installed.manifest.packageMode !== "source-node") {
       throw new HttpError(409, "plugin.package_mode_mismatch", "An OCI plugin already owns this plugin id");
     }
-    if (installed && installed.manifest.version === draft.version && installed.manifest.image === draft.digest) {
+    if (installed && installed.manifest.version === draft.version && installed.manifest.image === draft.digest && installed.manifest.publisher === draft.publisher) {
       throw new HttpError(409, "plugin.apply_unchanged", "Change the plugin version or source before applying an update");
     }
     const request = validateSourceWorkshopRequest(draft);
@@ -192,7 +193,7 @@ export function createPluginWorkshop({
       pluginId,
       displayName: request.displayName,
       version: request.version,
-      publisher: "Aru workshop",
+      publisher: request.publisher,
       source: "model-authored-on-paired-node",
       packageMode: "source-node",
       image: validated.digest,
@@ -260,6 +261,7 @@ export function createPluginWorkshop({
       schema: "aru.selfhost.plugin-source.v1",
       pluginId,
       displayName: plugin.manifest.displayName,
+      publisher: plugin.manifest.publisher,
       version: plugin.manifest.version,
       sourceCode: sourceRuntime.readPackage(plugin.manifest.image),
       capabilities: capabilitiesForPermissions(plugin.grantedPermissions),
@@ -315,6 +317,12 @@ export function createPluginWorkshop({
         throw new HttpError(400, "plugin.workshop_request_invalid", `${field} is required`);
       }
     }
+    if (args.publisher !== undefined && typeof args.publisher !== "string") {
+      throw new HttpError(400, "plugin.workshop_request_invalid", "publisher must be a string");
+    }
+    const publisher = args.publisher === undefined
+      ? (draftRecord(args.pluginId)?.publisher ?? pluginRecord(args.pluginId)?.manifest.publisher ?? "Aru workshop")
+      : (args.publisher.trim() || "Aru workshop");
     const capabilities = normalizeSourceCapabilities(args.capabilities);
     const permissions = {
       network: capabilities.includes("network-outbound") ? "outbound" : "none",
@@ -329,7 +337,7 @@ export function createPluginWorkshop({
       pluginId: args.pluginId,
       displayName: args.displayName,
       version: args.version,
-      publisher: "Aru workshop",
+      publisher,
       source: "model-authored-on-paired-node",
       packageMode: "source-node",
       image: `sha256:${"0".repeat(64)}`,
@@ -340,6 +348,7 @@ export function createPluginWorkshop({
     return {
       pluginId: args.pluginId,
       displayName: args.displayName.trim(),
+      publisher,
       version: args.version.trim(),
       sourceCode: args.sourceCode,
       capabilities,

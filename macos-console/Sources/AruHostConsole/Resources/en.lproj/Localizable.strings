@@ -535,3 +535,5 @@
 "backup.content.detail" = "Includes historical versions; not disk usage";
 
 "backup.incremental" = "Incremental snapshot";
+
+"plugin.publisher" = "Author credit (optional)";

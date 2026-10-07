@@ -311,6 +311,7 @@ function sourcePluginWorkshopProperties() {
   return {
     pluginId: mcpIdentifierSchema("Stable lowercase plugin id."),
     displayName: { type: "string", minLength: 1, description: "User-visible plugin name." },
+    publisher: { type: "string", description: "Optional self-declared author credit; omit to preserve existing credit. This is not verified identity." },
     version: { type: "string", minLength: 1, description: "Plugin release version." },
     sourceCode: { type: "string", minLength: 1, description: "JavaScript ESM source following aru_plugin_workshop_guide." },
     capabilities: {

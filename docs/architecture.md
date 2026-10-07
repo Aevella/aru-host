@@ -229,3 +229,11 @@ content reads until commit. `backup-snapshot-store.mjs` remains the only authori
 for publishing complete snapshots and collecting unreferenced ciphertext. Repository
 metadata advertises batch admission and snapshot v2; Host never interprets plaintext
 record boundaries or obtains the client's backup password.
+
+### Source plugin credits
+
+The workshop accepts optional `publisher` as self-declared author credit and keeps
+it in the draft and installed manifest. Source reads return the same value. An
+omitted field from an older client preserves existing credit; older uncredited
+drafts retain the historical `Aru workshop` default. The Console edits this field
+without creating an identity registry or granting permissions.

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Preserve source-plugin author credits through drafts, publishing and source reads. Mac, Windows and Linux Console editors can enter the credit, and plugin lists display it. Older clients that omit the field preserve existing credit.
+
 - Lower the Mac Console deployment and package minimum to macOS 15 (Sequoia). Keep Liquid Glass on macOS 26 and use system material with the same shape, tint and button feedback on macOS 15. CI now exercises Console tests and rendering on both OS generations. This change is not included in the existing 0.34.1 download.
 
 ## 0.34.1

@@ -4,6 +4,7 @@ struct PluginEditorSeed: Identifiable {
     let id = UUID()
     let pluginId: String
     let displayName: String
+    var publisher: String? = nil
     let version: String
     let sourceCode: String
     let capabilities: Set<String>
@@ -43,6 +44,7 @@ struct PluginEditorSheet: View {
 
     @State private var pluginId: String
     @State private var displayName: String
+    @State private var publisher: String
     @State private var version: String
     @State private var sourceCode: String
     @State private var persistentStorage: Bool
@@ -56,6 +58,7 @@ struct PluginEditorSheet: View {
         self.seed = seed
         _pluginId = State(initialValue: seed.pluginId)
         _displayName = State(initialValue: seed.displayName)
+        _publisher = State(initialValue: seed.publisher ?? "")
         _version = State(initialValue: seed.version)
         _sourceCode = State(initialValue: seed.sourceCode)
         _persistentStorage = State(initialValue: seed.capabilities.contains("persistent-storage"))
@@ -69,6 +72,7 @@ struct PluginEditorSheet: View {
         return HostPluginSourceMutation(
             pluginId: pluginId.trimmingCharacters(in: .whitespacesAndNewlines),
             displayName: displayName.trimmingCharacters(in: .whitespacesAndNewlines),
+            publisher: publisher,
             version: version.trimmingCharacters(in: .whitespacesAndNewlines),
             sourceCode: sourceCode,
             capabilities: capabilities
@@ -103,6 +107,7 @@ struct PluginEditorSheet: View {
         .frame(minWidth: 820, idealWidth: 920, minHeight: 680, idealHeight: 780)
         .background(BorrowedLightWeather())
         .onChange(of: pluginId) { _, _ in invalidateValidation() }
+        .onChange(of: publisher) { _, _ in invalidateValidation() }
         .onChange(of: displayName) { _, _ in invalidateValidation() }
         .onChange(of: version) { _, _ in invalidateValidation() }
         .onChange(of: sourceCode) { _, _ in invalidateValidation() }
@@ -129,12 +134,15 @@ struct PluginEditorSheet: View {
 
     private var identityFields: some View {
         ReadablePanel {
-            HStack(alignment: .top, spacing: 16) {
-                PluginField(title: L10n.pluginID, text: $pluginId, monospaced: true)
-                    .disabled(seed.locksIdentity)
-                PluginField(title: L10n.pluginDisplayName, text: $displayName)
-                PluginField(title: L10n.pluginVersion, text: $version, monospaced: true)
-                    .frame(maxWidth: 180)
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(alignment: .top, spacing: 16) {
+                    PluginField(title: L10n.pluginID, text: $pluginId, monospaced: true)
+                        .disabled(seed.locksIdentity)
+                    PluginField(title: L10n.pluginDisplayName, text: $displayName)
+                    PluginField(title: L10n.pluginVersion, text: $version, monospaced: true)
+                        .frame(maxWidth: 180)
+                }
+                PluginField(title: L10n.pluginPublisher, text: $publisher)
             }
         }
     }
@@ -287,6 +295,9 @@ struct PluginDraftRow: View {
                     Text(draft.displayName)
                         .font(.system(size: 14, weight: .semibold, design: .rounded))
                         .foregroundStyle(HostPalette.ink)
+                    if let publisher = draft.publisher {
+                        Text(publisher).font(.caption).foregroundStyle(HostPalette.secondaryInk)
+                    }
                     Text("\(draft.target == "update" ? L10n.pluginDraftUpdate : L10n.pluginDraftCreate) · \(draft.version) · \(L10n.pluginToolCount(draft.tools.count))")
                         .font(.system(size: 10, design: .rounded))
                         .foregroundStyle(HostPalette.secondaryInk.opacity(0.60))
@@ -317,7 +328,7 @@ struct PluginSelectionRow: View {
                     Text(plugin.manifest.displayName)
                         .font(.system(size: 13, weight: .semibold, design: .rounded))
                         .foregroundStyle(HostPalette.ink)
-                    Text("\(plugin.manifest.version) · \(L10n.pluginToolCount(plugin.tools.count))")
+                    Text("\(plugin.manifest.publisher) · \(plugin.manifest.version) · \(L10n.pluginToolCount(plugin.tools.count))")
                         .font(.system(size: 9, design: .rounded))
                         .foregroundStyle(HostPalette.secondaryInk.opacity(0.58))
                 }
@@ -349,6 +360,9 @@ struct PluginDetailPanel: View {
                         Text(plugin.manifest.displayName)
                             .font(.system(size: 20, weight: .medium, design: .rounded))
                             .foregroundStyle(HostPalette.ink)
+                        Text(plugin.manifest.publisher)
+                            .font(.system(size: 11, design: .rounded))
+                            .foregroundStyle(HostPalette.secondaryInk)
                         Text(plugin.statusLabel)
                             .font(.system(size: 11, weight: .medium, design: .rounded))
                             .foregroundStyle(plugin.health == "running" ? HostPalette.mint : plugin.health == "unhealthy" ? HostPalette.rose : HostPalette.amber)

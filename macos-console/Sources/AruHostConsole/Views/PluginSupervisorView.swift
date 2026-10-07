@@ -212,6 +212,7 @@ struct PluginSupervisorView: View {
             editorSeed = PluginEditorSeed(
                 pluginId: full.pluginId,
                 displayName: full.displayName,
+                publisher: full.publisher,
                 version: full.version,
                 sourceCode: sourceCode,
                 capabilities: Set(full.capabilities),
@@ -226,6 +227,7 @@ struct PluginSupervisorView: View {
             editorSeed = PluginEditorSeed(
                 pluginId: source.pluginId,
                 displayName: source.displayName,
+                publisher: source.publisher ?? plugin.manifest.publisher,
                 version: source.version,
                 sourceCode: source.sourceCode,
                 capabilities: Set(source.capabilities),
