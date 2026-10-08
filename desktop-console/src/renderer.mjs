@@ -578,8 +578,12 @@ function cancellationText(turn) {
   return turn?.cancellation ? (turn.cancellation.status === "pending" ? (locale === "zh" ? "正在停止…" : "Stopping…") : turn.cancellation.message ?? "") : "";
 }
 
+// Decisions sent (or in flight) to the Host; a poll response that raced the
+// decision must not resurrect the card. A failed request removes its entry.
+const decidedApprovals = new Set();
+
 function approvalMarkup(approvals = []) {
-  return approvals.filter(approval => approval.state === "pending").map(approval => `<div class="approval"><strong>${esc(approval.title)}</strong><div class="row-actions"><button class="primary-button" data-approval="${escAttr(approval.approvalId)}" data-decision="allowOnce">${esc(t("approve"))}</button><button class="quiet-button" data-approval="${escAttr(approval.approvalId)}" data-decision="allowSession">${esc(t("approveSession"))}</button><button class="danger-button" data-approval="${escAttr(approval.approvalId)}" data-decision="deny">${esc(t("deny"))}</button></div></div>`).join("");
+  return approvals.filter(approval => approval.state === "pending" && !decidedApprovals.has(approval.approvalId)).map(approval => `<div class="approval"><strong>${esc(approval.title)}</strong><div class="row-actions"><button class="primary-button" data-approval="${escAttr(approval.approvalId)}" data-decision="allowOnce">${esc(t("approve"))}</button><button class="quiet-button" data-approval="${escAttr(approval.approvalId)}" data-decision="allowSession">${esc(t("approveSession"))}</button><button class="danger-button" data-approval="${escAttr(approval.approvalId)}" data-decision="deny">${esc(t("deny"))}</button></div></div>`).join("");
 }
 
 function renderConversationView(collaborator, conversationId, view, path, conversation) {
@@ -606,7 +610,17 @@ function renderConversationView(collaborator, conversationId, view, path, conver
   content.querySelector("[data-approvals]").addEventListener("click", event => {
     const button = event.target.closest("[data-approval]");
     if (!button) return;
-    void mutate(() => api.request("POST", `${path}/approvals/${encodeURIComponent(button.dataset.approval)}?window=1`, { decision: button.dataset.decision }), null, () => undefined);
+    // Retire the card at once so a second click cannot race the next poll into a conflict.
+    const card = button.closest(".approval");
+    const buttons = [...card.querySelectorAll("button")];
+    const approvalId = button.dataset.approval;
+    buttons.forEach(item => { item.disabled = true; });
+    decidedApprovals.add(approvalId);
+    void mutate(async () => {
+      try { await api.request("POST", `${path}/approvals/${encodeURIComponent(approvalId)}?window=1`, { decision: button.dataset.decision }); }
+      catch (error) { decidedApprovals.delete(approvalId); buttons.forEach(item => { item.disabled = false; }); throw error; }
+      card.remove();
+    }, null, () => undefined);
   });
 }
 
