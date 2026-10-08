@@ -513,34 +513,104 @@ async function editCognitionRecord(collaborator, cognition, kind, recordId = nul
 async function openConversation(collaborator, conversationId) {
   const view = Symbol("conversation");
   currentConversationView = view;
+  stopConversationPoll();
   setBusy(true);
   try {
-    const path = `/aru/v1/hosted-collaborators/${encodeURIComponent(collaborator.collaboratorId)}/conversations/${encodeURIComponent(conversationId)}`;
+    const path = conversationApiPath(collaborator, conversationId);
     const conversation = await api.request("GET", path);
     if (currentConversationView !== view) return;
-    const active = turnActions(conversation.activeTurn).canCancel;
-    content.innerHTML = pageHead("conversations", conversation.title, t("conversations"), `<button class="quiet-button" data-back-studio>${esc(t("studio"))}</button>${active ? `<button class="danger-button" data-stop-turn>${esc(t("stop"))}</button>` : ""}`)
-      + (conversation.activeTurn?.cancellation ? `<p role="status">${esc(conversation.activeTurn.cancellation.status === "pending" ? (locale === "zh" ? "正在停止…" : "Stopping…") : conversation.activeTurn.cancellation.message ?? "")}</p>` : "")
-      + `<section class="conversation"><div class="messages">${(conversation.messages ?? []).map((message) => `<div class="message ${escAttr(message.role)}">${esc(message.content)}</div>`).join("") || empty("◌", t("noConversations"), t("conversations"))}</div>${(conversation.approvals ?? []).filter((approval) => approval.state === "pending").map((approval) => `<div class="approval"><strong>${esc(approval.title)}</strong><div class="row-actions"><button class="primary-button" data-approval="${escAttr(approval.approvalId)}" data-decision="allowOnce">${esc(t("approve"))}</button><button class="quiet-button" data-approval="${escAttr(approval.approvalId)}" data-decision="allowSession">${esc(t("approveSession"))}</button><button class="danger-button" data-approval="${escAttr(approval.approvalId)}" data-decision="deny">${esc(t("deny"))}</button></div></div>`).join("")}<div class="composer"><textarea id="composer"></textarea><button class="primary-button" data-send>${esc(t("send"))}</button></div></section>`;
-    content.querySelector("[data-back-studio]").addEventListener("click", () => renderCollaboratorStudio(collaborator));
-    content.querySelector("[data-stop-turn]")?.addEventListener("click", async (event) => {
-      event.currentTarget.disabled = true;
-      try {
-        const value = await api.request("POST", `${path}/turns/${encodeURIComponent(conversation.activeTurn.turnId)}/cancel`);
-        if (currentConversationView !== view) return;
-        if (value.activeTurn?.cancellation?.status === "failed") showToast(value.activeTurn.cancellation.message, true);
-        await openConversation(collaborator, conversationId);
-      } catch (error) {
-        if (currentConversationView === view) { showToast(error.message, true); await openConversation(collaborator, conversationId); }
-      }
-    });
-    content.querySelector("[data-send]").addEventListener("click", async () => {
-      const text = document.querySelector("#composer").value.trim(); if (!text) return;
-      await mutate(() => api.request("POST", `${path}/messages`, { clientRequestId: crypto.randomUUID(), text }), null, () => currentConversationView === view ? openConversation(collaborator, conversationId) : undefined);
-    });
-    content.querySelectorAll("[data-approval]").forEach((button) => button.addEventListener("click", () => mutate(() => api.request("POST", `${path}/approvals/${encodeURIComponent(button.dataset.approval)}`, { decision: button.dataset.decision }), null, () => currentConversationView === view ? openConversation(collaborator, conversationId) : undefined)));
+    renderConversationView(collaborator, conversationId, view, path, conversation, false);
+    startConversationPoll(collaborator, conversationId, view, path, conversation);
   } catch (error) { renderSectionFailure(error); }
   finally { setBusy(false); }
+}
+
+function conversationApiPath(collaborator, conversationId) {
+  return `/aru/v1/hosted-collaborators/${encodeURIComponent(collaborator.collaboratorId)}/conversations/${encodeURIComponent(conversationId)}`;
+}
+
+// Approvals are recorded asynchronously by the Host after the conversation view
+// renders, so a single GET can never show them. While a turn is active the view
+// polls the incremental /sync endpoint (cheap `unchanged` short-circuit when the
+// ledger file is untouched) and re-renders when the event cursor advances.
+const CONVERSATION_POLL_MS = 1500;
+let conversationPollTimer = null;
+
+function stopConversationPoll() {
+  if (conversationPollTimer !== null) { clearTimeout(conversationPollTimer); conversationPollTimer = null; }
+}
+
+function startConversationPoll(collaborator, conversationId, view, path, conversation) {
+  stopConversationPoll();
+  if (!conversation.activeTurn) return;
+  const pollState = { cursor: conversation.cursor ?? 0, version: null };
+  conversationPollTimer = setTimeout(() => { void conversationPollTick(collaborator, conversationId, view, path, pollState); }, CONVERSATION_POLL_MS);
+}
+
+async function conversationPollTick(collaborator, conversationId, view, path, pollState) {
+  conversationPollTimer = null;
+  if (currentConversationView !== view) return;
+  let refreshed = false;
+  try {
+    const params = new URLSearchParams({ after: String(pollState.cursor) });
+    if (pollState.version) params.set("version", pollState.version);
+    const sync = await api.request("GET", `${path}/sync?${params}`);
+    if (currentConversationView !== view) return;
+    if (typeof sync.version === "string") pollState.version = sync.version;
+    if (!sync.unchanged && typeof sync.cursor === "number" && sync.cursor !== pollState.cursor) {
+      pollState.cursor = sync.cursor;
+      refreshed = await refreshConversationView(collaborator, conversationId, view, path);
+    }
+  } catch {
+    // Transient poll failure: stay silent and keep polling on the next tick.
+  }
+  if (currentConversationView !== view) return;
+  if (!refreshed) {
+    conversationPollTimer = setTimeout(() => { void conversationPollTick(collaborator, conversationId, view, path, pollState); }, CONVERSATION_POLL_MS);
+  }
+}
+
+async function refreshConversationView(collaborator, conversationId, view, path) {
+  try {
+    const conversation = await api.request("GET", path);
+    if (currentConversationView !== view) return false;
+    renderConversationView(collaborator, conversationId, view, path, conversation, true);
+    startConversationPoll(collaborator, conversationId, view, path, conversation);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function renderConversationView(collaborator, conversationId, view, path, conversation, preserveComposer) {
+  const previousDraft = preserveComposer ? (content.querySelector("#composer")?.value ?? "") : "";
+  const composerFocused = preserveComposer && document.activeElement?.id === "composer";
+  const active = turnActions(conversation.activeTurn).canCancel;
+  content.innerHTML = pageHead("conversations", conversation.title, t("conversations"), `<button class="quiet-button" data-back-studio>${esc(t("studio"))}</button>${active ? `<button class="danger-button" data-stop-turn>${esc(t("stop"))}</button>` : ""}`)
+    + (conversation.activeTurn?.cancellation ? `<p role="status">${esc(conversation.activeTurn.cancellation.status === "pending" ? (locale === "zh" ? "正在停止…" : "Stopping…") : conversation.activeTurn.cancellation.message ?? "")}</p>` : "")
+    + `<section class="conversation"><div class="messages">${(conversation.messages ?? []).map((message) => `<div class="message ${escAttr(message.role)}">${esc(message.content)}</div>`).join("") || empty("◌", t("noConversations"), t("conversations"))}</div>${(conversation.approvals ?? []).filter((approval) => approval.state === "pending").map((approval) => `<div class="approval"><strong>${esc(approval.title)}</strong><div class="row-actions"><button class="primary-button" data-approval="${escAttr(approval.approvalId)}" data-decision="allowOnce">${esc(t("approve"))}</button><button class="quiet-button" data-approval="${escAttr(approval.approvalId)}" data-decision="allowSession">${esc(t("approveSession"))}</button><button class="danger-button" data-approval="${escAttr(approval.approvalId)}" data-decision="deny">${esc(t("deny"))}</button></div></div>`).join("")}<div class="composer"><textarea id="composer"></textarea><button class="primary-button" data-send>${esc(t("send"))}</button></div></section>`;
+  content.querySelector("[data-back-studio]").addEventListener("click", () => renderCollaboratorStudio(collaborator));
+  content.querySelector("[data-stop-turn]")?.addEventListener("click", async (event) => {
+    event.currentTarget.disabled = true;
+    try {
+      const value = await api.request("POST", `${path}/turns/${encodeURIComponent(conversation.activeTurn.turnId)}/cancel`);
+      if (currentConversationView !== view) return;
+      if (value.activeTurn?.cancellation?.status === "failed") showToast(value.activeTurn.cancellation.message, true);
+      await openConversation(collaborator, conversationId);
+    } catch (error) {
+      if (currentConversationView === view) { showToast(error.message, true); await openConversation(collaborator, conversationId); }
+    }
+  });
+  content.querySelector("[data-send]").addEventListener("click", async () => {
+    const text = document.querySelector("#composer").value.trim(); if (!text) return;
+    await mutate(() => api.request("POST", `${path}/messages`, { clientRequestId: crypto.randomUUID(), text }), null, () => currentConversationView === view ? openConversation(collaborator, conversationId) : undefined);
+  });
+  content.querySelectorAll("[data-approval]").forEach((button) => button.addEventListener("click", () => mutate(() => api.request("POST", `${path}/approvals/${encodeURIComponent(button.dataset.approval)}`, { decision: button.dataset.decision }), null, () => currentConversationView === view ? openConversation(collaborator, conversationId) : undefined)));
+  const composer = content.querySelector("#composer");
+  if (composer && previousDraft) {
+    composer.value = previousDraft;
+    if (composerFocused) { composer.focus(); composer.setSelectionRange(previousDraft.length, previousDraft.length); }
+  }
 }
 
 function bindDownloads(kind, items, id, filename) {
