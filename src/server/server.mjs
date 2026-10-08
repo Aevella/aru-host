@@ -249,8 +249,13 @@ const backupSnapshots = createBackupSnapshotRoutes({
   applyRetention: (actor, verifiedPackageId) => backupSettings.applyRetention(actor, verifiedPackageId),
 });
 const backupInventory = () => [...state.packages, ...backupSnapshots.inventory().packages];
-const removeBackup = (id, actor) => id.startsWith("r_")
-  ? deleteBackupPackage(id, actor) : backupSnapshots.remove(id);
+const removeBackup = (id, actor) => {
+  // Admit external identifiers before dispatching to either durable backup owner.
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(id)) {
+    throw new HttpError(400, "package.id_invalid", "backup package id is invalid");
+  }
+  return id.startsWith("r_") ? deleteBackupPackage(id, actor) : backupSnapshots.remove(id);
+};
 const backupSettings = createBackupSettings({
   state,
   saveState,

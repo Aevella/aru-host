@@ -614,12 +614,18 @@ curl -fsS -X PUT "http://127.0.0.1:$port/aru/v1/jobs/policy" \
 escape_probe="$data_dir/state/escape.aruencpkg"
 printf 'must-survive' > "$escape_probe"
 escape_response="$data_dir/escape-response.json"
-escape_status="$(curl --path-as-is -sS -o "$escape_response" -w '%{http_code}' \
-  -X DELETE "http://127.0.0.1:$port/aru/v1/backups/..%2Fescape" \
-  -H "authorization: Bearer $credential")"
-test "$escape_status" = "400"
-test "$(cat "$escape_probe")" = "must-survive"
-grep -Fq 'package.id_invalid' "$escape_response"
+# Reject invalid names before either legacy or snapshot owner can mutate storage.
+for invalid_id in '..%2Fescape' 'r_..%2Fescape' 'snapshot..%2Fescape'; do
+  escape_status="$(curl --path-as-is -sS -o "$escape_response" -w '%{http_code}' \
+    -X DELETE "http://127.0.0.1:$port/aru/v1/backups/$invalid_id" \
+    -H "authorization: Bearer $credential")"
+  if [[ "$escape_status" != "400" ]]; then
+    echo "invalid backup deletion returned $escape_status instead of 400" >&2
+    exit 1
+  fi
+  test "$(cat "$escape_probe")" = "must-survive"
+  grep -Fq 'package.id_invalid' "$escape_response"
+done
 
 if curl -fsS -X POST "http://127.0.0.1:$port/aru/v1/mcp" \
   -H 'content-type: application/json' \
