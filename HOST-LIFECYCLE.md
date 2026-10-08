@@ -268,3 +268,13 @@ creating tombstones; admitted draft/snapshot and existing deletion identities
 retain repeatable deletion across restart. HTTP smoke covers invalid paths for
 both owner prefixes and the existing MCP missing-package counterexample. This is
 source/local proof, not a deployed Host upgrade.
+
+2026-10-08 container probe permissions (candidate): runtime verification explicitly
+sets the synthetic input file to 0644 after creation, independently of service
+UMask=0077. Linux probes use the system /tmp directory rather than inheriting the
+private service StateDirectory TMPDIR; private Host data permissions remain intact.
+Sandbox resource limits remain part of readiness and failures still reject
+activation. A restrictive-umask fixture checks probe readability and private
+configuration permissions; a Linux fixture checks temporary placement and cleanup
+on cgroup failure. Local macOS proof: 7 tests pass, 1 Linux-only test skipped.
+Real VPS/rootless Podman acceptance remains pending connection details.
