@@ -2,9 +2,16 @@
 
 ## Unreleased
 
-- Preserve source-plugin author credits through drafts, publishing and source reads. Mac, Windows and Linux Console editors can enter the credit, and plugin lists display it. Older clients that omit the field preserve existing credit.
+## 0.35.0
 
-- Lower the Mac Console deployment and package minimum to macOS 15 (Sequoia). Keep Liquid Glass on macOS 26 and use system material with the same shape, tint and button feedback on macOS 15. CI now exercises Console tests and rendering on both OS generations. This change is not included in the existing 0.34.1 download.
+- Support macOS 15 (Sequoia) and later; preserve Liquid Glass on macOS 26 and use system material on macOS 15.
+- Add encrypted incremental backup snapshots with shared chunks, durable reference admission and retention across backup formats.
+- Preserve and display optional source-plugin author credits in all Console editors.
+- Refresh Windows/Linux conversation messages and pending approvals incrementally without rebuilding the full history or replacing the composer.
+- Reject invalid and unknown backup deletions before durable mutation.
+- Fix container readiness under restrictive service umask and private Linux TMPDIR, retaining sandbox limits.
+- Diagnose interrupted turn uploads before admission without logging private content.
+- See [upgrade instructions and validation scope](docs/releases/0.35.0.md).
 
 ## 0.34.1
 
