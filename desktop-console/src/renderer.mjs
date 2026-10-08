@@ -1,3 +1,4 @@
+import { pollConversation, patchMessageRows, conversationRunning } from "./conversation-sync.mjs";
 import { hostReleaseLabel, turnActions, driverGuidance } from "./host-presentation.mjs";
 import { containerSetupPanel, bindContainerSetup } from "./container-setup.mjs";
 const api = window.aruHost;
@@ -519,7 +520,7 @@ async function openConversation(collaborator, conversationId) {
     const path = conversationApiPath(collaborator, conversationId);
     const conversation = await api.request("GET", path);
     if (currentConversationView !== view) return;
-    renderConversationView(collaborator, conversationId, view, path, conversation, false);
+    renderConversationView(collaborator, conversationId, view, path, conversation);
     startConversationPoll(collaborator, conversationId, view, path, conversation);
   } catch (error) { renderSectionFailure(error); }
   finally { setBusy(false); }
@@ -532,7 +533,7 @@ function conversationApiPath(collaborator, conversationId) {
 // Approvals are recorded asynchronously by the Host after the conversation view
 // renders, so a single GET can never show them. While a turn is active the view
 // polls the incremental /sync endpoint (cheap `unchanged` short-circuit when the
-// ledger file is untouched) and re-renders when the event cursor advances.
+// ledger file is untouched) and patches only changed rows.
 const CONVERSATION_POLL_MS = 1500;
 let conversationPollTimer = null;
 
@@ -542,61 +543,50 @@ function stopConversationPoll() {
 
 function startConversationPoll(collaborator, conversationId, view, path, conversation) {
   stopConversationPoll();
-  if (!conversation.activeTurn) return;
-  const pollState = { cursor: conversation.cursor ?? 0, version: null };
+  if (!conversationRunning(conversation.activeTurn)) return;
+  const pollState = { cursor: conversation.cursor ?? 0, version: null, conversation, rows: new Map([...content.querySelectorAll("[data-message-id]")].map(row => [row.dataset.messageId, row])) };
   conversationPollTimer = setTimeout(() => { void conversationPollTick(collaborator, conversationId, view, path, pollState); }, CONVERSATION_POLL_MS);
 }
 
 async function conversationPollTick(collaborator, conversationId, view, path, pollState) {
   conversationPollTimer = null;
   if (currentConversationView !== view) return;
-  let refreshed = false;
   try {
-    const params = new URLSearchParams({ after: String(pollState.cursor) });
-    if (pollState.version) params.set("version", pollState.version);
-    const sync = await api.request("GET", `${path}/sync?${params}`);
-    if (currentConversationView !== view) return;
-    // Commit the new version only once the change is rendered; otherwise a failed
-    // refresh would leave the next tick short-circuiting on `unchanged` forever.
-    if (!sync.unchanged && typeof sync.cursor === "number" && sync.cursor !== pollState.cursor) {
-      refreshed = await refreshConversationView(collaborator, conversationId, view, path);
-    } else if (typeof sync.version === "string") {
-      pollState.version = sync.version;
-    }
-  } catch {
-    // Transient poll failure: stay silent and keep polling on the next tick.
-  }
+    await pollConversation(pollState, path, api.request, () => currentConversationView === view,
+      (projection, reset) => {
+        patchMessageRows(content.querySelector(".messages"), pollState.rows, projection.messages, reset);
+        Object.assign(pollState.conversation, projection);
+        const approvals = content.querySelector("[data-approvals]");
+        const markup = approvalMarkup(projection.approvals);
+        if (approvals.innerHTML !== markup) approvals.innerHTML = markup;
+        content.querySelector("[data-stop-turn]").hidden = !turnActions(projection.activeTurn).canCancel;
+        const cancellation = content.querySelector("[data-cancellation]");
+        const status = cancellationText(projection.activeTurn);
+        if (cancellation.textContent !== status) cancellation.textContent = status;
+        cancellation.hidden = !status;
+        const title = content.querySelector(".page-head h2");
+        if (title.textContent !== projection.title) title.textContent = projection.title;
+      });
+  } catch { /* Keep the last applied cursor and retry after transient failures. */ }
   if (currentConversationView !== view) return;
-  if (!refreshed) {
-    conversationPollTimer = setTimeout(() => { void conversationPollTick(collaborator, conversationId, view, path, pollState); }, CONVERSATION_POLL_MS);
+  if (pollState.hasMore || conversationRunning(pollState.conversation.activeTurn)) {
+    conversationPollTimer = setTimeout(() => { void conversationPollTick(collaborator, conversationId, view, path, pollState); }, pollState.hasMore ? 0 : CONVERSATION_POLL_MS);
   }
 }
 
-async function refreshConversationView(collaborator, conversationId, view, path) {
-  try {
-    const conversation = await api.request("GET", path);
-    if (currentConversationView !== view) return false;
-    renderConversationView(collaborator, conversationId, view, path, conversation, true);
-    startConversationPoll(collaborator, conversationId, view, path, conversation);
-    return true;
-  } catch {
-    return false;
-  }
+function cancellationText(turn) {
+  return turn?.cancellation ? (turn.cancellation.status === "pending" ? (locale === "zh" ? "正在停止…" : "Stopping…") : turn.cancellation.message ?? "") : "";
 }
 
-function renderConversationView(collaborator, conversationId, view, path, conversation, preserveComposer) {
-  const previousComposer = preserveComposer ? content.querySelector("#composer") : null;
-  const previousDraft = previousComposer?.value ?? "";
-  const composerFocused = previousComposer !== null && document.activeElement === previousComposer;
-  const selection = previousComposer ? [previousComposer.selectionStart, previousComposer.selectionEnd, previousComposer.selectionDirection] : null;
-  const previousMessages = preserveComposer ? content.querySelector(".messages") : null;
-  const messagesPinnedToBottom = previousMessages ? previousMessages.scrollHeight - previousMessages.scrollTop - previousMessages.clientHeight < 24 : false;
-  const messagesScrollTop = previousMessages?.scrollTop ?? 0;
-  const contentScrollTop = content.scrollTop;
+function approvalMarkup(approvals = []) {
+  return approvals.filter(approval => approval.state === "pending").map(approval => `<div class="approval"><strong>${esc(approval.title)}</strong><div class="row-actions"><button class="primary-button" data-approval="${escAttr(approval.approvalId)}" data-decision="allowOnce">${esc(t("approve"))}</button><button class="quiet-button" data-approval="${escAttr(approval.approvalId)}" data-decision="allowSession">${esc(t("approveSession"))}</button><button class="danger-button" data-approval="${escAttr(approval.approvalId)}" data-decision="deny">${esc(t("deny"))}</button></div></div>`).join("");
+}
+
+function renderConversationView(collaborator, conversationId, view, path, conversation) {
   const active = turnActions(conversation.activeTurn).canCancel;
-  content.innerHTML = pageHead("conversations", conversation.title, t("conversations"), `<button class="quiet-button" data-back-studio>${esc(t("studio"))}</button>${active ? `<button class="danger-button" data-stop-turn>${esc(t("stop"))}</button>` : ""}`)
-    + (conversation.activeTurn?.cancellation ? `<p role="status">${esc(conversation.activeTurn.cancellation.status === "pending" ? (locale === "zh" ? "正在停止…" : "Stopping…") : conversation.activeTurn.cancellation.message ?? "")}</p>` : "")
-    + `<section class="conversation"><div class="messages">${(conversation.messages ?? []).map((message) => `<div class="message ${escAttr(message.role)}">${esc(message.content)}</div>`).join("") || empty("◌", t("noConversations"), t("conversations"))}</div>${(conversation.approvals ?? []).filter((approval) => approval.state === "pending").map((approval) => `<div class="approval"><strong>${esc(approval.title)}</strong><div class="row-actions"><button class="primary-button" data-approval="${escAttr(approval.approvalId)}" data-decision="allowOnce">${esc(t("approve"))}</button><button class="quiet-button" data-approval="${escAttr(approval.approvalId)}" data-decision="allowSession">${esc(t("approveSession"))}</button><button class="danger-button" data-approval="${escAttr(approval.approvalId)}" data-decision="deny">${esc(t("deny"))}</button></div></div>`).join("")}<div class="composer"><textarea id="composer"></textarea><button class="primary-button" data-send>${esc(t("send"))}</button></div></section>`;
+  content.innerHTML = pageHead("conversations", conversation.title, t("conversations"), `<button class="quiet-button" data-back-studio>${esc(t("studio"))}</button><button class="danger-button" data-stop-turn ${active ? "" : "hidden"}>${esc(t("stop"))}</button>`)
+    + `<p role="status" data-cancellation ${cancellationText(conversation.activeTurn) ? "" : "hidden"}>${esc(cancellationText(conversation.activeTurn))}</p>`
+    + `<section class="conversation"><div class="messages">${(conversation.messages ?? []).map(message => `<div class="message ${escAttr(message.role)}" data-message-id="${escAttr(message.messageId)}" data-position="${message.position}">${esc(message.content)}</div>`).join("") || empty("◌", t("noConversations"), t("conversations"))}</div><div data-approvals>${approvalMarkup(conversation.approvals)}</div><div class="composer"><textarea id="composer"></textarea><button class="primary-button" data-send>${esc(t("send"))}</button></div></section>`;
   content.querySelector("[data-back-studio]").addEventListener("click", () => renderCollaboratorStudio(collaborator));
   content.querySelector("[data-stop-turn]")?.addEventListener("click", async (event) => {
     event.currentTarget.disabled = true;
@@ -613,18 +603,11 @@ function renderConversationView(collaborator, conversationId, view, path, conver
     const text = document.querySelector("#composer").value.trim(); if (!text) return;
     await mutate(() => api.request("POST", `${path}/messages`, { clientRequestId: crypto.randomUUID(), text }), null, () => currentConversationView === view ? openConversation(collaborator, conversationId) : undefined);
   });
-  content.querySelectorAll("[data-approval]").forEach((button) => button.addEventListener("click", () => mutate(() => api.request("POST", `${path}/approvals/${encodeURIComponent(button.dataset.approval)}`, { decision: button.dataset.decision }), null, () => currentConversationView === view ? openConversation(collaborator, conversationId) : undefined)));
-  const composer = content.querySelector("#composer");
-  if (composer && previousDraft) composer.value = previousDraft;
-  if (composer && composerFocused) {
-    composer.focus();
-    composer.setSelectionRange(selection[0], selection[1], selection[2]);
-  }
-  if (preserveComposer) {
-    const messages = content.querySelector(".messages");
-    if (messages) messages.scrollTop = messagesPinnedToBottom ? messages.scrollHeight : messagesScrollTop;
-    content.scrollTop = contentScrollTop;
-  }
+  content.querySelector("[data-approvals]").addEventListener("click", event => {
+    const button = event.target.closest("[data-approval]");
+    if (!button) return;
+    void mutate(() => api.request("POST", `${path}/approvals/${encodeURIComponent(button.dataset.approval)}?window=1`, { decision: button.dataset.decision }), null, () => undefined);
+  });
 }
 
 function bindDownloads(kind, items, id, filename) {
