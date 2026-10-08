@@ -556,10 +556,12 @@ async function conversationPollTick(collaborator, conversationId, view, path, po
     if (pollState.version) params.set("version", pollState.version);
     const sync = await api.request("GET", `${path}/sync?${params}`);
     if (currentConversationView !== view) return;
-    if (typeof sync.version === "string") pollState.version = sync.version;
+    // Commit the new version only once the change is rendered; otherwise a failed
+    // refresh would leave the next tick short-circuiting on `unchanged` forever.
     if (!sync.unchanged && typeof sync.cursor === "number" && sync.cursor !== pollState.cursor) {
-      pollState.cursor = sync.cursor;
       refreshed = await refreshConversationView(collaborator, conversationId, view, path);
+    } else if (typeof sync.version === "string") {
+      pollState.version = sync.version;
     }
   } catch {
     // Transient poll failure: stay silent and keep polling on the next tick.
@@ -583,8 +585,14 @@ async function refreshConversationView(collaborator, conversationId, view, path)
 }
 
 function renderConversationView(collaborator, conversationId, view, path, conversation, preserveComposer) {
-  const previousDraft = preserveComposer ? (content.querySelector("#composer")?.value ?? "") : "";
-  const composerFocused = preserveComposer && document.activeElement?.id === "composer";
+  const previousComposer = preserveComposer ? content.querySelector("#composer") : null;
+  const previousDraft = previousComposer?.value ?? "";
+  const composerFocused = previousComposer !== null && document.activeElement === previousComposer;
+  const selection = previousComposer ? [previousComposer.selectionStart, previousComposer.selectionEnd, previousComposer.selectionDirection] : null;
+  const previousMessages = preserveComposer ? content.querySelector(".messages") : null;
+  const messagesPinnedToBottom = previousMessages ? previousMessages.scrollHeight - previousMessages.scrollTop - previousMessages.clientHeight < 24 : false;
+  const messagesScrollTop = previousMessages?.scrollTop ?? 0;
+  const contentScrollTop = content.scrollTop;
   const active = turnActions(conversation.activeTurn).canCancel;
   content.innerHTML = pageHead("conversations", conversation.title, t("conversations"), `<button class="quiet-button" data-back-studio>${esc(t("studio"))}</button>${active ? `<button class="danger-button" data-stop-turn>${esc(t("stop"))}</button>` : ""}`)
     + (conversation.activeTurn?.cancellation ? `<p role="status">${esc(conversation.activeTurn.cancellation.status === "pending" ? (locale === "zh" ? "正在停止…" : "Stopping…") : conversation.activeTurn.cancellation.message ?? "")}</p>` : "")
@@ -607,9 +615,15 @@ function renderConversationView(collaborator, conversationId, view, path, conver
   });
   content.querySelectorAll("[data-approval]").forEach((button) => button.addEventListener("click", () => mutate(() => api.request("POST", `${path}/approvals/${encodeURIComponent(button.dataset.approval)}`, { decision: button.dataset.decision }), null, () => currentConversationView === view ? openConversation(collaborator, conversationId) : undefined)));
   const composer = content.querySelector("#composer");
-  if (composer && previousDraft) {
-    composer.value = previousDraft;
-    if (composerFocused) { composer.focus(); composer.setSelectionRange(previousDraft.length, previousDraft.length); }
+  if (composer && previousDraft) composer.value = previousDraft;
+  if (composer && composerFocused) {
+    composer.focus();
+    composer.setSelectionRange(selection[0], selection[1], selection[2]);
+  }
+  if (preserveComposer) {
+    const messages = content.querySelector(".messages");
+    if (messages) messages.scrollTop = messagesPinnedToBottom ? messages.scrollHeight : messagesScrollTop;
+    content.scrollTop = contentScrollTop;
   }
 }
 
