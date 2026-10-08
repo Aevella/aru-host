@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { EventEmitter } from "node:events";
 import {
   createConversationTurnRelay,
   SUPPORTED_CONVERSATION_TURN_PROTOCOLS,
@@ -233,4 +234,49 @@ test("provider failures retain a bounded redacted diagnostic", async () => {
     globalThis.fetch = previousFetch;
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+
+test("interrupted upload is diagnosed before admission and retry does not duplicate execution", async () => {
+  const root = mkdtempSync(join(tmpdir(), "aru-upload-interrupted-"));
+  const state = { conversationTurns: [] };
+  const logs = [], responses = [];
+  let interrupted = true, fetchCount = 0;
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async () => { fetchCount++; return new Response("data: [DONE]\n\n"); };
+  class HttpError extends Error {
+    constructor(status, code, message) { super(message); this.status = status; this.code = code; }
+  }
+  try {
+    const relay = createConversationTurnRelay({
+      dataDir: root, state, saveState: () => {}, HttpError, maximumRequestBytes: 1024,
+      log: (line) => logs.push(line),
+      sendJSON: (_res, status, body) => responses.push({ status, body }),
+      readJSONBody: async (req) => {
+        if (interrupted) {
+          req.emit("data", Buffer.from("private-partial-context"));
+          throw Object.assign(new Error("aborted"), { code: "ECONNRESET" });
+        }
+        return { clientTurnId: "turn-one", conversationId: "conversation-one", protocolId: "openai-compatible",
+          request: { endpoint: "https://provider.example/v1/chat/completions", headers: {},
+            bodyBase64: Buffer.from('{"stream":true}').toString("base64") } };
+      },
+    });
+    const req = Object.assign(new EventEmitter(), { method: "POST" });
+    await assert.rejects(relay.route(req, {}, "/aru/v1/conversation-turns", () => ({ deviceId: "device-one" })),
+      error => error.code === "conversation_turn.upload_interrupted" && error.status === 400);
+    assert.equal(state.conversationTurns.length, 0);
+    assert.equal(fetchCount, 0);
+    assert.equal(responses.length, 0);
+    assert.equal(req.listenerCount("data"), 0);
+    assert.match(logs[0], /phase=before_admission receivedBytes=23 elapsedMs=\d+/);
+    assert.ok(!logs.join(" ").includes("private-partial-context"));
+    interrupted = false;
+    await relay.route(req, {}, "/aru/v1/conversation-turns", () => ({ deviceId: "device-one" }));
+    await relay.route(req, {}, "/aru/v1/conversation-turns", () => ({ deviceId: "device-one" }));
+    await new Promise(resolve => setTimeout(resolve, 30));
+    assert.equal(state.conversationTurns.length, 1);
+    assert.equal(fetchCount, 1);
+    assert.equal(state.conversationTurns[0].state, "succeeded");
+  } finally { globalThis.fetch = previousFetch; rmSync(root, { recursive: true, force: true }); }
 });

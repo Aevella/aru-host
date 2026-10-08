@@ -235,3 +235,11 @@ missing or damaged acknowledged bytes stop recovery/collection. Fault tests cove
 both cases. Batch retain admission reads headers/sizes; publishing verifies each
 complete ciphertext once before exposing the recovery point. The repository
 advertises `batchRetain` and snapshot version 2; old v1 requests remain supported.
+
+
+2026-10-08 turn-upload diagnostics: interrupted request bodies are classified as
+`conversation_turn.upload_interrupted` before durable admission. Logs contain only
+phase, received byte count and elapsed time, never partial context or credentials.
+A focused interruption/retry fixture proves no admission/provider execution for the
+partial upload and one execution after idempotent retry. This is source/local proof;
+no installed Host or phone background-delivery acceptance is claimed.

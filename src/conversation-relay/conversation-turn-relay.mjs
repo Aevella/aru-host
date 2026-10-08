@@ -68,7 +68,24 @@ export function createConversationTurnRelay({
   }
 
   async function submit(req, res, device) {
-    const body = await readJSONBody(req, maximumRequestBytes);
+    const uploadStartedAt = Date.now();
+    let receivedBytes = 0;
+    const countChunk = (chunk) => { receivedBytes += chunk.length; };
+    req.on?.("data", countChunk);
+    let body;
+    try {
+      body = await readJSONBody(req, maximumRequestBytes);
+    } catch (error) {
+      if (req.aborted || error?.code === "ECONNRESET") {
+        // Admission has not happened: never claim a model execution failed or
+        // save a partial request. Do not log context, credentials or endpoints.
+        log(`conversation relay upload interrupted phase=before_admission receivedBytes=${receivedBytes} elapsedMs=${Date.now() - uploadStartedAt}`);
+        throw new HttpError(400, "conversation_turn.upload_interrupted", "Turn upload disconnected before Host admission.");
+      }
+      throw error;
+    } finally {
+      req.removeListener?.("data", countChunk);
+    }
     let clientTurnId;
     let conversationId;
     let protocolId;
