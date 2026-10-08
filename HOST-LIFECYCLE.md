@@ -277,4 +277,12 @@ Sandbox resource limits remain part of readiness and failures still reject
 activation. A restrictive-umask fixture checks probe readability and private
 configuration permissions; a Linux fixture checks temporary placement and cleanup
 on cgroup failure. Local macOS proof: 7 tests pass, 1 Linux-only test skipped.
-Real VPS/rootless Podman acceptance remains pending connection details.
+2026-10-09 real Linux VPS proof: an isolated transient systemd service used the
+installed Host user, UMask=0077, delegated cgroups, installed runtime configuration
+and cached images. Baseline reproduced EACCES reading the probe; candidate passed
+Node/Python/Shell read/write receipts with CPU, memory and PID limits retained,
+including private service TMPDIR. All 8 focused tests passed under the service
+user on Node 18. The production service remained active and was neither restarted
+nor upgraded; temporary probe files were removed. This VPS runs OpenCloudOS,
+not the reporter's Debian/Podman version, so it does not prove that separate
+cgroup issue on every rootless environment.
