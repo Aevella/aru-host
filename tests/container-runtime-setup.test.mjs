@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { configureContainerRuntime, replaceRuntime } from "../container-runtime-setup.mjs";
+import { configureContainerRuntime, replaceRuntime, verifyContainerRuntime } from "../container-runtime-setup.mjs";
 
 async function fixture(t) {
   const directory = await mkdtemp(join(tmpdir(), "aru-setup-test-"));
@@ -79,4 +79,40 @@ test("Windows literal paths and Unix shell quoting preserve executable identity"
   assert.equal(replaceRuntime("ARU_CONTAINER_RUNTIME=none\r\n", "C:\\Program Files\\Podman\\podman.exe", "win32"),
     "ARU_CONTAINER_RUNTIME=C:\\Program Files\\Podman\\podman.exe\r\n");
   assert.equal(replaceRuntime("", "/user's/podman", "darwin"), "\nARU_CONTAINER_RUNTIME='/user'\\''s/podman'\n");
+});
+
+test("restrictive service umask still admits container reads without weakening private files", { skip: process.platform === "win32" }, async t => {
+  const { config } = await fixture(t);
+  const oldMask = process.umask(0o077);
+  try {
+    await configureContainerRuntime(config, { candidates: ["podman"], run: async (command, args) => {
+      if (args[0] === "run") {
+        const mount = args[args.indexOf("--mount") + 1];
+        const directory = mount.slice("type=bind,src=".length, mount.indexOf(",dst="));
+        assert.equal((await stat(join(directory, "input.txt"))).mode & 0o777, 0o644);
+      }
+      return successfulRun(command, args);
+    } });
+    assert.equal((await stat(config)).mode & 0o777, 0o600);
+  } finally { process.umask(oldMask); }
+});
+
+test("Linux probe avoids private service TMPDIR and cleans up on sandbox failure", { skip: process.platform !== "linux" }, async t => {
+  const { config } = await fixture(t);
+  const privateRoot = join(config, "..");
+  const oldTmp = process.env.TMPDIR;
+  process.env.TMPDIR = privateRoot;
+  let probe;
+  try {
+    await assert.rejects(verifyContainerRuntime("podman", { checkEngine: false, run: async (_, args) => {
+      const mount = args[args.indexOf("--mount") + 1];
+      probe = mount.slice("type=bind,src=".length, mount.indexOf(",dst="));
+      assert.ok(probe.startsWith("/tmp/aru-container-check-"));
+      assert.ok(args.includes("--memory"));
+      throw Error("cgroup denied");
+    } }), /cgroup denied/);
+    await assert.rejects(stat(probe), { code: "ENOENT" });
+  } finally {
+    if (oldTmp === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = oldTmp;
+  }
 });

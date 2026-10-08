@@ -58,10 +58,16 @@ export async function verifyContainerRuntime(executable, { run = execute, settin
     try { await run(executable, ["info"], { timeout: 30_000, windowsHide: true, maxBuffer: 1024 * 1024 }); }
     catch { throw Object.assign(new Error("Container engine is unavailable to the Host process"), { code: "engine-unavailable" }); }
   }
-  const directory = await mkdtemp(join(tmpdir(), "aru-container-check-"));
+  // Linux service TMPDIR lives beneath a private StateDirectory. The non-root
+  // container user needs a traversable bind source, so keep this synthetic probe
+  // in the system temporary directory rather than widening private Host storage.
+  const directory = await mkdtemp(join(process.platform === "linux" ? "/tmp" : tmpdir(), "aru-container-check-"));
   try {
     await chmod(directory, 0o777);
     await writeFile(join(directory, "input.txt"), "aru-runtime-check", { mode: 0o644 });
+    // Creation mode is masked by systemd UMask=0077; chmod establishes the
+    // intended permission for the isolated container user after creation.
+    await chmod(join(directory, "input.txt"), 0o644);
     for (const [key, fallback, command] of [
       ["NODE", "node:22-alpine", ["node", "-e", "const f=require('fs');if(f.readFileSync('/workspace/input.txt','utf8')!=='aru-runtime-check')process.exit(1);f.writeFileSync('/workspace/node.txt','ok')"]],
       ["PYTHON", "python:3.13-alpine", ["python3", "-c", "from pathlib import Path; assert Path('/workspace/input.txt').read_text() == 'aru-runtime-check'; Path('/workspace/python.txt').write_text('ok')"]],
