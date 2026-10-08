@@ -22,7 +22,11 @@ export function createBackupSnapshotRoutes({ config, serverId, sendJSON, HttpErr
     return { remotePackageId: record.id, uploadedAt: record.publishedAt, metadata: record.metadata };
   }
   function remove(id) {
-    store().remove(id);
+    try { store().remove(id); }
+    catch (error) {
+      if (error.message === "backup.snapshot.unknown") throw new HttpError(404, "package.unknown", "unknown package");
+      throw error;
+    }
     return { remotePackageId: id, deleted: true, deletedAt: Date.now() };
   }
   function inventory() { return { packages: store().inventory().map(publicRecord) }; }

@@ -223,6 +223,7 @@ export function createBackupSnapshotStore({ directory, fault = () => {} }) {
     return data;
   }
   function remove(id) {
+    if (!exists(path("snapshots", id)) && !exists(path("drafts", id)) && !exists(path("deleted", id))) fail("unknown");
     atomic(path("deleted", id), Buffer.from(JSON.stringify({ id, deletedAt: Date.now() })));
     const file = path("snapshots", id);
     if (exists(file)) {

@@ -153,3 +153,14 @@ test('unacknowledged torn reference tail recovers; malformed committed lines fai
   assert.throws(() => f.reopen().collect());
   assert.ok(existsSync(join(f.directory, 'chunks', chunk.id)));
 });
+
+test("unknown deletion creates no tombstone; admitted deletion remains repeatable after restart", t => {
+  const f = fixture(t);
+  assert.throws(() => f.store.remove("missing-backup"), /snapshot.unknown/);
+  assert.equal(existsSync(join(f.directory, "deleted", "missing-backup.json")), false);
+  const draft = f.store.begin("device-a");
+  f.store.remove(draft.id);
+  const reopened = createBackupSnapshotStore({ directory: f.directory });
+  reopened.remove(draft.id);
+  assert.equal(existsSync(join(f.directory, "deleted", `${draft.id}.json`)), true);
+});

@@ -259,3 +259,12 @@ fixture verifies one changed row causes one text write, retains every row identi
 and preserves non-bottom scroll; repeated identical projection causes no text writes.
 This is operation-count evidence, not real Electron frame-time, battery, installed
 Windows/Linux acceptance, or published-package evidence.
+
+2026-10-08 backup deletion admission: the unified backup removal outlet validates
+external package identifiers before selecting the legacy vault or snapshot owner.
+Invalid identifiers return HTTP 400 `package.id_invalid` rather than a generic
+500. Snapshot deletion rejects unknown identities with `package.unknown` without
+creating tombstones; admitted draft/snapshot and existing deletion identities
+retain repeatable deletion across restart. HTTP smoke covers invalid paths for
+both owner prefixes and the existing MCP missing-package counterexample. This is
+source/local proof, not a deployed Host upgrade.

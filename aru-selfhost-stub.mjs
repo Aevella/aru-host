@@ -1436,6 +1436,7 @@ function createBackupSnapshotStore({ directory, fault = () => {} }) {
     return data;
   }
   function remove(id) {
+    if (!exists(path("snapshots", id)) && !exists(path("drafts", id)) && !exists(path("deleted", id))) fail("unknown");
     atomic(path("deleted", id), Buffer.from(JSON.stringify({ id, deletedAt: Date.now() })));
     const file = path("snapshots", id);
     if (exists(file)) {
@@ -1513,7 +1514,11 @@ function createBackupSnapshotRoutes({ config, serverId, sendJSON, HttpError, app
     return { remotePackageId: record.id, uploadedAt: record.publishedAt, metadata: record.metadata };
   }
   function remove(id) {
-    store().remove(id);
+    try { store().remove(id); }
+    catch (error) {
+      if (error.message === "backup.snapshot.unknown") throw new HttpError(404, "package.unknown", "unknown package");
+      throw error;
+    }
     return { remotePackageId: id, deleted: true, deletedAt: Date.now() };
   }
   function inventory() { return { packages: store().inventory().map(publicRecord) }; }
@@ -2557,8 +2562,13 @@ const backupSnapshots = createBackupSnapshotRoutes({
   applyRetention: (actor, verifiedPackageId) => backupSettings.applyRetention(actor, verifiedPackageId),
 });
 const backupInventory = () => [...state.packages, ...backupSnapshots.inventory().packages];
-const removeBackup = (id, actor) => id.startsWith("r_")
-  ? deleteBackupPackage(id, actor) : backupSnapshots.remove(id);
+const removeBackup = (id, actor) => {
+  // Admit external identifiers before dispatching to either durable backup owner.
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(id)) {
+    throw new HttpError(400, "package.id_invalid", "backup package id is invalid");
+  }
+  return id.startsWith("r_") ? deleteBackupPackage(id, actor) : backupSnapshots.remove(id);
+};
 const backupSettings = createBackupSettings({
   state,
   saveState,
