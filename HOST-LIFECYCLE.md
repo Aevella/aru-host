@@ -243,3 +243,19 @@ phase, received byte count and elapsed time, never partial context or credential
 A focused interruption/retry fixture proves no admission/provider execution for the
 partial upload and one execution after idempotent retry. This is source/local proof;
 no installed Host or phone background-delivery acceptance is claimed.
+
+2026-10-08 Console foreground sync follow-up (candidate branch): Electron Console
+applies sync message rows by stable identity instead of issuing a second complete
+conversation GET and replacing the page on each update. The composer stays mounted;
+pending approvals have a dedicated projection and delegated intent handler. Backlog
+pages drain before caching a conditional version, and pending cancellation remains
+observed until the turn is terminal. Stale views and failed projection application
+cannot advance the applied cursor. Initial opening and explicit send/cancel refresh
+retain their existing complete-history behavior; this is not initial-history paging
+or a ledger storage rewrite.
+
+Local proof: 25 Console tests and 3 Host sync tests pass. A synthetic 5,000-row DOM
+fixture verifies one changed row causes one text write, retains every row identity,
+and preserves non-bottom scroll; repeated identical projection causes no text writes.
+This is operation-count evidence, not real Electron frame-time, battery, installed
+Windows/Linux acceptance, or published-package evidence.
