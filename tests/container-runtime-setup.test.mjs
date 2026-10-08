@@ -81,7 +81,7 @@ test("Windows literal paths and Unix shell quoting preserve executable identity"
   assert.equal(replaceRuntime("", "/user's/podman", "darwin"), "\nARU_CONTAINER_RUNTIME='/user'\\''s/podman'\n");
 });
 
-test("restrictive service umask still admits container reads without weakening private files", async t => {
+test("restrictive service umask still admits container reads without weakening private files", { skip: process.platform === "win32" }, async t => {
   const { config } = await fixture(t);
   const oldMask = process.umask(0o077);
   try {
