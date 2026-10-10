@@ -1,6 +1,7 @@
 import { pollConversation, patchMessageRows, conversationRunning } from "./conversation-sync.mjs";
 import { hostReleaseLabel, turnActions, driverGuidance } from "./host-presentation.mjs";
 import { containerSetupPanel, bindContainerSetup } from "./container-setup.mjs";
+import { connectionSettingsPanel, bindConnectionSettings } from "./connection-settings.mjs";
 const api = window.aruHost;
 let currentConversationView;
 const locale = navigator.language.toLowerCase().startsWith("zh") ? "zh" : "en";
@@ -125,12 +126,14 @@ async function renderOverview() {
   content.innerHTML = pageHead("overview", t("overviewTitle"), t("overviewDetail"), `<button class="quiet-button" data-action="rename">${esc(t("rename"))}</button><button class="primary-button" data-action="pair">${esc(t("mobilePair"))}</button>`)
     + `<section class="hero">${state.bootstrap?.secretStorage === "windows-dpapi" ? `<p class="eyebrow">${esc(t("windowsPreview"))}</p>` : ""}<p class="eyebrow">Aru Host Core</p><h3>${esc(settings.displayName)}</h3><p>${esc(hostReleaseLabel(diagnostics, locale))} · ${esc(diagnostics.serverId)}</p><div class="status-row"><span class="status-pill good">${esc(t("systemHealthy"))}</span><span class="status-pill good">${esc(t(storageKey))}</span>${firewallBlocked ? `<span class="status-pill warn">${esc(t("firewallBlocked"))}</span><button class="quiet-button" data-fix-firewall>${esc(t("firewallFix"))}</button>` : ""}</div></section>`
     + (settings.networkAddress ? `<section class="hero"><p>${esc(settings.networkAddress.url)}</p><p>${esc(settings.networkAddress.status === "no-lan-interface" ? (locale === "zh" ? "未检测到局域网，连接 Wi-Fi 后重新读取。" : "No LAN interface. Connect to Wi-Fi and refresh.") : settings.networkAddress.mode === "automatic-lan" ? (locale === "zh" ? "自动跟随局域网地址" : "Automatic LAN address") : (locale === "zh" ? "固定地址（保留安装配置）" : "Fixed installation address"))}</p>${state.bootstrap?.manifest?.transportProfiles?.some(item => item.kind === "lan") ? `<button class="quiet-button" data-address-mode>${esc(locale === "zh" ? "地址设置" : "Address settings")}</button>` : ""}</section>` : "")
+    + connectionSettingsPanel(locale, state.bootstrap?.manifest?.capabilities?.["node-settings"]?.additionalTransports === true)
     + (!state.bootstrap?.manifest?.capabilities?.["workspace-runtime"]?.enabled ? containerSetupPanel(locale, false, state.bootstrap?.manifest?.capabilities?.["workspace-runtime"]?.readiness) : "")
     + `<div class="metrics">${metric(diagnostics.hostedCollaboratorCount, t("collaborators"))}${metric(diagnostics.activeJobCount, t("runtime"))}${metric(diagnostics.artifactCount, t("artifacts"))}${metric(activeDevices.length, t("pairedDevices"))}</div>`
     + sectionBlock(t("capabilities"), "", `<div class="raised-list">${diagnostics.capabilities.map((capability) => row(capability.id, capability.enabled ? t("systemHealthy") : t("routeUnavailable"), `<span class="status-pill ${capability.enabled ? "good" : "warn"}">${esc(t(capability.enabled ? "enabled" : "disabled"))}</span>`)).join("")}</div>`)
     + sectionBlock(t("pairedDevices"), "", activeDevices.length ? `<div class="raised-list">${activeDevices.map((device) => row(device.label, formatDate(device.issuedAt), device.isCurrent ? `<span class="tag">${esc(t("thisConsole"))}</span>` : `<button class="danger-button" data-revoke="${escAttr(device.deviceId)}">${esc(t("revoke"))}</button>`)).join("")}</div>` : empty("◌", t("noDevices"), t("noDevicesDetail")))
     + sectionBlock(t("settings"), t("uninstallHostDetail"), `<button class="danger-button" data-uninstall-host>${esc(t("uninstallHost"))}</button>`);
   if (content.querySelector("[data-container-verify]")) bindContainerSetup(content, api, locale, manifest => { state.bootstrap.manifest = manifest; });
+  bindConnectionSettings(content, api, locale, settings, updated => { Object.assign(settings, updated); });
   content.querySelector("[data-address-mode]")?.addEventListener("click", async () => {
     const values = await openForm(locale === "zh" ? "地址设置" : "Address settings", [{ name: "addressMode", label: locale === "zh" ? "地址来源" : "Address source", type: "select", value: settings.networkAddress.mode,
       options: [["automatic-lan", locale === "zh" ? "自动跟随局域网" : "Automatic LAN"], ["fixed", locale === "zh" ? "使用安装时指定的地址" : "Fixed installation address"]] }]);

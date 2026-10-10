@@ -14,7 +14,7 @@ const diagnostics = {
 };
 const nodeSettings = { schema: "aru.selfhost.node-settings.v1", displayName: "示例 Host", revision: 4,
   networkAddress: { mode: "fixed", url: "http://host-example.local:8787", status: "configured" } };
-const manifest = { serverVersion: "stub-0.30", releaseVersion: "0.33.1", transportProfiles: [{ kind: "lan" }], capabilities: { "workspace-runtime": { enabled: false, readiness: { status: "failed", reason: "engine-unavailable" } } } };
+const manifest = { serverId: "example-host", serverVersion: "stub-0.30", releaseVersion: "0.33.1", transportProfiles: [{ kind: "lan" }], capabilities: { "node-settings": { additionalTransports: true }, "workspace-runtime": { enabled: false, readiness: { status: "failed", reason: "engine-unavailable" } } } };
 const devices = {
   devices: [
     { deviceId: "console", label: "Aru Host Console", issuedAt: "2026-07-24T07:20:00Z", isCurrent: true, revokedAt: null },
@@ -63,9 +63,15 @@ window.aruHost = Object.freeze({
   },
   openContainerSetup: async () => true,
   verifyCoreRuntime: async () => ({ ...manifest, capabilities: { "workspace-runtime": { enabled: true, readiness: { status: "ready" } } } }),
+  checkConnectionAddress: async (kind, address) => {
+    if (address.includes('wrong')) return { ok: false, code: 'different_host', message: 'This address belongs to a different Host.' };
+    return { ok: true, baseUrl: address, serverId: 'example-host' };
+  },
   request: async (method, path, body) => {
     if (method === "GET" && path === "/.well-known/aru.json") return manifest;
-    if (method === "PUT" && path === "/aru/v1/node-settings") { nodeSettings.networkAddress.mode = body.addressMode ?? nodeSettings.networkAddress.mode; nodeSettings.revision++; return nodeSettings; }
+    if (method === "PUT" && path === "/aru/v1/node-settings") { if (body.expectedRevision !== nodeSettings.revision) throw new Error('node settings changed since they were read');
+      if (body.additionalTransports) nodeSettings.additionalTransports = body.additionalTransports;
+      nodeSettings.networkAddress.mode = body.addressMode ?? nodeSettings.networkAddress.mode; nodeSettings.revision++; return nodeSettings; }
     if (method === "GET" && path === "/aru/v1/jobs") return { jobs: [] };
     if (method === "GET" && path === "/aru/v1/jobs/policy") return { defaultMaximumRuntimeSeconds: null };
     if (method === "GET" && path === "/aru/v1/diagnostics") return diagnostics;
