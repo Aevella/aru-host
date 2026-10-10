@@ -2,18 +2,18 @@ import { connectionOrigin } from "./connection-address.mjs";
 
 const copy = {
   zh: {
-    title: "手机远程连接", detail: "保留原有局域网连接，同时添加公网 HTTPS 或 Tailscale 地址。这里不会自动寻找公网 IP，也不会配置域名、隧道或服务器防火墙。",
+    title: "手机远程连接", detail: "添加已配置好的公网 HTTPS 或 Tailscale 地址，让手机远程连接这台电脑。",
     invalid: "地址格式不正确：请填写公网 HTTPS 或 Tailscale 地址，不带路径、账号密码或查询参数。", different: "这个地址连到了另一台 Host，请核对地址。", unavailable: "暂时无法连接，请检查域名、端口和服务器防火墙。",
     empty: "还没有添加远程地址。", add: "添加地址", save: "保存连接地址", reset: "撤销修改", remove: "移除", check: "检查连接", checking: "正在检查…",
-    checked: "已确认连接到这台 Host。手机仍需能访问这个地址。", url: "连接地址", kind: "连接方式", public: "公网 HTTPS", tailscale: "Tailscale",
+    checked: "已连接到这台 Host，可以在手机上试试。", url: "连接地址", kind: "连接方式", public: "公网 HTTPS", tailscale: "Tailscale",
     hint: "填写地址和端口，不带路径。公网连接需要 HTTPS；Tailscale 可以使用 http://100.100.100.100:8787。", duplicate: "这个地址已经添加。",
     saved: "连接地址已保存，手机重新读取 Host 后可使用。", failed: "未保存，输入已保留：", unsupported: "当前 Host 尚不支持额外连接地址，请先更新 Host Core。",
   },
   en: {
-    title: "Remote phone connections", detail: "Keep the existing LAN connection and add public HTTPS or Tailscale addresses. This does not detect public IPs or configure DNS, tunnels or server firewalls.",
+    title: "Remote phone connections", detail: "Add a configured public HTTPS or Tailscale address to connect your phone remotely.",
     invalid: "Enter public HTTPS or Tailscale without a path, credentials or query.", different: "This address belongs to a different Host. Check the address.", unavailable: "Connection unavailable. Check DNS, port and server firewall.",
     empty: "No remote addresses yet.", add: "Add address", save: "Save addresses", reset: "Discard changes", remove: "Remove", check: "Check connection", checking: "Checking…",
-    checked: "Confirmed this Host. Your phone must also be able to reach the address.", url: "Connection address", kind: "Connection type", public: "Public HTTPS", tailscale: "Tailscale",
+    checked: "Connected to this Host. Try connecting from your phone.", url: "Connection address", kind: "Connection type", public: "Public HTTPS", tailscale: "Tailscale",
     hint: "Enter an origin and optional port, without a path. Public connections require HTTPS; Tailscale may use http://100.100.100.100:8787.", duplicate: "This address has already been added.",
     saved: "Addresses saved. Refresh the Host on your phone to use them.", failed: "Not saved; your input is retained: ", unsupported: "Update Host Core to support additional connection addresses.",
   },
