@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add public HTTPS and Tailscale connection-address editing to Windows/Linux Console, including credential-free Host identity checks, revision-checked save, removal and retained drafts after failure.
+
 - Use Docker/Podman-compatible writable mounts in runtime verification, workspace jobs and plugin data volumes.
 - Show background container verification stage, executable, image and engine stderr in Windows/Linux Console. Private failure details require an authenticated loopback Host Console and are excluded from the public manifest.
 

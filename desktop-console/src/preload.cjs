@@ -1,6 +1,7 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("aruHost", Object.freeze({
+  checkConnectionAddress: (kind, address) => ipcRenderer.invoke("host:check-connection-address", kind, address),
   openContainerSetup: () => ipcRenderer.invoke("host:open-container-setup"),
   verifyCoreRuntime: () => ipcRenderer.invoke("host:verify-core-runtime"),
   setupContainerRuntime: () => ipcRenderer.invoke("host:setup-container-runtime"),

@@ -59,6 +59,8 @@ Aru 是 iPhone 上的 AI 协作者应用，本仓库不包含它。Aru Host 是 
 
 桌面 Console 的总览与运行环境提供官方安装说明和“检测并启用”。安装并启动容器引擎后，Host 会下载镜像、验证实际运行和工作目录读写，再保存配置并重启服务。错误不会被当作安装完成。命令行用户可在更新当前安装器后运行 `aru-selfhost --instance home setup-runtime`（Windows 对应 `-Instance home setup-runtime`）。Linux VPS 的完整安装器原本就自动准备 Podman，无需桌面引导。
 
+Windows/Linux Console 的远程地址入口已在源码中补齐，尚待安装包发布：进入“总览 → 手机远程连接”，添加公网 HTTPS 或 Tailscale 地址，检查连接后保存。原局域网连接继续保留，保存的地址会立即加入 Host 清单并在重启后保留。自动地址模式只识别局域网，不会寻找云服务器映射的公网 IP；需要先配置可用的 HTTPS 域名或 Tailscale，并确认端口、服务器防火墙和云平台安全组。检查仅从电脑读取公开清单并核对 Host 身份，不发送配对凭据；电脑检查通过不代表手机网络一定可达。地址可以修改或移除，检查失败不清空输入。
+
 ## 现在能做什么
 
 - iPhone 扫码配对 Mac、家用电脑或 VPS；
