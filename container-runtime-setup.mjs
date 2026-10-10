@@ -8,6 +8,14 @@ import { pathToFileURL } from "node:url";
 
 const execute = promisify(execFile);
 
+function verificationError(error, stage, executable, image) {
+  const detail = String(error.stderr || error.message || error).trim();
+  return Object.assign(new Error(`Container verification failed (${stage}): ${detail}`, { cause: error }), {
+    code: stage === "engine" ? "engine-unavailable" : "execution-failed",
+    stage, executable, image, detail,
+  });
+}
+
 export function runtimeCandidates(platform = process.platform, env = process.env) {
   const roots = (env.PATH ?? "").split(delimiter).filter(Boolean);
   if (platform === "darwin") roots.push("/opt/podman/bin", "/opt/homebrew/bin", "/usr/local/bin", "/Applications/Docker.app/Contents/Resources/bin");
@@ -57,7 +65,7 @@ export async function configureContainerRuntime(configPath, {
 export async function verifyContainerRuntime(executable, { run = execute, setting = (_, fallback) => fallback, checkEngine = true, allowPull = true } = {}) {
   if (checkEngine) {
     try { await run(executable, ["info"], { timeout: 30_000, windowsHide: true, maxBuffer: 1024 * 1024 }); }
-    catch { throw Object.assign(new Error("Container engine is unavailable to the Host process"), { code: "engine-unavailable" }); }
+    catch (error) { throw verificationError(error, "engine", executable); }
   }
   // Linux service TMPDIR lives beneath a private StateDirectory. The non-root
   // container user needs a traversable bind source, so keep this synthetic probe
@@ -77,12 +85,15 @@ export async function verifyContainerRuntime(executable, { run = execute, settin
       const configured = setting(`${key}_IMAGE`, fallback);
       // Pulling images can take minutes; cancellation/engine errors are failures,
       // not a reason to save an unverified runtime. No fixed download deadline.
-      await run(executable, ["run", ...(allowPull ? [] : ["--pull", "never"]), "--rm", "--init", "--network", "none", "--read-only", "--cap-drop", "ALL",
+      try {
+        await run(executable, ["run", ...(allowPull ? [] : ["--pull", "never"]), "--rm", "--init", "--network", "none", "--read-only", "--cap-drop", "ALL",
         "--security-opt", "no-new-privileges", "--user", "65532:65532",
         "--pids-limit", "128", "--memory", setting("CONTAINER_MEMORY", "1g"),
         "--cpus", setting("CONTAINER_CPUS", "2"), "--tmpfs", "/tmp:rw,nosuid,nodev,size=64m", "--workdir", "/workspace",
-        "--mount", `type=bind,src=${directory},dst=/workspace,rw`, configured || fallback, ...command],
-      { windowsHide: true, maxBuffer: 4 * 1024 * 1024 });
+        "--mount", `type=bind,src=${directory},dst=/workspace`, configured || fallback, ...command],
+        { windowsHide: true, maxBuffer: 4 * 1024 * 1024 });
+      }
+      catch (error) { throw verificationError(error, key.toLowerCase(), executable, configured || fallback); }
     }
     for (const name of ["node", "python", "shell"]) {
       if (await readFile(join(directory, `${name}.txt`), "utf8") !== "ok") throw new Error("Container workspace write verification failed");

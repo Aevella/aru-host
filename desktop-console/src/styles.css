@@ -127,4 +127,5 @@ label.field { display: block; margin-bottom: 15px; }
 .container-setup { margin-block: 22px; }
 .container-setup h3 { font-size: 22px; }
 .container-setup p { font-size: 13px; line-height: 1.7; max-width: 72ch; }
+.container-setup [data-container-status] { white-space: pre-wrap; overflow-wrap: anywhere; }
 .container-setup button { margin-top: 10px; }

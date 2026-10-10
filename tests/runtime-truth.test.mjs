@@ -33,7 +33,10 @@ test('Core verification coalesces, reports actual failure, and repairs on retry'
   const first = owner.check(); assert.equal(owner.check(), first);
   await Promise.resolve(); complete.reject(new Error('service environment cannot mount'));
   assert.equal((await first).status, 'failed'); assert.equal(owner.ready(), false);
+  assert.equal(owner.diagnostics().failure.detail, 'service environment cannot mount');
+  assert.equal(owner.snapshot().failure, undefined, 'public manifest cannot disclose private execution details');
   const next = owner.check(); await Promise.resolve(); complete.resolve();
+  assert.equal(owner.diagnostics().failure, undefined, 'retry retires previous failure');
   assert.equal((await next).status, 'ready'); assert.equal(calls, 2);
   assert.equal((await createContainerReadiness({ containerRuntime: null }).check()).status, 'unconfigured');
 });

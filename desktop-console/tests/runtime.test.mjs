@@ -12,6 +12,10 @@ import {
 import { createDesktopPlatform } from "../src/platform/index.mjs";
 
 test("Host request allowlist admits owned routes and blocks traversal", () => {
+  assert.deepEqual(validateHostRequest("GET", "/aru/v1/container-runtime"), {
+    method: "GET", path: "/aru/v1/container-runtime",
+  });
+  assert.throws(() => validateHostRequest("PUT", "/aru/v1/container-runtime"));
   assert.deepEqual(validateHostRequest("GET", "/aru/v1/diagnostics"), {
     method: "GET", path: "/aru/v1/diagnostics",
   });

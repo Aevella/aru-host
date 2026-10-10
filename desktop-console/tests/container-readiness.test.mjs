@@ -29,3 +29,29 @@ test("Core execution failure is surfaced immediately without calling it an old r
     "workspace-runtime": { enabled: false, readiness: { status: "failed", message: "Service user cannot access engine" } },
   } })), /Service user cannot access engine/);
 });
+
+test("failure reads authenticated diagnostics once and preserves Podman stderr", async () => {
+  let reads = 0;
+  await assert.rejects(waitForContainerRuntime(async () => ({ capabilities: {
+    "workspace-runtime": { enabled: false, readiness: { status: "failed", message: "Background check failed" } },
+  } }), { readDiagnostics: async () => {
+    reads++;
+    return { failure: { stage: "python", executable: "podman.exe", image: "python:test", detail: "cannot connect to Podman socket" } };
+  } }), /python: podman.exe\nImage: python:test\ncannot connect to Podman socket/);
+  assert.equal(reads, 1);
+});
+
+test("successful readiness never reads private diagnostics", async () => {
+  assert.equal(await waitForContainerRuntime(async () => enabled, {
+    readDiagnostics: async () => { assert.fail("unnecessary diagnostic request"); },
+  }), enabled);
+});
+
+test("timeout explains unconfigured Core and failed diagnostic transport does not erase the failure", async () => {
+  await assert.rejects(waitForContainerRuntime(async () => ({ releaseVersion: "test" }), {
+    timeoutMs: 10, intervalMs: 1, readDiagnostics: async () => ({ status: "unconfigured" }),
+  }), /no container executable configured/);
+  await assert.rejects(waitForContainerRuntime(async () => ({ capabilities: {
+    "workspace-runtime": { readiness: { status: "failed", message: "Engine unavailable" } },
+  } }), { readDiagnostics: async () => { throw new Error("route.unknown"); } }), /Engine unavailable[\s\S]*route.unknown/);
+});
