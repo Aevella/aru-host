@@ -436,6 +436,10 @@ async function route(req, res) {
     void containerReadiness.check();
     return sendJSON(res, 202, containerReadiness.snapshot());
   }
+  if (req.method === "GET" && path === "/aru/v1/container-runtime") {
+    requireLocalHostConsole(req);
+    return sendJSON(res, 200, containerReadiness.diagnostics());
+  }
   if (req.method === "POST" && path === "/aru/v1/pair") {
     return handlePair(req, res);
   }

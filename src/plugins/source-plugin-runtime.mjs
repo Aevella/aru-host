@@ -280,7 +280,7 @@ export function createSourcePluginRuntime({
     if (resources?.pids) args.push("--pids-limit", String(resources.pids));
     args.push("--mount", `type=bind,src=${resolve(runnerPath)},dst=/aru/runner.mjs,ro`);
     args.push("--mount", `type=bind,src=${resolve(entry)},dst=/aru/plugin.mjs,ro`);
-    if (dataDirectory) args.push("--mount", `type=bind,src=${resolve(dataDirectory)},dst=/data,rw`);
+    if (dataDirectory) args.push("--mount", `type=bind,src=${resolve(dataDirectory)},dst=/data`);
     args.push(nodeImage, "node", "/aru/runner.mjs", "/aru/plugin.mjs");
     const child = spawn(containerRuntime, args, { stdio: ["pipe", "pipe", "pipe"] });
     child.aruContainerName = containerName;

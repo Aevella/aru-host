@@ -447,7 +447,7 @@ async function runWorkspaceContainer({
     "--cpus", config.containerCPUs,
     "--user", "65532:65532",
     "--tmpfs", "/tmp:rw,nosuid,nodev,size=64m",
-    "--mount", `type=bind,src=${workspaceDirectory},dst=/workspace,rw`,
+    "--mount", `type=bind,src=${workspaceDirectory},dst=/workspace`,
     "--workdir", "/workspace",
     "--env", `ARU_WORKSPACE_INPUT=${inputJSON}`,
     image,

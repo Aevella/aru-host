@@ -19,6 +19,7 @@ async function successfulRun(command, args) {
   assert.ok(args.includes("none"));
   assert.ok(args.includes("65532:65532"));
   const mount = args[args.indexOf("--mount") + 1];
+  assert.ok(!mount.endsWith(",rw"), "Docker --mount rejects bare rw; writable is the default");
   const directory = mount.slice("type=bind,src=".length, mount.indexOf(",dst="));
   const language = args.includes("node") ? "node" : args.includes("python3") ? "python" : "shell";
   assert.equal(await readFile(join(directory, "input.txt"), "utf8"), "aru-runtime-check");
@@ -79,6 +80,39 @@ test("Windows literal paths and Unix shell quoting preserve executable identity"
   assert.equal(replaceRuntime("ARU_CONTAINER_RUNTIME=none\r\n", "C:\\Program Files\\Podman\\podman.exe", "win32"),
     "ARU_CONTAINER_RUNTIME=C:\\Program Files\\Podman\\podman.exe\r\n");
   assert.equal(replaceRuntime("", "/user's/podman", "darwin"), "\nARU_CONTAINER_RUNTIME='/user'\\''s/podman'\n");
+});
+
+test("engine failure retains stderr and identifies the background executable", async () => {
+  await assert.rejects(verifyContainerRuntime("C:\\Program Files\\Podman\\podman.exe", {
+    run: async () => { throw Object.assign(new Error("Command failed"), { stderr: "cannot connect to Podman socket" }); },
+  }), error => {
+    assert.equal(error.code, "engine-unavailable");
+    assert.equal(error.stage, "engine");
+    assert.equal(error.detail, "cannot connect to Podman socket");
+    assert.match(error.executable, /podman.exe$/);
+    return true;
+  });
+});
+
+test("cached-image failure identifies the language and image without pulling on Core startup", async () => {
+  let probe;
+  await assert.rejects(verifyContainerRuntime("podman", {
+    allowPull: false,
+    run: async (command, args) => {
+      if (args[0] === "info") return;
+      assert.deepEqual(args.slice(0, 3), ["run", "--pull", "never"]);
+      const mount = args[args.indexOf("--mount") + 1];
+      probe = mount.slice("type=bind,src=".length, mount.indexOf(",dst="));
+      if (args.includes("python3")) throw Object.assign(new Error("Command failed"), { stderr: "image not known" });
+      return successfulRun(command, args);
+    },
+  }), error => {
+    assert.equal(error.stage, "python");
+    assert.equal(error.image, "python:3.13-alpine");
+    assert.equal(error.detail, "image not known");
+    return true;
+  });
+  await assert.rejects(stat(probe), { code: "ENOENT" });
 });
 
 test("restrictive service umask still admits container reads without weakening private files", { skip: process.platform === "win32" }, async t => {
