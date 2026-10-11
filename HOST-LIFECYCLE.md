@@ -305,3 +305,16 @@ including the Unicode device label, upgrade, rollback and reinstall. The fixture
 explicitly decodes JSON response bytes as UTF-8 for Windows PowerShell 5.1.
 Affected customer installations and real provider calls remain pending; this is
 not a published release.
+
+2026-10-11 recovery follow-up (candidate): authenticated execution-grant inventory
+is projected from the replica ledger by executor, independently of a phone's local
+residence link. Clients revoke the selected source/epoch through the existing
+receipt-checked endpoint before deleting the executor. The deletion guard remains;
+a concurrent new grant cannot be silently removed. Replica tests cover scoped and
+authenticated reads, revocation, restart and stale-epoch rejection.
+
+Console cancel/close buttons bypass required-field validation, while save retains
+it; each dialog opening clears its prior return value. Windows activation failures
+retain the probe error and distinguish no prior release, healthy rollback and
+failed rollback. The Windows lifecycle fixture now injects all three outcomes;
+these new Windows fault cases require CI execution, not a macOS acceptance claim.

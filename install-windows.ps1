@@ -466,18 +466,22 @@ try {
     if (Test-Path -LiteralPath $activeMetadata) {
       $expectedVersion = (Get-Content -LiteralPath $activeMetadata -Raw -Encoding UTF8 | ConvertFrom-Json).version
     }
-    Start-ScheduledTask -TaskName $taskName
+    $script:lastProbeFailure = "Host did not become ready"
+    try { Start-ScheduledTask -TaskName $taskName }
+    catch { $script:lastProbeFailure = "Scheduled Task start failed: $($_.Exception.Message)"; return $false }
     for ($attempt = 0; $attempt -lt 60; $attempt++) {
       try {
         $live = Invoke-RestMethod -UseBasicParsing -Uri "http://127.0.0.1:$Port/.well-known/aru.json" -TimeoutSec 2
         if ($live.schema -ne "aru.selfhost.manifest.v1" -or -not $live.serverId -or
             ($expectedVersion -and $live.releaseVersion -ne $expectedVersion) -or
             ($expectedServerId -and $live.serverId -ne $expectedServerId)) {
+          $script:lastProbeFailure = "Manifest mismatch (expected version $expectedVersion, running $($live.releaseVersion); schema or server identity may also differ)"
           Start-Sleep -Milliseconds 250
           continue
         }
         return $true
       } catch {
+        $script:lastProbeFailure = $_.Exception.Message
         Start-Sleep -Milliseconds 250
       }
     }
@@ -487,6 +491,8 @@ try {
   if (-not $SkipStart) {
     RegisterHostTask
     if (-not (StartHostAndProbe)) {
+      $activationFailure = $script:lastProbeFailure
+      $recoveryOutcome = "first installation failed; no previous release exists"
       StopHostTask
       AssertStateReadable
       foreach ($name in @("node.env", "install.env")) {
@@ -498,7 +504,11 @@ try {
       if ($oldRelease -and (Test-Path -LiteralPath (Join-Path $releasesDir $oldRelease))) {
         SetLink $currentLink (Join-Path $releasesDir $oldRelease) $currentPointer
         RegisterHostTask
-        StartHostAndProbe | Out-Null
+        if (StartHostAndProbe) {
+          $recoveryOutcome = "previous release restored and healthy"
+        } else {
+          $recoveryOutcome = "previous release selected but recovery health check failed: $script:lastProbeFailure"
+        }
       } else {
         RemoveLink $currentLink
         if (Test-Path -LiteralPath $currentPointer) { Remove-Item -LiteralPath $currentPointer -Force }
@@ -511,7 +521,7 @@ try {
       }
       Remove-Item -LiteralPath $releaseDir -Recurse -Force
       Remove-Item -LiteralPath $rollbackTemp -Recurse -Force -ErrorAction SilentlyContinue
-      Fail "new release failed health check; previous release restored"
+      Fail "new release failed health check: $activationFailure; $recoveryOutcome. Inspect logs at $logDir"
     }
   }
 

@@ -296,6 +296,14 @@ test("revoking phone execution stops the Host scheduler, drops late results, and
 
   await send("PUT", "", replica(1, 1));
   assert.equal(response.status, 200);
+  const inventoryPath = "/aru/v1/mobile-collaborator-execution-grants";
+  const inventory = (owner, executor = "hostcol_reader", authenticate = device) => owner.route(
+    { method: "GET", url: `${inventoryPath}?executor=${executor}` }, {}, inventoryPath, authenticate);
+  await inventory(host);
+  assert.deepEqual(response.value.grants, [{ sourceCollaboratorId: "phone_aru", executorHostCollaboratorId: "hostcol_reader", epoch: 1 }]);
+  await inventory(host, "hostcol_other");
+  assert.deepEqual(response.value.grants, []);
+  await assert.rejects(inventory(host, "hostcol_reader", () => { throw new HttpError(401, "unauthorized", "unauthorized"); }), error => error.status === 401);
   host.start();
   await host.runDue();
   assert.equal(triggered.length, 1);
@@ -306,6 +314,9 @@ test("revoking phone execution stops the Host scheduler, drops late results, and
     status: 200,
     value: { schema: "aru.selfhost.mobile-collaborator-revoke-receipt.v1", sourceCollaboratorId: "phone_aru", epoch: 1 },
   });
+
+  await inventory(host);
+  assert.deepEqual(response.value.grants, []);
 
   // A task that was already running may finish, but its result is no longer accepted as a delivery.
   clock = 1_100;
@@ -337,6 +348,8 @@ test("revoking phone execution stops the Host scheduler, drops late results, and
   // Revocation survives a Host restart.
   host.stop();
   const restarted = createMobileCollaboratorReplicaHost(options);
+  await inventory(restarted);
+  assert.deepEqual(response.value.grants, []);
   restarted.start();
   await restarted.runDue();
   assert.equal(triggered.length, 1);
@@ -350,6 +363,8 @@ test("revoking phone execution stops the Host scheduler, drops late results, and
   await assert.rejects(
     restarted.route({ method: "POST", body: { epoch: 1 }, url: `${path}/revoke` }, {}, `${path}/revoke`, device),
     (error) => error instanceof HttpError && error.status === 409 && error.code === "mobile_replica.epoch_stale");
+  await inventory(restarted);
+  assert.equal(response.value.grants[0].epoch, 2);
   restarted.stop();
 });
 

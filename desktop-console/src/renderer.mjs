@@ -665,7 +665,7 @@ async function openForm(title, fields, confirmLabel = t("save")) {
   document.querySelector("#dialog-cancel").textContent = t("cancel");
   document.querySelector("#dialog-confirm").className = "primary-button";
   document.querySelector("#dialog-body").innerHTML = fields.map((field) => fieldHTML(field)).join("");
-  dialog.showModal();
+  dialog.returnValue = ""; dialog.showModal();
   const result = await new Promise((resolve) => dialog.addEventListener("close", () => resolve(dialog.returnValue), { once: true }));
   if (result !== "confirm") return null;
   const values = {};
@@ -678,13 +678,13 @@ async function confirmDialog(title, detail, destructive = false) {
   document.querySelector("#dialog-body").innerHTML = `<p class="row-detail">${esc(detail)}</p>`;
   document.querySelector("#dialog-confirm").textContent = t("confirm");
   document.querySelector("#dialog-confirm").className = destructive ? "danger-button" : "primary-button";
-  dialog.showModal();
+  dialog.returnValue = ""; dialog.showModal();
   return new Promise((resolve) => dialog.addEventListener("close", () => resolve(dialog.returnValue === "confirm"), { once: true }));
 }
 async function messageDialog(title, html) {
   document.querySelector("#dialog-title").textContent = title; document.querySelector("#dialog-body").innerHTML = html;
   document.querySelector("#dialog-confirm").textContent = t("close"); document.querySelector("#dialog-confirm").className = "primary-button";
-  document.querySelector("#dialog-cancel").classList.add("hidden"); dialog.showModal();
+  document.querySelector("#dialog-cancel").classList.add("hidden"); dialog.returnValue = ""; dialog.showModal();
   await new Promise((resolve) => dialog.addEventListener("close", resolve, { once: true })); document.querySelector("#dialog-cancel").classList.remove("hidden");
 }
 function fieldHTML(field) {

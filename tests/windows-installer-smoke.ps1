@@ -187,6 +187,42 @@ try {
   Check "manifest healthy after rollback" ($null -ne $manifestAfterRollback.serverId)
   Check "server identity survives rollback" ($manifestAfterRollback.serverId -eq $manifest.serverId)
 
+  # Candidate startup failure must prove rollback before claiming recovery.
+  $brokenSource = Join-Path $baseRoot "broken-source"
+  New-Item -ItemType Directory -Force -Path $brokenSource | Out-Null
+  Get-ChildItem -LiteralPath $selfhost -File | Copy-Item -Destination $brokenSource
+  [IO.File]::WriteAllText((Join-Path $brokenSource "run-node.ps1"), "param([string]`$ConfigFile)`nexit 93`n")
+  $savedErrorPreference = $ErrorActionPreference
+  try {
+    $ErrorActionPreference = "Continue"
+    $failureOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer `
+      -Instance $Instance -BaseRoot $baseRoot -Port $Port -SourceDir $brokenSource 2>&1
+    $failureCode = $LASTEXITCODE
+  } finally { $ErrorActionPreference = $savedErrorPreference }
+  Check "failed candidate exits nonzero" ($failureCode -ne 0)
+  Check "rollback is reported healthy only after probe" (($failureOutput -join "`n") -match "previous release restored and healthy")
+  $recovered = Invoke-RestMethod -UseBasicParsing -Uri "http://127.0.0.1:$Port/.well-known/aru.json" -TimeoutSec 10
+  Check "failed candidate preserves identity" ($recovered.serverId -eq $manifest.serverId)
+
+  # A selected old release is not necessarily a successfully restored service.
+  $oldRunner = Join-Path $instanceRoot "current\run-node.ps1"
+  $oldRunnerBytes = [IO.File]::ReadAllBytes($oldRunner)
+  try {
+    [IO.File]::WriteAllText($oldRunner, "param([string]`$ConfigFile)`nexit 94`n")
+    try {
+      $ErrorActionPreference = "Continue"
+      $failureOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer `
+        -Instance $Instance -BaseRoot $baseRoot -Port $Port -SourceDir $brokenSource 2>&1
+      $failureCode = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $savedErrorPreference }
+    Check "unhealthy rollback exits nonzero" ($failureCode -ne 0)
+    Check "unhealthy rollback is reported as failed" (($failureOutput -join "`n") -match "recovery health check failed")
+  } finally {
+    [IO.File]::WriteAllBytes($oldRunner, $oldRunnerBytes)
+  }
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $control -Instance $Instance -BaseRoot $baseRoot restart
+  Check "fixture restores healthy service" ($LASTEXITCODE -eq 0)
+
   # 4. DPAPI round trip through the real provider secret store.
   $secretStoreUri = ([Uri](Join-Path $selfhost "provider-secret-store.mjs")).AbsoluteUri
   $dpapiProbe = @"
@@ -235,6 +271,16 @@ console.log('dpapi-roundtrip-ok');
     -Instance $Instance -BaseRoot $baseRoot -Uninstall -PurgeData
   Check "purge exits 0" ($LASTEXITCODE -eq 0)
   Check "durable data purged" (-not (Test-Path $dataMarker))
+  # With no previous release, failure must never claim restoration.
+  try {
+    $ErrorActionPreference = "Continue"
+    $failureOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer `
+      -Instance $Instance -BaseRoot $baseRoot -Port $Port -SourceDir $brokenSource 2>&1
+    $failureCode = $LASTEXITCODE
+  } finally { $ErrorActionPreference = $savedErrorPreference }
+  Check "fresh failed candidate exits nonzero" ($failureCode -ne 0)
+  Check "fresh failure identifies absence of previous release" (($failureOutput -join "`n") -match "no previous release exists")
+  Check "fresh failure does not claim restored" (($failureOutput -join "`n") -notmatch "previous release restored")
 } finally {
   Cleanup
 }

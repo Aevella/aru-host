@@ -254,6 +254,17 @@ function createMobileCollaboratorReplicaHost({
   }
 
   async function route(req, res, path, requireDevice) {
+    if (path === "/aru/v1/mobile-collaborator-execution-grants" && req.method === "GET") {
+      requireDevice();
+      const executor = validatedId(new URL(req.url, "http://localhost").searchParams.get("executor"), "executor collaborator");
+      collaboratorForId(executor);
+      const grants = ledger.replicas.filter(replica => replica.executorHostCollaboratorId === executor
+        && !executionRevoked(replica.sourceCollaboratorId, replica.epoch))
+        .map(replica => ({ sourceCollaboratorId: replica.sourceCollaboratorId,
+          executorHostCollaboratorId: executor, epoch: replica.epoch }));
+      sendJSON(res, 200, { schema: "aru.selfhost.mobile-execution-grants.v1", grants });
+      return true;
+    }
     const match = path.match(/^\/aru\/v1\/mobile-collaborator-replicas\/([^/]+)(.*)$/);
     if (!match) return false;
     const sourceCollaboratorId = validatedId(match[1], "source collaborator");
