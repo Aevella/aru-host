@@ -318,3 +318,11 @@ it; each dialog opening clears its prior return value. Windows activation failur
 retain the probe error and distinguish no prior release, healthy rollback and
 failed rollback. The Windows lifecycle fixture now injects all three outcomes;
 these new Windows fault cases require CI execution, not a macOS acceptance claim.
+
+2026-10-12 rejected external wake inputs: the receiver can DELETE one encrypted
+mailbox event using its endpoint fetch token. Removal is scoped and idempotent,
+physically deletes the ciphertext, and preserves the endpoint and other events.
+This is explicit rejection, not an ACK claiming phone-side SQLite admission.
+The phone reports malformed, undecryptable or mismatched inputs in its existing
+status surface and continues the batch. Transport/storage failures are not proof
+of bad input. No rejection queue or additional log is created.

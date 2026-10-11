@@ -43,12 +43,20 @@ export function createWakeBridge({
       sendJSON(res, 200, publicStatus(endpoint));
       return true;
     }
-    const match = path.match(/^\/aru\/v1\/wake-bridge\/endpoints\/([^/]+)\/events(?:\/([^/]+)\/ack)?$/);
+    const match = path.match(/^\/aru\/v1\/wake-bridge\/endpoints\/([^/]+)\/events(?:\/([^/]+)(\/ack)?)?$/);
     if (!match) return false;
     const endpoint = endpointById(decodeURIComponent(match[1]));
     if (match[2]) {
       authorize(bearer(req), endpoint.fetchTokenHash);
-      if (req.method !== "POST") return false;
+      if (req.method === "DELETE" && !match[3]) {
+        const eventId = decodeURIComponent(match[2]);
+        state.wakeBridgeEvents = state.wakeBridgeEvents.filter(
+          event => event.endpointId !== endpoint.endpointId || event.eventId !== eventId);
+        saveState();
+        sendJSON(res, 200, publicStatus(endpoint));
+        return true;
+      }
+      if (req.method !== "POST" || !match[3]) return false;
       acknowledge(endpoint.endpointId, decodeURIComponent(match[2]));
       sendJSON(res, 200, publicStatus(endpoint));
       return true;

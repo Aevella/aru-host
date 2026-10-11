@@ -85,6 +85,19 @@ assert.equal(JSON.parse(relayRequests[1].options.body).requestId,
 assert.equal(state.wakeBridgeEndpoints[0].lastFailure, null);
 await bridge.route(request("GET", token), {}, "/aru/v1/wake-bridge/endpoints/phone-1/events");
 assert.equal(responses.at(-1).value.events.length, 2);
+// Only the receiver can discard one rejected event. Other events and registration survive.
+await assert.rejects(
+  bridge.route(request("DELETE", submit), {}, "/aru/v1/wake-bridge/endpoints/phone-1/events/event-1"),
+  error => error.status === 401);
+assert.equal(state.wakeBridgeEvents.length, 2);
+state.wakeBridgeEvents.push({ endpointId: "other-phone", eventId: "event-1", sealedPayload: "unrelated", createdAt: 1, acknowledgedAt: null });
+await bridge.route(request("DELETE", token), {}, "/aru/v1/wake-bridge/endpoints/phone-1/events/event-1");
+assert.ok(state.wakeBridgeEvents.some(event => event.endpointId === "other-phone"));
+state.wakeBridgeEvents = state.wakeBridgeEvents.filter(event => event.endpointId !== "other-phone");
+assert.deepEqual(state.wakeBridgeEvents.map(event => event.eventId), ["event-2"]);
+assert.equal(state.wakeBridgeEndpoints.length, 1);
+await bridge.route(request("DELETE", token), {}, "/aru/v1/wake-bridge/endpoints/phone-1/events/event-1");
+assert.equal(state.wakeBridgeEvents.length, 1);
 await bridge.route(request("POST", token), {}, "/aru/v1/wake-bridge/endpoints/phone-1/events/event-1/ack");
 await bridge.route(request("POST", token), {}, "/aru/v1/wake-bridge/endpoints/phone-1/events/event-2/ack");
 await bridge.route(request("GET", token), {}, "/aru/v1/wake-bridge/endpoints/phone-1/events");
