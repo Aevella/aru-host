@@ -350,7 +350,7 @@ async function streamAnthropic(response, onTextDelta) {
       const block = event.content_block ?? {};
       blocks.set(Number(event.index ?? 0), block.type === "tool_use"
         ? { type: "tool_use", id: block.id, name: block.name, inputText: "" }
-        : { type: "text", text: block.text ?? "" });
+        : { ...block });
       if (block.type === "text" && block.text) await onTextDelta(block.text);
       return;
     }
@@ -363,17 +363,23 @@ async function streamAnthropic(response, onTextDelta) {
       current.text += text;
       if (text) await onTextDelta(text);
     }
+    if (event.delta?.type === "thinking_delta" && current.type === "thinking") {
+      current.thinking = (current.thinking ?? "") + String(event.delta.thinking ?? "");
+    }
+    if (event.delta?.type === "signature_delta" && current.type === "thinking") {
+      current.signature = (current.signature ?? "") + String(event.delta.signature ?? "");
+    }
     if (event.delta?.type === "input_json_delta" && current.type === "tool_use") {
       current.inputText += String(event.delta.partial_json ?? "");
     }
   });
   const parsedBlocks = [...blocks.entries()].sort(([left], [right]) => left - right).map(([, block]) => {
-    if (block.type === "text") return block;
+    if (block.type !== "tool_use") return block;
     return { ...block, ...parsedArguments(block.inputText) };
   });
   // The replayed assistant turn must stay a valid tool_use block even when the
   // model's partial JSON was unreadable; the failure travels in toolCalls.
-  const rawContent = parsedBlocks.map((block) => (block.type === "text"
+  const rawContent = parsedBlocks.filter(nonemptyAnthropicBlock).map((block) => (block.type !== "tool_use"
     ? block
     : { type: "tool_use", id: block.id, name: block.name, input: block.arguments }));
   return {
@@ -507,6 +513,10 @@ function parseOpenAI(payload) {
   };
 }
 
+function nonemptyAnthropicBlock(block) {
+  return block.type !== "text" || (typeof block.text === "string" && block.text.trim().length > 0);
+}
+
 function parseAnthropic(payload) {
   if (!Array.isArray(payload?.content)) throw new Error("Anthropic API 没有返回 content blocks");
   const toolCalls = payload.content.filter((block) => block.type === "tool_use").map((block) => ({
@@ -515,7 +525,7 @@ function parseAnthropic(payload) {
     ...parsedArguments(block.input),
   }));
   let toolIndex = 0;
-  const rawContent = payload.content.map((block) => {
+  const rawContent = payload.content.filter(nonemptyAnthropicBlock).map((block) => {
     if (block.type !== "tool_use") return block;
     const call = toolCalls[toolIndex++];
     return { ...block, id: call.id, name: call.name, input: call.arguments };

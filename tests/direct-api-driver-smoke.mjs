@@ -231,6 +231,11 @@ const anthropicProfile = {
 const anthropicRequests = [];
 const anthropicResponses = [
   [
+    { type: "content_block_start", index: 1, content_block: { type: "thinking", thinking: "", signature: "" } },
+    { type: "content_block_delta", index: 1, delta: { type: "thinking_delta", thinking: "Consider the tool." } },
+    { type: "content_block_delta", index: 1, delta: { type: "signature_delta", signature: "signed-receipt" } },
+    { type: "content_block_start", index: 2, content_block: { type: "text", text: "" } },
+    { type: "content_block_start", index: 3, content_block: { type: "redacted_thinking", data: "opaque-receipt" } },
     { type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "tool_one", name: "remember" } },
     { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: "{\"value\":\"anthropic\"}" } },
     { type: "content_block_stop", index: 0 },
@@ -285,6 +290,11 @@ assert.equal(anthropicRequests[0].body.max_tokens, 32_768);
 assert.deepEqual(anthropicCalls[0].arguments, { value: "anthropic" });
 assert.equal(anthropicRequests[1].body.messages.at(-1).content[0].type, "tool_result");
 assert.deepEqual(anthropicDeltas, ["安", "好"]);
+assert.deepEqual(anthropicRequests[1].body.messages.at(-2).content, [
+  { type: "tool_use", id: "tool_one", name: "remember", input: { value: "anthropic" } },
+  { type: "thinking", thinking: "Consider the tool.", signature: "signed-receipt" },
+  { type: "redacted_thinking", data: "opaque-receipt" },
+]);
 anthropicDriver.validateAttachments([
   { kind: "file", mimeType: "application/pdf", filename: "paper.pdf" },
 ]);
