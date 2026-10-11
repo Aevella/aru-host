@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Use Docker/Podman-compatible writable mounts in runtime verification, workspace jobs and plugin data volumes.
+- Show background container verification stage, executable, image and engine stderr in Windows/Linux Console. Private failure details require an authenticated loopback Host Console and are excluded from the public manifest.
+
 ## 0.35.0
 
 - Support macOS 15 (Sequoia) and later; preserve Liquid Glass on macOS 26 and use system material on macOS 15.

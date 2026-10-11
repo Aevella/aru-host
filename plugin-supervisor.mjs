@@ -431,7 +431,7 @@ export function createPluginSupervisor({
     ];
     if (plugin.manifest.permissions.network === "none") args.push("--network", "none");
     if (plugin.manifest.permissions.persistentVolume) {
-      args.push("--mount", `type=volume,src=${pluginVolumeName(plugin.pluginId)},dst=/data,rw`);
+      args.push("--mount", `type=volume,src=${pluginVolumeName(plugin.pluginId)},dst=/data`);
     }
     if (plugin.manifest.resources.memoryMiB) {
       args.push("--memory", `${plugin.manifest.resources.memoryMiB}m`);

@@ -72,9 +72,9 @@ for ((index = 0; index < ${#arguments[@]}; index += 1)); do
     --network)
       [[ "${arguments[$((index + 1))]}" != "none" ]] || network_disabled=true
       ;;
-    type=bind,src=*,dst=/workspace,rw)
+    type=bind,src=*,dst=/workspace)
       workspace="${argument#type=bind,src=}"
-      workspace="${workspace%,dst=/workspace,rw}"
+      workspace="${workspace%,dst=/workspace}"
       ;;
     type=bind,src=*,dst=/aru/runner.mjs,ro)
       source_plugin_runner="${argument#type=bind,src=}"
@@ -84,9 +84,9 @@ for ((index = 0; index < ${#arguments[@]}; index += 1)); do
       source_plugin_entry="${argument#type=bind,src=}"
       source_plugin_entry="${source_plugin_entry%,dst=/aru/plugin.mjs,ro}"
       ;;
-    type=bind,src=*,dst=/data,rw)
+    type=bind,src=*,dst=/data)
       source_plugin_data="${argument#type=bind,src=}"
-      source_plugin_data="${source_plugin_data%,dst=/data,rw}"
+      source_plugin_data="${source_plugin_data%,dst=/data}"
       ;;
   esac
 done

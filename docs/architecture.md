@@ -156,6 +156,16 @@ images; Core verification cannot pull images. Container job admission and capabi
 advertisement require this receipt. A receipt is a completed check, not continuous
 proof that a runtime cannot subsequently fail. Console can explicitly retry it.
 
+The owner retains execution failure stage, executable, image and stderr for the
+current attempt. `GET /aru/v1/container-runtime` projects these private diagnostics
+only to an authenticated loopback `host-console`; the public manifest retains its
+generic readiness message. Windows/Linux Console reads the private projection only
+after a failed check or readiness deadline, with a bounded diagnostic request.
+Starting a new attempt clears the previous failure. Writable mounts omit the bare
+`rw` field rejected by Docker's `--mount` parser; the default is writable for both
+supported engines. Verification and actual workspace/plugin execution use that
+same syntax and retain existing sandbox limits.
+
 The conversation owner persists cancellation state and publishes `canCancel`.
 `src/conversations/turn-execution.mjs` holds one turn's startup receipt, abort signal
 and outstanding tools. Cancellation waits for driver termination and admitted tools

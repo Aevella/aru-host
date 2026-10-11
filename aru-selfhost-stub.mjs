@@ -29,22 +29,30 @@ const { verifyContainerRuntime } = node0;
 function createContainerReadiness(config, verify = verifyContainerRuntime) {
   let snapshot = { status: config.containerRuntime ? "checking" : "unconfigured", checkedAt: null, message: null };
   let attempt;
+  let failure;
   function check() {
     if (attempt) return attempt;
     if (!config.containerRuntime) return Promise.resolve(snapshot);
     snapshot = { status: "checking", checkedAt: null, message: null };
+    failure = undefined;
     attempt = Promise.resolve().then(() => verify(config.containerRuntime, {
       allowPull: false,
       setting: (key, fallback) => ({ NODE_IMAGE: config.runtimeImages.node, PYTHON_IMAGE: config.runtimeImages.python,
         SHELL_IMAGE: config.runtimeImages.shell, CONTAINER_MEMORY: config.containerMemory, CONTAINER_CPUS: config.containerCPUs }[key] ?? fallback),
     })).then(() => snapshot = { status: "ready", checkedAt: Date.now(), message: null },
-      error => snapshot = { status: "failed", checkedAt: Date.now(), reason: error.code === "engine-unavailable" ? "engine-unavailable" : "execution-failed",
+      error => {
+        failure = { stage: error.stage ?? "workspace", executable: config.containerRuntime,
+          image: error.image ?? null, detail: error.detail ?? error.message };
+        return snapshot = { status: "failed", checkedAt: Date.now(), reason: error.code === "engine-unavailable" ? "engine-unavailable" : "execution-failed",
         message: error.code === "engine-unavailable" ? "The configured container engine is unavailable to the Host background process. Start the engine and verify the service user can access it, then retry."
-          : "Host Core could not execute the configured Node/Python/Shell container checks. Prepare the images and check workspace access for the Host service user, then retry." })
+          : "Host Core could not execute the configured Node/Python/Shell container checks. Prepare the images and check workspace access for the Host service user, then retry." };
+      })
       .finally(() => { attempt = undefined; });
     return attempt;
   }
-  return { check, snapshot: () => ({ ...snapshot }), ready: () => snapshot.status === "ready" };
+  return { check, snapshot: () => ({ ...snapshot }),
+    diagnostics: () => ({ ...snapshot, executable: config.containerRuntime, ...(failure ? { failure: { ...failure } } : {}) }),
+    ready: () => snapshot.status === "ready" };
 }
 return { createContainerReadiness };
 })();
@@ -810,7 +818,7 @@ async function runWorkspaceContainer({
     "--cpus", config.containerCPUs,
     "--user", "65532:65532",
     "--tmpfs", "/tmp:rw,nosuid,nodev,size=64m",
-    "--mount", `type=bind,src=${workspaceDirectory},dst=/workspace,rw`,
+    "--mount", `type=bind,src=${workspaceDirectory},dst=/workspace`,
     "--workdir", "/workspace",
     "--env", `ARU_WORKSPACE_INPUT=${inputJSON}`,
     image,
@@ -2748,6 +2756,10 @@ async function route(req, res) {
     requireLocalHostConsole(req);
     void containerReadiness.check();
     return sendJSON(res, 202, containerReadiness.snapshot());
+  }
+  if (req.method === "GET" && path === "/aru/v1/container-runtime") {
+    requireLocalHostConsole(req);
+    return sendJSON(res, 200, containerReadiness.diagnostics());
   }
   if (req.method === "POST" && path === "/aru/v1/pair") {
     return handlePair(req, res);

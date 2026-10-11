@@ -69,14 +69,18 @@ function registerIPC() {
       await platform.setupContainerRuntime();
       await waitForCoreRelease(signal => requestHost("GET", "/.well-known/aru.json", undefined, false, {}, signal), { version: app.getVersion() });
       return waitForContainerRuntime(signal =>
-        requestHost("GET", "/.well-known/aru.json", undefined, false, {}, signal));
+        requestHost("GET", "/.well-known/aru.json", undefined, false, {}, signal), {
+          readDiagnostics: signal => requestHost("GET", "/aru/v1/container-runtime", undefined, true, {}, signal),
+        });
     })();
     try { return await containerSetupAttempt; }
     finally { containerSetupAttempt = undefined; }
   });
   ipcMain.handle("host:verify-core-runtime", async () => {
     await requestHost("POST", "/aru/v1/container-runtime/verify", {});
-    return waitForContainerRuntime(signal => requestHost("GET", "/.well-known/aru.json", undefined, false, {}, signal));
+    return waitForContainerRuntime(signal => requestHost("GET", "/.well-known/aru.json", undefined, false, {}, signal), {
+      readDiagnostics: signal => requestHost("GET", "/aru/v1/container-runtime", undefined, true, {}, signal),
+    });
   });
   ipcMain.handle("host:bootstrap", async () => {
     await ensureHostInstalled();
