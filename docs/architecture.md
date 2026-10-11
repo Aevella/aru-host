@@ -258,3 +258,10 @@ it in the draft and installed manifest. Source reads return the same value. An
 omitted field from an older client preserves existing credit; older uncredited
 drafts retain the historical `Aru workshop` default. The Console edits this field
 without creating an identity registry or granting permissions.
+
+The paired-device `GET /aru/v1/mobile-collaborator-execution-grants?executor=...`
+projects source collaborator identity and epoch from the existing replica owner.
+It does not create a grant registry or infer revocation from rule counts. It supports
+recovering a delegated executor after a phone residence link disappears. Revocation
+continues to use the existing source/epoch endpoint; executor deletion still rejects
+any remaining grant, including one admitted after the client read the inventory.

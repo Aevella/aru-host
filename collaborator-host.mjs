@@ -237,6 +237,7 @@ export function createCollaboratorHost({
       .filter((collaborator) => !collaborator.archivedAt)
       .map((collaborator) => collaborator.collaboratorId),
     trigger: (collaborator, rule) => conversations.runProactive(collaborator, rule),
+    executionOutcome: (collaboratorId, rule) => conversations.initiativeOutcome(collaboratorId, rule),
     now,
     log,
   });

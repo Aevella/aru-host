@@ -18,6 +18,7 @@ $installer = Join-Path $selfhost "install-windows.ps1"
 $taskName = "Aru Host ($Instance)"
 $instanceRoot = Join-Path $baseRoot "instances\$Instance"
 $failures = 0
+$unicodeLabel = "Windows Smoke " + [char]0x4E2D + [char]0x6587
 
 function Check([string]$label, [bool]$condition) {
   if ($condition) { Write-Host "ok: $label" }
@@ -42,7 +43,7 @@ try {
 
   # 1. Fresh install with real task registration and health probe.
   & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer `
-    -Instance $Instance -BaseRoot $baseRoot -Port $Port -DisplayName "Windows Smoke" -SourceDir $selfhost
+    -Instance $Instance -BaseRoot $baseRoot -Port $Port -DisplayName $unicodeLabel -SourceDir $selfhost
   Check "fresh install exits 0" ($LASTEXITCODE -eq 0)
   Check "config/node.env exists" (Test-Path (Join-Path $instanceRoot "config\node.env"))
   $nodeEnv = [IO.File]::ReadAllText((Join-Path $instanceRoot "config\node.env"))
@@ -101,16 +102,19 @@ try {
   Check "pairing preserves previous log entries" ($firstLink.Count -eq 1 -and $logText.Contains($firstLink[0]))
   function PairWithLink([string]$link) {
     $token = [Uri]::UnescapeDataString([regex]::Match($link, '[?&]pairingToken=([^&]+)').Groups[1].Value)
-    $body = @{ pairingToken = $token; deviceLabel = "Windows Smoke"; deviceRole = "host-console" } | ConvertTo-Json
-    return Invoke-RestMethod -UseBasicParsing -Method Post -Uri "http://127.0.0.1:$Port/aru/v1/pair" -ContentType "application/json" -Body $body
+    $body = @{ pairingToken = $token; deviceLabel = $unicodeLabel; deviceRole = "host-console" } | ConvertTo-Json
+    return Invoke-RestMethod -UseBasicParsing -Method Post -Uri "http://127.0.0.1:$Port/aru/v1/pair" -ContentType "application/json; charset=utf-8" -Body ([Text.Encoding]::UTF8.GetBytes($body))
   }
   $oldTokenRejected = $false
   try { $null = PairWithLink $firstLink[0] }
   catch { $oldTokenRejected = [int]$_.Exception.Response.StatusCode -eq 401 }
   Check "previous boot pairing token rejected" $oldTokenRejected
   $grant = PairWithLink $nextLink[0]
-  $devices = Invoke-RestMethod -UseBasicParsing -Uri "http://127.0.0.1:$Port/aru/v1/devices" -Headers @{ Authorization = "Bearer $($grant.credentialSecret)" }
-  Check "fresh pairing grants authenticated access" (@($devices.devices | Where-Object { $_.isCurrent -and $_.label -eq "Windows Smoke" }).Count -eq 1)
+  # Windows PowerShell 5.1 can decode JSON without a charset as a legacy code page.
+  # Decode the response bytes as UTF-8 before comparing the Unicode fixture label.
+  $deviceResponse = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$Port/aru/v1/devices" -Headers @{ Authorization = "Bearer $($grant.credentialSecret)" }
+  $devices = [Text.Encoding]::UTF8.GetString($deviceResponse.RawContentStream.ToArray()) | ConvertFrom-Json
+  Check "fresh pairing grants authenticated access" (@($devices.devices | Where-Object { $_.isCurrent -and $_.label -eq $unicodeLabel }).Count -eq 1)
   # Phone artifact ownership does not require a computer collaborator or driver.
   $headers = @{ Authorization = "Bearer $($grant.credentialSecret)" }
   $sourceIdentity = [Guid]::NewGuid().ToString()
@@ -154,7 +158,7 @@ try {
     try {
       $ErrorActionPreference = "Continue"
       & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer `
-        -Instance $Instance -BaseRoot $baseRoot -Port $Port -DisplayName "Windows Smoke" -SourceDir $selfhost *> (Join-Path $baseRoot "rejected.log")
+        -Instance $Instance -BaseRoot $baseRoot -Port $Port -DisplayName $unicodeLabel -SourceDir $selfhost *> (Join-Path $baseRoot "rejected.log")
       $rejectedExit = $LASTEXITCODE
     } finally { $ErrorActionPreference = $priorErrorAction }
     Check "damaged state rejects upgrade" ($rejectedExit -ne 0)
@@ -168,7 +172,7 @@ try {
 
   # 3. Upgrade retains previous release; rollback swaps back and stays healthy.
   & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer `
-    -Instance $Instance -BaseRoot $baseRoot -Port $Port -DisplayName "Windows Smoke" -SourceDir $selfhost
+    -Instance $Instance -BaseRoot $baseRoot -Port $Port -DisplayName $unicodeLabel -SourceDir $selfhost
   Check "upgrade exits 0" ($LASTEXITCODE -eq 0)
   $restoredIdentity = Invoke-RestMethod -Method Put -Uri $identityURL -Headers @{ Authorization = "Bearer $($grant.credentialSecret)" } -ContentType 'application/json' -Body $identityBody
   Check "upgrade preserves phone artifact owner" ($restoredIdentity.collaboratorId -eq $identity.collaboratorId)
@@ -182,6 +186,51 @@ try {
   $manifestAfterRollback = Invoke-RestMethod -UseBasicParsing -Uri "http://127.0.0.1:$Port/.well-known/aru.json" -TimeoutSec 10
   Check "manifest healthy after rollback" ($null -ne $manifestAfterRollback.serverId)
   Check "server identity survives rollback" ($manifestAfterRollback.serverId -eq $manifest.serverId)
+
+  # Candidate startup failure must prove rollback before claiming recovery.
+  $brokenSource = Join-Path $baseRoot "broken-source"
+  New-Item -ItemType Directory -Force -Path $brokenSource | Out-Null
+  Get-ChildItem -LiteralPath $selfhost -File | Copy-Item -Destination $brokenSource
+  [IO.File]::WriteAllText((Join-Path $brokenSource "run-node.ps1"), "param([string]`$ConfigFile)`nexit 93`n")
+  $savedErrorPreference = $ErrorActionPreference
+  try {
+    $ErrorActionPreference = "Continue"
+    $failureOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer `
+      -Instance $Instance -BaseRoot $baseRoot -Port $Port -SourceDir $brokenSource 2>&1
+    $failureCode = $LASTEXITCODE
+  } finally { $ErrorActionPreference = $savedErrorPreference }
+  Check "failed candidate exits nonzero" ($failureCode -ne 0)
+  # Windows PowerShell formats native stderr for the console and can wrap
+  # a single error message across lines. Preserve it for diagnosis, then match
+  # semantic words independently of presentation whitespace.
+  $failureText = $failureOutput -join "`n"
+  Write-Host "Candidate failure output (verbatim):`n$failureText"
+  $recoveryPattern = "previous\s+release\s+restored\s+and\s+healthy"
+  Check "rollback is reported healthy only after probe" ($failureText -match $recoveryPattern)
+  if ($failureText -match $recoveryPattern -and $failureText -notmatch "previous release restored and healthy") {
+    Write-Host "diagnostic: recovery message was wrapped by native stderr formatting"
+  }
+  $recovered = Invoke-RestMethod -UseBasicParsing -Uri "http://127.0.0.1:$Port/.well-known/aru.json" -TimeoutSec 10
+  Check "failed candidate preserves identity" ($recovered.serverId -eq $manifest.serverId)
+
+  # A selected old release is not necessarily a successfully restored service.
+  $oldRunner = Join-Path $instanceRoot "current\run-node.ps1"
+  $oldRunnerBytes = [IO.File]::ReadAllBytes($oldRunner)
+  try {
+    [IO.File]::WriteAllText($oldRunner, "param([string]`$ConfigFile)`nexit 94`n")
+    try {
+      $ErrorActionPreference = "Continue"
+      $failureOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer `
+        -Instance $Instance -BaseRoot $baseRoot -Port $Port -SourceDir $brokenSource 2>&1
+      $failureCode = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $savedErrorPreference }
+    Check "unhealthy rollback exits nonzero" ($failureCode -ne 0)
+    Check "unhealthy rollback is reported as failed" (($failureOutput -join "`n") -match "recovery health check failed")
+  } finally {
+    [IO.File]::WriteAllBytes($oldRunner, $oldRunnerBytes)
+  }
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $control -Instance $Instance -BaseRoot $baseRoot restart
+  Check "fixture restores healthy service" ($LASTEXITCODE -eq 0)
 
   # 4. DPAPI round trip through the real provider secret store.
   $secretStoreUri = ([Uri](Join-Path $selfhost "provider-secret-store.mjs")).AbsoluteUri
@@ -222,7 +271,7 @@ console.log('dpapi-roundtrip-ok');
 
   # 6. Reinstall over preserved data keeps the server identity.
   & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer `
-    -Instance $Instance -BaseRoot $baseRoot -Port $Port -DisplayName "Windows Smoke" -SourceDir $selfhost
+    -Instance $Instance -BaseRoot $baseRoot -Port $Port -DisplayName $unicodeLabel -SourceDir $selfhost
   Check "reinstall exits 0" ($LASTEXITCODE -eq 0)
   $manifestAfterReinstall = Invoke-RestMethod -UseBasicParsing -Uri "http://127.0.0.1:$Port/.well-known/aru.json" -TimeoutSec 10
   Check "server identity survives reinstall" ($manifestAfterReinstall.serverId -eq $manifest.serverId)
@@ -231,6 +280,16 @@ console.log('dpapi-roundtrip-ok');
     -Instance $Instance -BaseRoot $baseRoot -Uninstall -PurgeData
   Check "purge exits 0" ($LASTEXITCODE -eq 0)
   Check "durable data purged" (-not (Test-Path $dataMarker))
+  # With no previous release, failure must never claim restoration.
+  try {
+    $ErrorActionPreference = "Continue"
+    $failureOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer `
+      -Instance $Instance -BaseRoot $baseRoot -Port $Port -SourceDir $brokenSource 2>&1
+    $failureCode = $LASTEXITCODE
+  } finally { $ErrorActionPreference = $savedErrorPreference }
+  Check "fresh failed candidate exits nonzero" ($failureCode -ne 0)
+  Check "fresh failure identifies absence of previous release" (($failureOutput -join "`n") -match "no previous release exists")
+  Check "fresh failure does not claim restored" (($failureOutput -join "`n") -notmatch "previous release restored")
 } finally {
   Cleanup
 }

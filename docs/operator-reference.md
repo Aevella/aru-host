@@ -172,6 +172,7 @@ deterministic dev flows.
 | `PUT/DELETE /aru/v1/wake-bridge/endpoints/current` | Endpoint fetch token | register or revoke one phone-created encrypted wake endpoint and its anonymous official-relay route |
 | `POST /aru/v1/wake-bridge/endpoints/:endpointId/events` | Endpoint submit token | idempotently admit one sealed event, then ask the official relay for a content-free generic wake |
 | `GET /aru/v1/wake-bridge/endpoints/:endpointId/events`, `POST .../:eventId/ack` | Endpoint fetch token | fetch bounded ciphertext inventory or acknowledge phone-side SQLite admission |
+| `DELETE /aru/v1/wake-bridge/endpoints/:endpointId/events/:eventId` | Endpoint fetch token | idempotently discard one rejected event without removing its trigger or acknowledging SQLite admission |
 
 The fixed MCP catalog exposes node identity read/rename, backup inventory,
 revision-safe backup retention read/update, device inspection, durable job

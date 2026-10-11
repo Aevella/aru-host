@@ -42,12 +42,20 @@ export function createWakeBridge({
       sendJSON(res, 200, publicStatus(endpoint));
       return true;
     }
-    const match = path.match(/^\/aru\/v1\/wake-bridge\/endpoints\/([^/]+)\/events(?:\/([^/]+)\/ack)?$/);
+    const match = path.match(/^\/aru\/v1\/wake-bridge\/endpoints\/([^/]+)\/events(?:\/([^/]+)(\/ack)?)?$/);
     if (!match) return false;
     const endpoint = endpointById(decodeURIComponent(match[1]));
     if (match[2]) {
       authorize(bearer(req), endpoint.fetchTokenHash);
-      if (req.method !== "POST") return false;
+      if (req.method === "DELETE" && !match[3]) {
+        const eventId = decodeURIComponent(match[2]);
+        state.wakeBridgeEvents = state.wakeBridgeEvents.filter(
+          event => event.endpointId !== endpoint.endpointId || event.eventId !== eventId);
+        saveState();
+        sendJSON(res, 200, publicStatus(endpoint));
+        return true;
+      }
+      if (req.method !== "POST" || !match[3]) return false;
       acknowledge(endpoint.endpointId, decodeURIComponent(match[2]));
       sendJSON(res, 200, publicStatus(endpoint));
       return true;
@@ -61,16 +69,30 @@ export function createWakeBridge({
     }
     if (req.method === "GET") {
       authorize(bearer(req), endpoint.fetchTokenHash);
+      const rawCursor = new URL(req.url ?? path, "http://localhost").searchParams.get("after");
+      let after;
+      if (rawCursor) {
+        try { after = JSON.parse(Buffer.from(rawCursor, "base64url").toString("utf8")); }
+        catch { throw new HttpError(400, "wake.cursor_invalid", "invalid wake event cursor"); }
+        if (!Number.isSafeInteger(after?.createdAt) || typeof after?.eventId !== "string") {
+          throw new HttpError(400, "wake.cursor_invalid", "invalid wake event cursor");
+        }
+      }
+      const compare = (a, b) => a.createdAt - b.createdAt || a.eventId.localeCompare(b.eventId);
+      const pending = state.wakeBridgeEvents
+        .filter(event => event.endpointId === endpoint.endpointId && !event.acknowledgedAt
+          && (!after || compare(event, after) > 0))
+        .sort(compare);
+      const page = pending.slice(0, 32);
+      const last = page.at(-1);
       sendJSON(res, 200, {
         schema: INVENTORY_SCHEMA,
         endpointId: endpoint.endpointId,
-        events: state.wakeBridgeEvents
-          .filter((event) => event.endpointId === endpoint.endpointId && !event.acknowledgedAt)
-          .sort((a, b) => a.createdAt - b.createdAt || a.eventId.localeCompare(b.eventId))
-          .slice(0, 32)
-          .map(({ eventId, sealedPayload, createdAt }) => ({
-            schema: ENVELOPE_SCHEMA, eventId, sealedPayload, createdAt,
-          })),
+        nextCursor: pending.length > page.length
+          ? Buffer.from(JSON.stringify({ createdAt: last.createdAt, eventId: last.eventId })).toString("base64url") : null,
+        events: page.map(({ eventId, sealedPayload, createdAt }) => ({
+          schema: ENVELOPE_SCHEMA, eventId, sealedPayload, createdAt,
+        })),
       });
       return true;
     }

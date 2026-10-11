@@ -286,3 +286,69 @@ user on Node 18. The production service remained active and was neither restarte
 nor upgraded; temporary probe files were removed. This VPS runs OpenCloudOS,
 not the reporter's Debian/Podman version, so it does not prove that separate
 cgroup issue on every rootless environment.
+
+
+2026-10-11 feedback repairs (candidate): mobile replica message IDs and basis
+message IDs are opaque phone references, not filesystem components. Admission
+preserves them byte-for-byte; empty/non-string IDs still fail and path-bearing
+Host identities retain their existing validation. The replica fixture carries a
+punctuated ID through admission, execution, delivery and disk reopen; rejected
+updates do not replace the previous valid snapshot.
+
+The direct Anthropic API driver now preserves thinking/signature and redacted
+blocks during streamed tool continuation, instead of converting them to empty
+text. Empty text is excluded from both streamed and JSON tool replay. Windows
+installer JSON reads explicitly use UTF-8; the Windows lifecycle fixture uses a
+Unicode device label. Local protocol tests pass. Windows CI run 38146871031
+passed the real Scheduled Task / DPAPI installer lifecycle fixture on a3596e2,
+including the Unicode device label, upgrade, rollback and reinstall. The fixture
+explicitly decodes JSON response bytes as UTF-8 for Windows PowerShell 5.1.
+Affected customer installations and real provider calls remain pending; this is
+not a published release.
+
+2026-10-11 recovery follow-up (candidate): authenticated execution-grant inventory
+is projected from the replica ledger by executor, independently of a phone's local
+residence link. Clients revoke the selected source/epoch through the existing
+receipt-checked endpoint before deleting the executor. The deletion guard remains;
+a concurrent new grant cannot be silently removed. Replica tests cover scoped and
+authenticated reads, revocation, restart and stale-epoch rejection.
+
+Console cancel/close buttons bypass required-field validation, while save retains
+it; each dialog opening clears its prior return value. Windows activation failures
+retain the probe error and distinguish no prior release, healthy rollback and
+failed rollback. The Windows lifecycle fixture now injects all three outcomes;
+these new Windows fault cases require CI execution, not a macOS acceptance claim.
+
+2026-10-12 rejected external wake inputs: the receiver can DELETE one encrypted
+mailbox event using its endpoint fetch token. Removal is scoped and idempotent,
+physically deletes the ciphertext, and preserves the endpoint and other events.
+This is explicit rejection, not an ACK claiming phone-side SQLite admission.
+The phone reports malformed, undecryptable or mismatched inputs in its existing
+status surface and continues the batch. Transport/storage failures are not proof
+of bad input. No rejection queue or additional log is created.
+
+
+2026-10-12 failure-exit follow-up (candidate): wake inventories have an optional
+opaque keyset nextCursor; clients can continue beyond unacknowledged first-page
+items. Deleting or acknowledging the cursor event does not skip later entries.
+Older clients retain their first-page protocol. No expiry is imposed on execution
+results. Initiative read/mutation/scheduler paths reconcile running markers against
+the conversation execution owner after a lost settlement; completed receipts are
+counted once, failed admissions close, and old settlements cannot release a newer
+attempt. Codex cancellation timeout reads the owning thread before deciding that
+an already-terminal or missing idle turn has stopped. A running/unreadable target
+and outstanding tool side effects do not falsely become stopped.
+
+Focused mock/fault proof only; real installed Host and phone acceptance remain
+pending. No package release, server restart or deployment is performed.
+
+2026-10-12 proactive delivery rejection (candidate): `/deliveries/reject` closes
+one delivery under the current source/epoch with a durable `rejectedAt`, distinct
+from successful import acknowledgement. The existing record transaction removes
+pending and continuation indexes together; the saved execution/result is preserved.
+Repeated rejection and a later ACK cannot reopen it or change its disposition.
+Phone admission rejects definitively conflicting/invalid envelopes only within the
+current grant; storage, transport and post-import ACK failures stay retryable.
+Old Hosts without this endpoint return an error; clients never substitute a success
+ACK. Local fault tests cover restart after journal/publication, sibling preservation
+and repeated terminal receipts. No new logging or user management surface is added.

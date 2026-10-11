@@ -39,8 +39,8 @@ function createReplicaRecordStore(root, { fault = () => {}, onRead = () => {} } 
     const index = `${kind}-index/${scope(source, epoch)}/${String(record.createdAt).padStart(16, '0')}_${valid(id)}.json`;
     const ops = [{ path: recordPath, value: record }, { path: index, value: { deliveryId: id } }];
     const pending = pathFor(kind === 'executions' ? 'running' : 'pending', source, epoch, id);
-    ops.push({ path: pending, value: (kind === 'executions' ? record.state === 'running' : !record.acknowledgedAt) ? { deliveryId: id } : null });
-    if (kind === 'deliveries') ops.push({ path: index.replace('deliveries-index/', 'continuation/'), value: { deliveryId: id } });
+    ops.push({ path: pending, value: (kind === 'executions' ? record.state === 'running' : !record.acknowledgedAt && !record.rejectedAt) ? { deliveryId: id } : null });
+    if (kind === 'deliveries') ops.push({ path: index.replace('deliveries-index/', 'continuation/'), value: record.rejectedAt ? null : { deliveryId: id } });
     return ops;
   }
   function apply(base, transaction) {
@@ -254,6 +254,17 @@ function createMobileCollaboratorReplicaHost({
   }
 
   async function route(req, res, path, requireDevice) {
+    if (path === "/aru/v1/mobile-collaborator-execution-grants" && req.method === "GET") {
+      requireDevice();
+      const executor = validatedId(new URL(req.url, "http://localhost").searchParams.get("executor"), "executor collaborator");
+      collaboratorForId(executor);
+      const grants = ledger.replicas.filter(replica => replica.executorHostCollaboratorId === executor
+        && !executionRevoked(replica.sourceCollaboratorId, replica.epoch))
+        .map(replica => ({ sourceCollaboratorId: replica.sourceCollaboratorId,
+          executorHostCollaboratorId: executor, epoch: replica.epoch }));
+      sendJSON(res, 200, { schema: "aru.selfhost.mobile-execution-grants.v1", grants });
+      return true;
+    }
     const match = path.match(/^\/aru\/v1\/mobile-collaborator-replicas\/([^/]+)(.*)$/);
     if (!match) return false;
     const sourceCollaboratorId = validatedId(match[1], "source collaborator");
@@ -299,6 +310,11 @@ function createMobileCollaboratorReplicaHost({
     if (suffix === "/deliveries" && req.method === "GET") {
       const epoch = requestEpoch(req.url);
       sendJSON(res, 200, deliveries(sourceCollaboratorId, epoch));
+      return true;
+    }
+    if (suffix === "/deliveries/reject" && req.method === "POST") {
+      const body = await readJSONBody(req, 64 * 1024);
+      sendJSON(res, 200, acknowledge(sourceCollaboratorId, body, true));
       return true;
     }
     if (suffix === "/deliveries/acknowledge" && req.method === "POST") {
@@ -369,7 +385,7 @@ function createMobileCollaboratorReplicaHost({
     };
   }
 
-  function acknowledge(sourceCollaboratorId, body) {
+  function acknowledge(sourceCollaboratorId, body, rejected = false) {
     const replica = replicaForId(sourceCollaboratorId, true);
     const epoch = positiveInteger(body?.epoch, "epoch");
     if (epoch !== replica.epoch) {
@@ -378,11 +394,14 @@ function createMobileCollaboratorReplicaHost({
     const deliveryId = validatedId(body?.deliveryId, "delivery");
     const delivery = records.get("deliveries", sourceCollaboratorId, epoch, deliveryId);
     if (!delivery) throw new HttpError(404, "mobile_delivery.unknown", "unknown mobile collaborator delivery");
-    delivery.acknowledgedAt ??= now();
+    if (!delivery.acknowledgedAt && !delivery.rejectedAt) {
+      if (rejected) delivery.rejectedAt = now();
+      else delivery.acknowledgedAt = now();
+    }
     records.put("deliveries", delivery);
     records.retireContinuation(sourceCollaboratorId, epoch, replica.revision);
     saveLedger();
-    return { schema: DELIVERY_ACK_SCHEMA, deliveryId };
+    return { schema: rejected ? "aru.selfhost.mobile-collaborator-delivery-rejection.v1" : DELIVERY_ACK_SCHEMA, deliveryId };
   }
 
   function selfTools() {
@@ -640,7 +659,7 @@ function publicReceipt(replica) {
 }
 
 function publicDelivery(delivery) {
-  const { acknowledgedAt: _, replicaRevision: __, ...value } = delivery;
+  const { acknowledgedAt: _, replicaRevision: __, rejectedAt: ___, ...value } = delivery;
   return value;
 }
 
@@ -695,7 +714,7 @@ function validatedConversations(value) {
   if (!Array.isArray(value)) throw new Error("conversations must be an array");
   return value.map((item) => {
     const messages = validatedContextMessages(item?.messages);
-    const baseMessageId = item?.baseMessageId ? validatedId(item.baseMessageId, "base message") : null;
+    const baseMessageId = item?.baseMessageId ? validatedMessageId(item.baseMessageId) : null;
     if (baseMessageId !== (messages.at(-1)?.messageId ?? null)) {
       throw new Error("baseMessageId must identify the final context message");
     }
@@ -708,10 +727,17 @@ function validatedConversations(value) {
   });
 }
 
+// Phone message identities are opaque references, never filesystem components.
+// Preserve them exactly so the returned basis still names the phone's durable row.
+function validatedMessageId(value) {
+  if (typeof value !== "string" || !value.trim()) throw new Error("message id is invalid");
+  return value;
+}
+
 function validatedContextMessages(value) {
   if (!Array.isArray(value)) throw new Error("context messages must be an array");
   return value.map((message) => ({
-    messageId: validatedId(message?.messageId, "message"),
+    messageId: validatedMessageId(message?.messageId),
     role: validatedContextRole(message?.role),
     content: String(message?.content ?? ""),
     createdAt: positiveInteger(message?.createdAt, "message.createdAt"),

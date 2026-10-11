@@ -53,9 +53,9 @@ test("computer collaborator reads a phone replica without owning it and Host set
     conversations: [{
       conversationId: "phone_conversation",
       title: "Us",
-      baseMessageId: "phone_message",
+      baseMessageId: "phone:message/part.1",
       messages: [{
-        messageId: "phone_message",
+        messageId: "phone:message/part.1",
         role: "user",
         content: "hello",
         createdAt: 900,
@@ -95,6 +95,16 @@ test("computer collaborator reads a phone replica without owning it and Host set
   assert.equal(response.status, 200);
   assert.equal(response.value.sourceCollaboratorId, "phone_aru");
 
+  for (const invalidId of [null, 123, "", "   "]) {
+    const invalid = structuredClone(replica);
+    invalid.revision = 2;
+    invalid.conversations[0].messages[0].messageId = invalidId;
+    await assert.rejects(host.route(
+      { method: "PUT", body: invalid, url: "/aru/v1/mobile-collaborator-replicas/phone_aru" },
+      {}, "/aru/v1/mobile-collaborator-replicas/phone_aru", () => ({ deviceId: "phone" }),
+    ), /message id is invalid/);
+  }
+
   host.start();
   await host.runDue();
   assert.equal(triggered.executor.collaboratorId, "hostcol_reader");
@@ -108,7 +118,7 @@ test("computer collaborator reads a phone replica without owning it and Host set
       source: "mobile-replica-proactive",
       sourceCollaboratorId: "phone_aru",
       sourceConversationId: "phone_conversation",
-      baseMessageId: "phone_message",
+      baseMessageId: "phone:message/part.1",
       basisMessages: replica.conversations[0].messages,
       executionEpoch: 1,
       ruleId: "rule_one",
@@ -125,7 +135,7 @@ test("computer collaborator reads a phone replica without owning it and Host set
   );
   assert.equal(response.value.deliveries.length, 1);
   assert.equal(response.value.deliveries[0].assistantContent, "I am here.");
-  assert.equal(response.value.deliveries[0].baseMessageId, "phone_message");
+  assert.equal(response.value.deliveries[0].baseMessageId, "phone:message/part.1");
   assert.equal(response.value.deliveries[0].ruleVersion, "rule-version-1");
   assert.deepEqual(response.value.deliveries[0].basisMessages, replica.conversations[0].messages);
 
@@ -138,6 +148,17 @@ test("computer collaborator reads a phone replica without owning it and Host set
     collaborators.get("hostcol_reader"),
   );
   assert.equal(readable.value.systemPrompt, "Stay close.");
+  const reopened = createMobileCollaboratorReplicaHost({
+    dataDir: directory, readJSONBody: async req => req.body,
+    sendJSON: () => {}, HttpError,
+    collaboratorForId: id => collaborators.get(id), trigger: () => {},
+    maximumRequestBytes: 64 * 1024 * 1024, setTimer: () => 1, clearTimer: () => {},
+  });
+  const recovered = reopened.callSelfTool("aru_mobile_replica_read",
+    { sourceCollaboratorId: "phone_aru" }, {}, collaborators.get("hostcol_reader"));
+  assert.equal(recovered.value.conversations[0].baseMessageId, "phone:message/part.1");
+  assert.equal(recovered.value.conversations[0].messages[0].messageId, "phone:message/part.1");
+
   assert.equal(readable.value.memories, undefined);
   assert.equal(readable.value.references, undefined);
   assert.throws(() => host.callSelfTool(
@@ -275,6 +296,14 @@ test("revoking phone execution stops the Host scheduler, drops late results, and
 
   await send("PUT", "", replica(1, 1));
   assert.equal(response.status, 200);
+  const inventoryPath = "/aru/v1/mobile-collaborator-execution-grants";
+  const inventory = (owner, executor = "hostcol_reader", authenticate = device) => owner.route(
+    { method: "GET", url: `${inventoryPath}?executor=${executor}` }, {}, inventoryPath, authenticate);
+  await inventory(host);
+  assert.deepEqual(response.value.grants, [{ sourceCollaboratorId: "phone_aru", executorHostCollaboratorId: "hostcol_reader", epoch: 1 }]);
+  await inventory(host, "hostcol_other");
+  assert.deepEqual(response.value.grants, []);
+  await assert.rejects(inventory(host, "hostcol_reader", () => { throw new HttpError(401, "unauthorized", "unauthorized"); }), error => error.status === 401);
   host.start();
   await host.runDue();
   assert.equal(triggered.length, 1);
@@ -285,6 +314,9 @@ test("revoking phone execution stops the Host scheduler, drops late results, and
     status: 200,
     value: { schema: "aru.selfhost.mobile-collaborator-revoke-receipt.v1", sourceCollaboratorId: "phone_aru", epoch: 1 },
   });
+
+  await inventory(host);
+  assert.deepEqual(response.value.grants, []);
 
   // A task that was already running may finish, but its result is no longer accepted as a delivery.
   clock = 1_100;
@@ -316,6 +348,8 @@ test("revoking phone execution stops the Host scheduler, drops late results, and
   // Revocation survives a Host restart.
   host.stop();
   const restarted = createMobileCollaboratorReplicaHost(options);
+  await inventory(restarted);
+  assert.deepEqual(response.value.grants, []);
   restarted.start();
   await restarted.runDue();
   assert.equal(triggered.length, 1);
@@ -329,6 +363,8 @@ test("revoking phone execution stops the Host scheduler, drops late results, and
   await assert.rejects(
     restarted.route({ method: "POST", body: { epoch: 1 }, url: `${path}/revoke` }, {}, `${path}/revoke`, device),
     (error) => error instanceof HttpError && error.status === 409 && error.code === "mobile_replica.epoch_stale");
+  await inventory(restarted);
+  assert.equal(response.value.grants[0].epoch, 2);
   restarted.stop();
 });
 
@@ -396,7 +432,8 @@ test("a recurring phone rule continues from the Host's own unsynced deliveries w
   assert.equal(ids.length, 4);
 });
 
-test("saved delivery survives notification failure, restart and duplicate acknowledgement", async (context) => {
+for (const disposition of ["acknowledge", "reject"]) {
+test(`saved delivery survives notification failure, restart and duplicate ${disposition}`, async (context) => {
   const directory = mkdtempSync(join(tmpdir(), "aru-mobile-replica-"));
   context.after(() => rmSync(directory, { recursive: true, force: true }));
   let clock = 1_000;
@@ -497,7 +534,10 @@ test("saved delivery survives notification failure, restart and duplicate acknow
   await host.settle(event); // A duplicate completion cannot create another delivery.
   await fetch();
   assert.equal(response.value.deliveries.length, 1);
-  const ack = `${path}/acknowledge`;
+  const ack = `${path}/${disposition}`;
+  await assert.rejects(host.route({ method: "POST", url: ack,
+    body: { epoch: 2, deliveryId: event.turn.deliveryId } }, {}, ack, () => ({})),
+    error => error.code === "mobile_replica.epoch_stale");
   for (let index = 0; index < 2; index++) {
     await host.route({ method: "POST", url: ack, body: { epoch: 1, deliveryId: event.turn.deliveryId } }, {}, ack, () => ({}));
   }
@@ -507,6 +547,8 @@ test("saved delivery survives notification failure, restart and duplicate acknow
   assert.equal(response.value.deliveries.length, 0);
   host.stop();
 });
+
+}
 
 for (const outcome of ["completed", "failed", "interrupted"]) {
 test(`restart reconciles ${outcome} conversation before clearing pending delivery`, async (context) => {
