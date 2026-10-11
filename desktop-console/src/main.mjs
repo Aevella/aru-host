@@ -6,6 +6,7 @@ import QRCode from "qrcode";
 import { parsePairingLink, readInstalledVersion, readPort, validateHostRequest } from "./runtime.mjs";
 import { waitForCoreRelease } from "./core-release.mjs";
 import { waitForContainerRuntime } from "./container-readiness.mjs";
+import { verifyConnectionAddress } from "./connection-address.mjs";
 import { createDesktopPlatform } from "./platform/index.mjs";
 
 const sourceRoot = dirname(fileURLToPath(import.meta.url));
@@ -59,6 +60,13 @@ function createWindow() {
 }
 
 function registerIPC() {
+  ipcMain.handle("host:check-connection-address", async (_event, kind, address) => {
+    try {
+      const local = await requestHost("GET", "/.well-known/aru.json", undefined, false, {}, AbortSignal.timeout(10_000));
+      return { ok: true, ...await verifyConnectionAddress(kind, address, local.serverId) };
+    }
+    catch (error) { return { ok: false, code: error.code ?? "connection_unavailable", message: error.message }; }
+  });
   ipcMain.handle("host:open-container-setup", () => shell.openExternal(
     platform.id === "windows"
       ? "https://podman-desktop.io/docs/installation/windows-install"

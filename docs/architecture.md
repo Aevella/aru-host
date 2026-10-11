@@ -216,6 +216,17 @@ Host identity without forwarding credentials. There is no interface polling,
 automatic tunnel setup, or implicit route deletion. macOS installation retains
 container configuration independently of runtime readiness.
 
+Windows/Linux Console uses `desktop-console/src/connection-settings.mjs` for
+the remote-address draft and submission surface. The existing node-settings owner
+continues to own durable additional transports and revision admission; Console
+does not replace the primary LAN route or infer a public IP. The preload exposes
+an explicit address-check IPC. Main validates the origin using
+`connection-address.mjs`, reads the local Core identity, and requests only the
+candidate's public manifest without credentials, cookies or redirects. Its
+deadline includes body reading. A failed check retains the draft; a save uses the
+node-settings revision and only publishes the admitted response. This is source
+implementation, not published installer or phone-network acceptance.
+
 ## Incremental backup recovery points (2026-10-05)
 
 `src/server/backup-snapshot-store.mjs` owns the random repository salt, per-device

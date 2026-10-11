@@ -129,3 +129,12 @@ label.field { display: block; margin-bottom: 15px; }
 .container-setup p { font-size: 13px; line-height: 1.7; max-width: 72ch; }
 .container-setup [data-container-status] { white-space: pre-wrap; overflow-wrap: anywhere; }
 .container-setup button { margin-top: 10px; }
+.connection-settings h3 { font-size: 22px; }
+.connection-settings > p { font-size: 13px; line-height: 1.7; max-width: 76ch; }
+.connection-address { display: grid; grid-template-columns: minmax(150px, 1fr) minmax(260px, 3fr); gap: 14px; padding: 18px 0; border-bottom: 1px solid rgba(100,85,125,.16); }
+.connection-address label { display: grid; gap: 8px; font-size: 12px; }
+.connection-address input, .connection-address select { width: 100%; box-sizing: border-box; min-height: 42px; border: 1px solid rgba(100,85,125,.24); border-radius: 10px; padding: 9px 12px; color: inherit; background: rgba(255,255,255,.64); font: inherit; }
+.connection-address input:focus-visible, .connection-address select:focus-visible { outline: 2px solid #7d6fa7; outline-offset: 2px; }
+.address-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.connection-address .address-actions, .connection-address [data-address-check-status] { grid-column: 1 / -1; }
+.connection-settings [role=status] { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.6; }
