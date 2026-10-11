@@ -110,7 +110,10 @@ try {
   catch { $oldTokenRejected = [int]$_.Exception.Response.StatusCode -eq 401 }
   Check "previous boot pairing token rejected" $oldTokenRejected
   $grant = PairWithLink $nextLink[0]
-  $devices = Invoke-RestMethod -UseBasicParsing -Uri "http://127.0.0.1:$Port/aru/v1/devices" -Headers @{ Authorization = "Bearer $($grant.credentialSecret)" }
+  # Windows PowerShell 5.1 can decode JSON without a charset as a legacy code page.
+  # Decode the response bytes as UTF-8 before comparing the Unicode fixture label.
+  $deviceResponse = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$Port/aru/v1/devices" -Headers @{ Authorization = "Bearer $($grant.credentialSecret)" }
+  $devices = [Text.Encoding]::UTF8.GetString($deviceResponse.RawContentStream.ToArray()) | ConvertFrom-Json
   Check "fresh pairing grants authenticated access" (@($devices.devices | Where-Object { $_.isCurrent -and $_.label -eq $unicodeLabel }).Count -eq 1)
   # Phone artifact ownership does not require a computer collaborator or driver.
   $headers = @{ Authorization = "Bearer $($grant.credentialSecret)" }
