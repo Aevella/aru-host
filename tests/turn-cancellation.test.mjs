@@ -16,7 +16,7 @@ function fixture(t, { start, interrupt, executeTool } = {}) {
     executeTool: executeTool ?? (async () => ({})), defer: fn => queue.push(fn),
   });
   const call = async (method, path, body) => { const res = {}; await host.route({ method, body }, res, path, () => ({ deviceId: 'test' })); return res.body; };
-  return { call, queue, handlers, async conversation() {
+  return { host, call, queue, handlers, async conversation() {
     const base = '/aru/v1/hosted-collaborators/a/conversations';
     const c = await call('POST', base, { title: 'Test' }); return `${base}/${c.conversationId}`;
   }, async send(path, id) { return call('POST', `${path}/messages`, { text: 'work', clientRequestId: id }); },
@@ -56,4 +56,19 @@ test('tool cancellation signals the exact attempt and waits for real side effect
   finish({}); await rejection; await new Promise(resolve => setImmediate(resolve));
   assert.equal((await f.call('GET', path)).activeTurn.state, 'interrupted');
   await f.send(path, 'second');
+});
+
+
+test('initiative recovery reads the matching execution and never adopts an older attempt', async t => {
+  const f = fixture(t);
+  const rule = { ruleId: 'hostinitiative_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+    runningAt: Date.now(), title: 'rule', seed: 'hello', conversationMode: 'follow_latest' };
+  const c = f.host.runProactive({ collaboratorId: 'a', displayName: 'A', driverId: 'codex', approvalMode: 'always_allow' }, rule);
+  rule.runningConversationId = c.conversationId;
+  assert.equal(f.host.initiativeOutcome('a', rule), null);
+  await f.queue.shift()();
+  assert.equal(f.host.initiativeOutcome('a', rule), null);
+  await f.stop(`/aru/v1/hosted-collaborators/a/conversations/${c.conversationId}`);
+  assert.equal(f.host.initiativeOutcome('a', rule).outcome, 'interrupted');
+  assert.equal(f.host.initiativeOutcome('a', { ...rule, runningAt: c.activeTurn.createdAt + 1 }).outcome, 'failed');
 });
