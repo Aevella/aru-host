@@ -138,6 +138,11 @@ export function createMobileCollaboratorReplicaHost({
       sendJSON(res, 200, deliveries(sourceCollaboratorId, epoch));
       return true;
     }
+    if (suffix === "/deliveries/reject" && req.method === "POST") {
+      const body = await readJSONBody(req, 64 * 1024);
+      sendJSON(res, 200, acknowledge(sourceCollaboratorId, body, true));
+      return true;
+    }
     if (suffix === "/deliveries/acknowledge" && req.method === "POST") {
       const body = await readJSONBody(req, 64 * 1024);
       sendJSON(res, 200, acknowledge(sourceCollaboratorId, body));
@@ -206,7 +211,7 @@ export function createMobileCollaboratorReplicaHost({
     };
   }
 
-  function acknowledge(sourceCollaboratorId, body) {
+  function acknowledge(sourceCollaboratorId, body, rejected = false) {
     const replica = replicaForId(sourceCollaboratorId, true);
     const epoch = positiveInteger(body?.epoch, "epoch");
     if (epoch !== replica.epoch) {
@@ -215,11 +220,14 @@ export function createMobileCollaboratorReplicaHost({
     const deliveryId = validatedId(body?.deliveryId, "delivery");
     const delivery = records.get("deliveries", sourceCollaboratorId, epoch, deliveryId);
     if (!delivery) throw new HttpError(404, "mobile_delivery.unknown", "unknown mobile collaborator delivery");
-    delivery.acknowledgedAt ??= now();
+    if (!delivery.acknowledgedAt && !delivery.rejectedAt) {
+      if (rejected) delivery.rejectedAt = now();
+      else delivery.acknowledgedAt = now();
+    }
     records.put("deliveries", delivery);
     records.retireContinuation(sourceCollaboratorId, epoch, replica.revision);
     saveLedger();
-    return { schema: DELIVERY_ACK_SCHEMA, deliveryId };
+    return { schema: rejected ? "aru.selfhost.mobile-collaborator-delivery-rejection.v1" : DELIVERY_ACK_SCHEMA, deliveryId };
   }
 
   function selfTools() {
@@ -477,7 +485,7 @@ function publicReceipt(replica) {
 }
 
 function publicDelivery(delivery) {
-  const { acknowledgedAt: _, replicaRevision: __, ...value } = delivery;
+  const { acknowledgedAt: _, replicaRevision: __, rejectedAt: ___, ...value } = delivery;
   return value;
 }
 

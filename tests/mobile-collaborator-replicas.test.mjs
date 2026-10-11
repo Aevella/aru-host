@@ -432,7 +432,8 @@ test("a recurring phone rule continues from the Host's own unsynced deliveries w
   assert.equal(ids.length, 4);
 });
 
-test("saved delivery survives notification failure, restart and duplicate acknowledgement", async (context) => {
+for (const disposition of ["acknowledge", "reject"]) {
+test(`saved delivery survives notification failure, restart and duplicate ${disposition}`, async (context) => {
   const directory = mkdtempSync(join(tmpdir(), "aru-mobile-replica-"));
   context.after(() => rmSync(directory, { recursive: true, force: true }));
   let clock = 1_000;
@@ -533,7 +534,10 @@ test("saved delivery survives notification failure, restart and duplicate acknow
   await host.settle(event); // A duplicate completion cannot create another delivery.
   await fetch();
   assert.equal(response.value.deliveries.length, 1);
-  const ack = `${path}/acknowledge`;
+  const ack = `${path}/${disposition}`;
+  await assert.rejects(host.route({ method: "POST", url: ack,
+    body: { epoch: 2, deliveryId: event.turn.deliveryId } }, {}, ack, () => ({})),
+    error => error.code === "mobile_replica.epoch_stale");
   for (let index = 0; index < 2; index++) {
     await host.route({ method: "POST", url: ack, body: { epoch: 1, deliveryId: event.turn.deliveryId } }, {}, ack, () => ({}));
   }
@@ -543,6 +547,8 @@ test("saved delivery survives notification failure, restart and duplicate acknow
   assert.equal(response.value.deliveries.length, 0);
   host.stop();
 });
+
+}
 
 for (const outcome of ["completed", "failed", "interrupted"]) {
 test(`restart reconciles ${outcome} conversation before clearing pending delivery`, async (context) => {

@@ -32,8 +32,8 @@ export function createReplicaRecordStore(root, { fault = () => {}, onRead = () =
     const index = `${kind}-index/${scope(source, epoch)}/${String(record.createdAt).padStart(16, '0')}_${valid(id)}.json`;
     const ops = [{ path: recordPath, value: record }, { path: index, value: { deliveryId: id } }];
     const pending = pathFor(kind === 'executions' ? 'running' : 'pending', source, epoch, id);
-    ops.push({ path: pending, value: (kind === 'executions' ? record.state === 'running' : !record.acknowledgedAt) ? { deliveryId: id } : null });
-    if (kind === 'deliveries') ops.push({ path: index.replace('deliveries-index/', 'continuation/'), value: { deliveryId: id } });
+    ops.push({ path: pending, value: (kind === 'executions' ? record.state === 'running' : !record.acknowledgedAt && !record.rejectedAt) ? { deliveryId: id } : null });
+    if (kind === 'deliveries') ops.push({ path: index.replace('deliveries-index/', 'continuation/'), value: record.rejectedAt ? null : { deliveryId: id } });
     return ops;
   }
   function apply(base, transaction) {

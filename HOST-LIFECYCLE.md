@@ -341,3 +341,14 @@ and outstanding tool side effects do not falsely become stopped.
 
 Focused mock/fault proof only; real installed Host and phone acceptance remain
 pending. No package release, server restart or deployment is performed.
+
+2026-10-12 proactive delivery rejection (candidate): `/deliveries/reject` closes
+one delivery under the current source/epoch with a durable `rejectedAt`, distinct
+from successful import acknowledgement. The existing record transaction removes
+pending and continuation indexes together; the saved execution/result is preserved.
+Repeated rejection and a later ACK cannot reopen it or change its disposition.
+Phone admission rejects definitively conflicting/invalid envelopes only within the
+current grant; storage, transport and post-import ACK failures stay retryable.
+Old Hosts without this endpoint return an error; clients never substitute a success
+ACK. Local fault tests cover restart after journal/publication, sibling preservation
+and repeated terminal receipts. No new logging or user management surface is added.

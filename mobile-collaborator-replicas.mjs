@@ -39,8 +39,8 @@ function createReplicaRecordStore(root, { fault = () => {}, onRead = () => {} } 
     const index = `${kind}-index/${scope(source, epoch)}/${String(record.createdAt).padStart(16, '0')}_${valid(id)}.json`;
     const ops = [{ path: recordPath, value: record }, { path: index, value: { deliveryId: id } }];
     const pending = pathFor(kind === 'executions' ? 'running' : 'pending', source, epoch, id);
-    ops.push({ path: pending, value: (kind === 'executions' ? record.state === 'running' : !record.acknowledgedAt) ? { deliveryId: id } : null });
-    if (kind === 'deliveries') ops.push({ path: index.replace('deliveries-index/', 'continuation/'), value: { deliveryId: id } });
+    ops.push({ path: pending, value: (kind === 'executions' ? record.state === 'running' : !record.acknowledgedAt && !record.rejectedAt) ? { deliveryId: id } : null });
+    if (kind === 'deliveries') ops.push({ path: index.replace('deliveries-index/', 'continuation/'), value: record.rejectedAt ? null : { deliveryId: id } });
     return ops;
   }
   function apply(base, transaction) {
@@ -312,6 +312,11 @@ function createMobileCollaboratorReplicaHost({
       sendJSON(res, 200, deliveries(sourceCollaboratorId, epoch));
       return true;
     }
+    if (suffix === "/deliveries/reject" && req.method === "POST") {
+      const body = await readJSONBody(req, 64 * 1024);
+      sendJSON(res, 200, acknowledge(sourceCollaboratorId, body, true));
+      return true;
+    }
     if (suffix === "/deliveries/acknowledge" && req.method === "POST") {
       const body = await readJSONBody(req, 64 * 1024);
       sendJSON(res, 200, acknowledge(sourceCollaboratorId, body));
@@ -380,7 +385,7 @@ function createMobileCollaboratorReplicaHost({
     };
   }
 
-  function acknowledge(sourceCollaboratorId, body) {
+  function acknowledge(sourceCollaboratorId, body, rejected = false) {
     const replica = replicaForId(sourceCollaboratorId, true);
     const epoch = positiveInteger(body?.epoch, "epoch");
     if (epoch !== replica.epoch) {
@@ -389,11 +394,14 @@ function createMobileCollaboratorReplicaHost({
     const deliveryId = validatedId(body?.deliveryId, "delivery");
     const delivery = records.get("deliveries", sourceCollaboratorId, epoch, deliveryId);
     if (!delivery) throw new HttpError(404, "mobile_delivery.unknown", "unknown mobile collaborator delivery");
-    delivery.acknowledgedAt ??= now();
+    if (!delivery.acknowledgedAt && !delivery.rejectedAt) {
+      if (rejected) delivery.rejectedAt = now();
+      else delivery.acknowledgedAt = now();
+    }
     records.put("deliveries", delivery);
     records.retireContinuation(sourceCollaboratorId, epoch, replica.revision);
     saveLedger();
-    return { schema: DELIVERY_ACK_SCHEMA, deliveryId };
+    return { schema: rejected ? "aru.selfhost.mobile-collaborator-delivery-rejection.v1" : DELIVERY_ACK_SCHEMA, deliveryId };
   }
 
   function selfTools() {
@@ -651,7 +659,7 @@ function publicReceipt(replica) {
 }
 
 function publicDelivery(delivery) {
-  const { acknowledgedAt: _, replicaRevision: __, ...value } = delivery;
+  const { acknowledgedAt: _, replicaRevision: __, rejectedAt: ___, ...value } = delivery;
   return value;
 }
 

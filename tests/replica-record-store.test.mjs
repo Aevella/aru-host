@@ -69,3 +69,19 @@ test('acknowledgement retains continuation until a newer replica reflects the re
   assert.equal(store.continuation('phone', 1, 'conversation', 24).length, 0);
   assert.equal(store.get('deliveries', 'phone', 1, item.deliveryId).assistantContent, 'keep me');
 });
+for (const point of ['after-journal', 'after-publication']) test(`rejected delivery stays terminal after ${point} and preserves unrelated results`, t => {
+  const root = fixture(t); let armed = false;
+  let store = createReplicaRecordStore(root, { fault: p => { if (armed && p === point) throw new Error('crash'); } });
+  const bad = { ...record(1), sourceConversationId: 'chat', replicaRevision: 1 };
+  const good = { ...record(2), sourceConversationId: 'chat', replicaRevision: 1 };
+  store.put('deliveries', bad); store.put('deliveries', good); store.commit(store.ledger);
+  store.put('deliveries', { ...bad, rejectedAt: 9 }); armed = true;
+  assert.throws(() => store.commit(store.ledger), /crash/);
+  store = createReplicaRecordStore(root);
+  assert.deepEqual(store.pending('deliveries', 'phone', 1).map(x => x.deliveryId), [good.deliveryId]);
+  assert.deepEqual(store.continuation('phone', 1, 'chat', 24).map(x => x.deliveryId), [good.deliveryId]);
+  const rejected = store.get('deliveries', 'phone', 1, bad.deliveryId);
+  assert.equal(rejected.rejectedAt, 9);
+  assert.equal(rejected.acknowledgedAt, undefined);
+  assert.equal(rejected.content, bad.content);
+});
