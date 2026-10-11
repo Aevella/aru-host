@@ -1151,6 +1151,37 @@ function createCollaboratorConversationHost({
     });
   }
 
+  // Only invoked for rules whose durable running marker still needs closure.
+  // An unreadable ledger is not evidence that its execution disappeared.
+  function initiativeOutcome(collaboratorId, rule) {
+    for (const conversation of activeConversations.values()) {
+      if (conversation.collaboratorId === collaboratorId
+          && conversation.activeTurn?.ruleId === rule.ruleId
+          && conversation.activeTurn.createdAt >= rule.runningAt
+          && ACTIVE_STATES.has(conversation.activeTurn.state)) return null;
+    }
+    let sources;
+    try {
+      sources = rule.runningConversationId
+        ? [loadConversation(collaboratorId, rule.runningConversationId)]
+        : loadConversations(collaboratorId, true);
+    } catch (error) {
+      if (error.code === "conversation.unknown") {
+        return { outcome: "failed", failure: "主动回合所属对话已删除，本次尝试已结束" };
+      }
+      throw error;
+    }
+    const candidates = sources
+      .filter(item => item.activeTurn?.ruleId === rule.ruleId
+        && item.activeTurn.createdAt >= rule.runningAt)
+      .sort((a, b) => b.activeTurn.createdAt - a.activeTurn.createdAt);
+    const conversation = candidates[0];
+    if (!conversation) return { outcome: "failed", failure: "主动回合未能启动，已结束本次尝试" };
+    const turn = conversation.activeTurn;
+    if (ACTIVE_STATES.has(turn.state)) return null;
+    return { outcome: turn.state, turn: publicTurn(turn), failure: turn.failure };
+  }
+
   function runReplicaProactive(executor, replica, rule, deliveryId) {
     const device = { deviceId: "host-mobile-replica-scheduler" };
     const triggeredAt = now();
@@ -1813,6 +1844,7 @@ function createCollaboratorConversationHost({
     hasActiveTurns,
     hasConversation,
     runProactive,
+    initiativeOutcome,
     runReplicaProactive,
     recoverReplicaDelivery: createReplicaDeliveryRecovery({ loadConversations, publicConversation, publicTurn, message }),
   };

@@ -11,6 +11,7 @@ test('a lost interrupt acknowledgement can be retried, and retired turn events c
   t.after(() => { globalThis.WebSocket = original; rmSync(root, { recursive: true, force: true }); });
   const script = join(root, 'fake.mjs');
   writeFileSync(script, "console.error('listening on: ws://127.0.0.1:54321');\n");
+  let readThread = null;
   let socket, allowInterrupt = false, completeInterrupt = false, sequence = 0;
   class Socket extends EventTarget {
     readyState = 1;
@@ -20,7 +21,8 @@ test('a lost interrupt acknowledgement can be retried, and retired turn events c
       if (!message.method || message.id === undefined) return;
       if (message.method === 'turn/interrupt' && !allowInterrupt) return;
       const result = message.method === 'thread/start' ? { thread: { id: 'thread' } }
-        : message.method === 'turn/start' ? { turn: { id: `turn${++sequence}` } } : {};
+        : message.method === 'turn/start' ? { turn: { id: `turn${++sequence}` } }
+        : message.method === 'thread/read' ? { thread: readThread } : {};
       queueMicrotask(() => {
         this.deliver({ id: message.id, result });
         if (message.method === 'turn/interrupt' && completeInterrupt) this.deliver({ method: 'turn/completed', params: { threadId: message.params.threadId, turn: { id: message.params.turnId, status: 'interrupted' } } });
@@ -44,4 +46,14 @@ test('a lost interrupt acknowledgement can be retried, and retired turn events c
   socket.deliver({ method: 'turn/completed', params: { threadId: next.threadId, turn: { id: next.turnId, status: 'completed' } } });
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(events.length, 1); assert.equal(events[0][1].turn.id, next.turnId);
+  completeInterrupt = false;
+  const lost = await driver.startTurn({ ...options, threadId: first.threadId });
+  readThread = { id: lost.threadId, status: { type: 'active' }, turns: [{ id: lost.turnId, status: 'inProgress' }] };
+  await assert.rejects(driver.interrupt(lost.threadId, lost.turnId));
+  readThread = { id: lost.threadId, status: { type: 'idle' }, turns: [] };
+  await driver.interrupt(lost.threadId, lost.turnId);
+  const afterLost = await driver.startTurn({ ...options, threadId: first.threadId });
+  readThread = { id: afterLost.threadId, status: { type: 'idle' }, turns: [{ id: afterLost.turnId, status: 'failed' }] };
+  await driver.interrupt(afterLost.threadId, afterLost.turnId);
+
 });

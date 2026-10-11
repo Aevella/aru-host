@@ -70,16 +70,30 @@ export function createWakeBridge({
     }
     if (req.method === "GET") {
       authorize(bearer(req), endpoint.fetchTokenHash);
+      const rawCursor = new URL(req.url ?? path, "http://localhost").searchParams.get("after");
+      let after;
+      if (rawCursor) {
+        try { after = JSON.parse(Buffer.from(rawCursor, "base64url").toString("utf8")); }
+        catch { throw new HttpError(400, "wake.cursor_invalid", "invalid wake event cursor"); }
+        if (!Number.isSafeInteger(after?.createdAt) || typeof after?.eventId !== "string") {
+          throw new HttpError(400, "wake.cursor_invalid", "invalid wake event cursor");
+        }
+      }
+      const compare = (a, b) => a.createdAt - b.createdAt || a.eventId.localeCompare(b.eventId);
+      const pending = state.wakeBridgeEvents
+        .filter(event => event.endpointId === endpoint.endpointId && !event.acknowledgedAt
+          && (!after || compare(event, after) > 0))
+        .sort(compare);
+      const page = pending.slice(0, 32);
+      const last = page.at(-1);
       sendJSON(res, 200, {
         schema: INVENTORY_SCHEMA,
         endpointId: endpoint.endpointId,
-        events: state.wakeBridgeEvents
-          .filter((event) => event.endpointId === endpoint.endpointId && !event.acknowledgedAt)
-          .sort((a, b) => a.createdAt - b.createdAt || a.eventId.localeCompare(b.eventId))
-          .slice(0, 32)
-          .map(({ eventId, sealedPayload, createdAt }) => ({
-            schema: ENVELOPE_SCHEMA, eventId, sealedPayload, createdAt,
-          })),
+        nextCursor: pending.length > page.length
+          ? Buffer.from(JSON.stringify({ createdAt: last.createdAt, eventId: last.eventId })).toString("base64url") : null,
+        events: page.map(({ eventId, sealedPayload, createdAt }) => ({
+          schema: ENVELOPE_SCHEMA, eventId, sealedPayload, createdAt,
+        })),
       });
       return true;
     }

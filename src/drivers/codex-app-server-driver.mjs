@@ -140,6 +140,17 @@ export function createCodexAppServerDriver({ executable, resolveExecutable, log 
         });
       });
       try { await completed; }
+      catch (error) {
+        // A lost completion notification is not a still-running turn. Read the
+        // owning thread before leaving a dead turn holding the Host conversation.
+        const response = await request("thread/read", { threadId, includeTurns: true }, interruptTimeoutMs);
+        const thread = response?.thread;
+        const turn = thread?.turns?.find(item => item.id === turnId);
+        const terminal = ["completed", "interrupted", "failed"].includes(turn?.status);
+        const absentAndIdle = Array.isArray(thread?.turns) && !turn && thread?.status?.type === "idle";
+        if (thread?.id !== threadId || (!terminal && !absentAndIdle)) throw error;
+        completedTurnIds.add(turnId);
+      }
       finally { clearTimeout(timer); completionWaiters.delete(turnId); }
     }
     if (threadTurnIds.get(threadId) === turnId) {

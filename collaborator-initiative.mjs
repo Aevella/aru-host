@@ -28,6 +28,7 @@ export function createCollaboratorInitiativeHost({
   collaboratorIds,
   conversationExists = () => true,
   trigger,
+  executionOutcome = () => null,
   now = Date.now,
   defer = setImmediate,
   schedule = setInterval,
@@ -101,7 +102,9 @@ export function createCollaboratorInitiativeHost({
   }
 
   function read(collaboratorId) {
-    return publicInitiative(load(collaboratorId));
+    const initiative = load(collaboratorId);
+    reconcileRunning(initiative);
+    return publicInitiative(initiative);
   }
 
   function createRule(collaboratorId, body, device) {
@@ -146,6 +149,7 @@ export function createCollaboratorInitiativeHost({
 
   function updateRule(collaboratorId, ruleId, body, device) {
     const initiative = load(collaboratorId);
+    reconcileRunning(initiative);
     checkRevision(initiative, body?.expectedRevision);
     const rule = findRule(initiative, ruleId);
     if (rule.runningAt) {
@@ -205,6 +209,7 @@ export function createCollaboratorInitiativeHost({
 
   function setArchived(collaboratorId, ruleId, body, device, archived) {
     const initiative = load(collaboratorId);
+    reconcileRunning(initiative);
     checkRevision(initiative, body?.expectedRevision);
     const rule = findRule(initiative, ruleId, true);
     if (rule.runningAt) {
@@ -221,6 +226,7 @@ export function createCollaboratorInitiativeHost({
 
   function runRuleNow(collaborator, ruleId, body, device) {
     const initiative = load(collaborator.collaboratorId);
+    reconcileRunning(initiative);
     checkRevision(initiative, body?.expectedRevision);
     const rule = findRule(initiative, ruleId);
     beginAttempt(initiative, rule, collaborator, device.deviceId, true);
@@ -234,13 +240,15 @@ export function createCollaboratorInitiativeHost({
       try {
         collaborator = collaboratorForId(collaboratorId);
         initiative = load(collaboratorId);
+        reconcileRunning(initiative);
       } catch (error) {
         log(`initiative scan skipped ${collaboratorId}: ${safeFailure(error)}`);
         continue;
       }
       const timestamp = now();
       for (const rule of initiative.rules.filter((item) => due(item, timestamp))) {
-        beginAttempt(initiative, rule, collaborator, "host-scheduler", false);
+        try { beginAttempt(initiative, rule, collaborator, "host-scheduler", false); }
+        catch { /* The persisted attempt is reconciled on the next scan. Other rules continue. */ }
       }
     }
   }
@@ -281,6 +289,7 @@ export function createCollaboratorInitiativeHost({
         manual,
         seed: proactiveSeed(rule),
       });
+      rule.runningConversationId = conversation?.conversationId ?? null;
       rule.updatedAt = now();
       touch(initiative, actorDeviceId);
       save(initiative);
@@ -293,10 +302,10 @@ export function createCollaboratorInitiativeHost({
     const ruleId = event?.turn?.ruleId;
     if (!RULE_ID.test(String(ruleId ?? ""))) return;
     let initiative;
-    try { initiative = load(event.collaborator.collaboratorId); }
-    catch { return; }
+    initiative = load(event.collaborator.collaboratorId);
     const rule = initiative.rules.find((item) => item.ruleId === ruleId);
-    if (!rule) return;
+    if (!rule?.runningAt) return;
+    if (event.turn.createdAt != null && event.turn.createdAt < rule.runningAt) return;
     if (event.outcome === "completed") {
       rule.runningAt = null;
       rule.deliveryCount += 1;
@@ -307,6 +316,25 @@ export function createCollaboratorInitiativeHost({
       save(initiative);
     } else {
       settleFailure(initiative, rule, event.failure ?? "主动回合没有完成");
+    }
+  }
+
+  function reconcileRunning(initiative) {
+    for (const rule of initiative.rules) {
+      if (!rule.runningAt) continue;
+      const result = executionOutcome(initiative.collaboratorId, rule);
+      if (!result) continue;
+      rule.runningAt = null;
+      if (result.outcome === "completed") {
+        rule.deliveryCount += 1;
+        rule.lastDeliveredAt = result.turn.completedAt ?? now();
+        rule.lastFailure = null;
+      } else {
+        rule.lastFailure = result.failure ?? "主动回合已结束，未完成回复";
+      }
+      rule.updatedAt = now();
+      touch(initiative, null);
+      save(initiative);
     }
   }
 
@@ -680,7 +708,7 @@ export function createCollaboratorInitiativeHost({
       schema: INITIATIVE_SCHEMA,
       collaboratorId: initiative.collaboratorId,
       revision: initiative.revision,
-      rules: initiative.rules.map(({ updatedByDeviceId: _, ...rule }) => rule),
+      rules: initiative.rules.map(({ updatedByDeviceId: _, runningConversationId: __, ...rule }) => rule),
       createdAt: initiative.createdAt,
       updatedAt: initiative.updatedAt,
     };

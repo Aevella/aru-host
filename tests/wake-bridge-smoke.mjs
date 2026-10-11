@@ -102,7 +102,24 @@ await bridge.route(request("POST", token), {}, "/aru/v1/wake-bridge/endpoints/ph
 await bridge.route(request("POST", token), {}, "/aru/v1/wake-bridge/endpoints/phone-1/events/event-2/ack");
 await bridge.route(request("GET", token), {}, "/aru/v1/wake-bridge/endpoints/phone-1/events");
 assert.equal(responses.at(-1).value.events.length, 0);
+// A failed ACK on the oldest page must not hide newer events. Cursor identity
+// survives deletion of the last event in the previous page.
+for (let i = 0; i < 35; i++) {
+  state.wakeBridgeEvents.push({ endpointId: "phone-1", eventId: `page-${String(i).padStart(3, "0")}`,
+    sealedPayload: "ciphertext", createdAt: 10000 + i, acknowledgedAt: null });
+}
+const pagePath = "/aru/v1/wake-bridge/endpoints/phone-1/events";
+await bridge.route(request("GET", token), {}, pagePath);
+const page = responses.at(-1).value;
+assert.ok(page.nextCursor);
+const lastId = page.events.at(-1).eventId;
+await bridge.route(request("DELETE", token), {}, `${pagePath}/${lastId}`);
+await bridge.route({ ...request("GET", token), url: `${pagePath}?after=${encodeURIComponent(page.nextCursor)}` }, {}, pagePath);
+assert.ok(responses.at(-1).value.events.some(event => event.eventId === "page-034"));
+assert.ok(!responses.at(-1).value.events.some(event => event.eventId === lastId));
+
 await bridge.route(request("DELETE", token), {}, "/aru/v1/wake-bridge/endpoints/current");
 assert.equal(state.wakeBridgeEndpoints.length, 0);
 assert.equal(state.wakeBridgeEvents.length, 0);
+
 console.log("wake bridge smoke passed");

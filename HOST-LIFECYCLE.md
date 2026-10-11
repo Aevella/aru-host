@@ -326,3 +326,18 @@ This is explicit rejection, not an ACK claiming phone-side SQLite admission.
 The phone reports malformed, undecryptable or mismatched inputs in its existing
 status surface and continues the batch. Transport/storage failures are not proof
 of bad input. No rejection queue or additional log is created.
+
+
+2026-10-12 failure-exit follow-up (candidate): wake inventories have an optional
+opaque keyset nextCursor; clients can continue beyond unacknowledged first-page
+items. Deleting or acknowledging the cursor event does not skip later entries.
+Older clients retain their first-page protocol. No expiry is imposed on execution
+results. Initiative read/mutation/scheduler paths reconcile running markers against
+the conversation execution owner after a lost settlement; completed receipts are
+counted once, failed admissions close, and old settlements cannot release a newer
+attempt. Codex cancellation timeout reads the owning thread before deciding that
+an already-terminal or missing idle turn has stopped. A running/unreadable target
+and outstanding tool side effects do not falsely become stopped.
+
+Focused mock/fault proof only; real installed Host and phone acceptance remain
+pending. No package release, server restart or deployment is performed.
