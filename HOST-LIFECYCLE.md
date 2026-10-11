@@ -299,5 +299,9 @@ The direct Anthropic API driver now preserves thinking/signature and redacted
 blocks during streamed tool continuation, instead of converting them to empty
 text. Empty text is excluded from both streamed and JSON tool replay. Windows
 installer JSON reads explicitly use UTF-8; the Windows lifecycle fixture uses a
-Unicode device label. These are source/local protocol proofs; the Windows
-fixture, affected customer installations and real provider calls remain pending.
+Unicode device label. Local protocol tests pass. Windows CI run 38146871031
+passed the real Scheduled Task / DPAPI installer lifecycle fixture on a3596e2,
+including the Unicode device label, upgrade, rollback and reinstall. The fixture
+explicitly decodes JSON response bytes as UTF-8 for Windows PowerShell 5.1.
+Affected customer installations and real provider calls remain pending; this is
+not a published release.
