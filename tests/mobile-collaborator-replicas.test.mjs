@@ -53,9 +53,9 @@ test("computer collaborator reads a phone replica without owning it and Host set
     conversations: [{
       conversationId: "phone_conversation",
       title: "Us",
-      baseMessageId: "phone_message",
+      baseMessageId: "phone:message/part.1",
       messages: [{
-        messageId: "phone_message",
+        messageId: "phone:message/part.1",
         role: "user",
         content: "hello",
         createdAt: 900,
@@ -95,6 +95,16 @@ test("computer collaborator reads a phone replica without owning it and Host set
   assert.equal(response.status, 200);
   assert.equal(response.value.sourceCollaboratorId, "phone_aru");
 
+  for (const invalidId of [null, 123, "", "   "]) {
+    const invalid = structuredClone(replica);
+    invalid.revision = 2;
+    invalid.conversations[0].messages[0].messageId = invalidId;
+    await assert.rejects(host.route(
+      { method: "PUT", body: invalid, url: "/aru/v1/mobile-collaborator-replicas/phone_aru" },
+      {}, "/aru/v1/mobile-collaborator-replicas/phone_aru", () => ({ deviceId: "phone" }),
+    ), /message id is invalid/);
+  }
+
   host.start();
   await host.runDue();
   assert.equal(triggered.executor.collaboratorId, "hostcol_reader");
@@ -108,7 +118,7 @@ test("computer collaborator reads a phone replica without owning it and Host set
       source: "mobile-replica-proactive",
       sourceCollaboratorId: "phone_aru",
       sourceConversationId: "phone_conversation",
-      baseMessageId: "phone_message",
+      baseMessageId: "phone:message/part.1",
       basisMessages: replica.conversations[0].messages,
       executionEpoch: 1,
       ruleId: "rule_one",
@@ -125,7 +135,7 @@ test("computer collaborator reads a phone replica without owning it and Host set
   );
   assert.equal(response.value.deliveries.length, 1);
   assert.equal(response.value.deliveries[0].assistantContent, "I am here.");
-  assert.equal(response.value.deliveries[0].baseMessageId, "phone_message");
+  assert.equal(response.value.deliveries[0].baseMessageId, "phone:message/part.1");
   assert.equal(response.value.deliveries[0].ruleVersion, "rule-version-1");
   assert.deepEqual(response.value.deliveries[0].basisMessages, replica.conversations[0].messages);
 
@@ -138,6 +148,17 @@ test("computer collaborator reads a phone replica without owning it and Host set
     collaborators.get("hostcol_reader"),
   );
   assert.equal(readable.value.systemPrompt, "Stay close.");
+  const reopened = createMobileCollaboratorReplicaHost({
+    dataDir: directory, readJSONBody: async req => req.body,
+    sendJSON: () => {}, HttpError,
+    collaboratorForId: id => collaborators.get(id), trigger: () => {},
+    maximumRequestBytes: 64 * 1024 * 1024, setTimer: () => 1, clearTimer: () => {},
+  });
+  const recovered = reopened.callSelfTool("aru_mobile_replica_read",
+    { sourceCollaboratorId: "phone_aru" }, {}, collaborators.get("hostcol_reader"));
+  assert.equal(recovered.value.conversations[0].baseMessageId, "phone:message/part.1");
+  assert.equal(recovered.value.conversations[0].messages[0].messageId, "phone:message/part.1");
+
   assert.equal(readable.value.memories, undefined);
   assert.equal(readable.value.references, undefined);
   assert.throws(() => host.callSelfTool(

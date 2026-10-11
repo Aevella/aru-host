@@ -695,7 +695,7 @@ function validatedConversations(value) {
   if (!Array.isArray(value)) throw new Error("conversations must be an array");
   return value.map((item) => {
     const messages = validatedContextMessages(item?.messages);
-    const baseMessageId = item?.baseMessageId ? validatedId(item.baseMessageId, "base message") : null;
+    const baseMessageId = item?.baseMessageId ? validatedMessageId(item.baseMessageId) : null;
     if (baseMessageId !== (messages.at(-1)?.messageId ?? null)) {
       throw new Error("baseMessageId must identify the final context message");
     }
@@ -708,10 +708,17 @@ function validatedConversations(value) {
   });
 }
 
+// Phone message identities are opaque references, never filesystem components.
+// Preserve them exactly so the returned basis still names the phone's durable row.
+function validatedMessageId(value) {
+  if (typeof value !== "string" || !value.trim()) throw new Error("message id is invalid");
+  return value;
+}
+
 function validatedContextMessages(value) {
   if (!Array.isArray(value)) throw new Error("context messages must be an array");
   return value.map((message) => ({
-    messageId: validatedId(message?.messageId, "message"),
+    messageId: validatedMessageId(message?.messageId),
     role: validatedContextRole(message?.role),
     content: String(message?.content ?? ""),
     createdAt: positiveInteger(message?.createdAt, "message.createdAt"),
