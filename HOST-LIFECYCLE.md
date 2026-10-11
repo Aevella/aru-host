@@ -286,3 +286,18 @@ user on Node 18. The production service remained active and was neither restarte
 nor upgraded; temporary probe files were removed. This VPS runs OpenCloudOS,
 not the reporter's Debian/Podman version, so it does not prove that separate
 cgroup issue on every rootless environment.
+
+
+2026-10-11 feedback repairs (candidate): mobile replica message IDs and basis
+message IDs are opaque phone references, not filesystem components. Admission
+preserves them byte-for-byte; empty/non-string IDs still fail and path-bearing
+Host identities retain their existing validation. The replica fixture carries a
+punctuated ID through admission, execution, delivery and disk reopen; rejected
+updates do not replace the previous valid snapshot.
+
+The direct Anthropic API driver now preserves thinking/signature and redacted
+blocks during streamed tool continuation, instead of converting them to empty
+text. Empty text is excluded from both streamed and JSON tool replay. Windows
+installer JSON reads explicitly use UTF-8; the Windows lifecycle fixture uses a
+Unicode device label. These are source/local protocol proofs; the Windows
+fixture, affected customer installations and real provider calls remain pending.

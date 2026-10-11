@@ -18,6 +18,7 @@ $installer = Join-Path $selfhost "install-windows.ps1"
 $taskName = "Aru Host ($Instance)"
 $instanceRoot = Join-Path $baseRoot "instances\$Instance"
 $failures = 0
+$unicodeLabel = "Windows Smoke " + [char]0x4E2D + [char]0x6587
 
 function Check([string]$label, [bool]$condition) {
   if ($condition) { Write-Host "ok: $label" }
@@ -42,7 +43,7 @@ try {
 
   # 1. Fresh install with real task registration and health probe.
   & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer `
-    -Instance $Instance -BaseRoot $baseRoot -Port $Port -DisplayName "Windows Smoke" -SourceDir $selfhost
+    -Instance $Instance -BaseRoot $baseRoot -Port $Port -DisplayName $unicodeLabel -SourceDir $selfhost
   Check "fresh install exits 0" ($LASTEXITCODE -eq 0)
   Check "config/node.env exists" (Test-Path (Join-Path $instanceRoot "config\node.env"))
   $nodeEnv = [IO.File]::ReadAllText((Join-Path $instanceRoot "config\node.env"))
@@ -101,8 +102,8 @@ try {
   Check "pairing preserves previous log entries" ($firstLink.Count -eq 1 -and $logText.Contains($firstLink[0]))
   function PairWithLink([string]$link) {
     $token = [Uri]::UnescapeDataString([regex]::Match($link, '[?&]pairingToken=([^&]+)').Groups[1].Value)
-    $body = @{ pairingToken = $token; deviceLabel = "Windows Smoke"; deviceRole = "host-console" } | ConvertTo-Json
-    return Invoke-RestMethod -UseBasicParsing -Method Post -Uri "http://127.0.0.1:$Port/aru/v1/pair" -ContentType "application/json" -Body $body
+    $body = @{ pairingToken = $token; deviceLabel = $unicodeLabel; deviceRole = "host-console" } | ConvertTo-Json
+    return Invoke-RestMethod -UseBasicParsing -Method Post -Uri "http://127.0.0.1:$Port/aru/v1/pair" -ContentType "application/json; charset=utf-8" -Body ([Text.Encoding]::UTF8.GetBytes($body))
   }
   $oldTokenRejected = $false
   try { $null = PairWithLink $firstLink[0] }
@@ -110,7 +111,7 @@ try {
   Check "previous boot pairing token rejected" $oldTokenRejected
   $grant = PairWithLink $nextLink[0]
   $devices = Invoke-RestMethod -UseBasicParsing -Uri "http://127.0.0.1:$Port/aru/v1/devices" -Headers @{ Authorization = "Bearer $($grant.credentialSecret)" }
-  Check "fresh pairing grants authenticated access" (@($devices.devices | Where-Object { $_.isCurrent -and $_.label -eq "Windows Smoke" }).Count -eq 1)
+  Check "fresh pairing grants authenticated access" (@($devices.devices | Where-Object { $_.isCurrent -and $_.label -eq $unicodeLabel }).Count -eq 1)
   # Phone artifact ownership does not require a computer collaborator or driver.
   $headers = @{ Authorization = "Bearer $($grant.credentialSecret)" }
   $sourceIdentity = [Guid]::NewGuid().ToString()
@@ -154,7 +155,7 @@ try {
     try {
       $ErrorActionPreference = "Continue"
       & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer `
-        -Instance $Instance -BaseRoot $baseRoot -Port $Port -DisplayName "Windows Smoke" -SourceDir $selfhost *> (Join-Path $baseRoot "rejected.log")
+        -Instance $Instance -BaseRoot $baseRoot -Port $Port -DisplayName $unicodeLabel -SourceDir $selfhost *> (Join-Path $baseRoot "rejected.log")
       $rejectedExit = $LASTEXITCODE
     } finally { $ErrorActionPreference = $priorErrorAction }
     Check "damaged state rejects upgrade" ($rejectedExit -ne 0)
@@ -168,7 +169,7 @@ try {
 
   # 3. Upgrade retains previous release; rollback swaps back and stays healthy.
   & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer `
-    -Instance $Instance -BaseRoot $baseRoot -Port $Port -DisplayName "Windows Smoke" -SourceDir $selfhost
+    -Instance $Instance -BaseRoot $baseRoot -Port $Port -DisplayName $unicodeLabel -SourceDir $selfhost
   Check "upgrade exits 0" ($LASTEXITCODE -eq 0)
   $restoredIdentity = Invoke-RestMethod -Method Put -Uri $identityURL -Headers @{ Authorization = "Bearer $($grant.credentialSecret)" } -ContentType 'application/json' -Body $identityBody
   Check "upgrade preserves phone artifact owner" ($restoredIdentity.collaboratorId -eq $identity.collaboratorId)
@@ -222,7 +223,7 @@ console.log('dpapi-roundtrip-ok');
 
   # 6. Reinstall over preserved data keeps the server identity.
   & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer `
-    -Instance $Instance -BaseRoot $baseRoot -Port $Port -DisplayName "Windows Smoke" -SourceDir $selfhost
+    -Instance $Instance -BaseRoot $baseRoot -Port $Port -DisplayName $unicodeLabel -SourceDir $selfhost
   Check "reinstall exits 0" ($LASTEXITCODE -eq 0)
   $manifestAfterReinstall = Invoke-RestMethod -UseBasicParsing -Uri "http://127.0.0.1:$Port/.well-known/aru.json" -TimeoutSec 10
   Check "server identity survives reinstall" ($manifestAfterReinstall.serverId -eq $manifest.serverId)

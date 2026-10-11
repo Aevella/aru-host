@@ -332,7 +332,7 @@ try {
   }
   $releaseMetadata = Join-Path $SourceDir "release.json"
   if (Test-Path -LiteralPath $releaseMetadata) {
-    $release = Get-Content -LiteralPath $releaseMetadata -Raw | ConvertFrom-Json
+    $release = Get-Content -LiteralPath $releaseMetadata -Raw -Encoding UTF8 | ConvertFrom-Json
     if ($release.schema -ne "aru.host.release.v1") { Fail "invalid release metadata" }
     if ($ReleaseVersion -and $ReleaseVersion -ne $release.version) { Fail "requested release does not match bundled Host Core" }
     $ReleaseVersion = $release.version
@@ -347,7 +347,7 @@ try {
   $expectedServerId = $null
   $statePath = Join-Path $dataDir "state.json"
   if (Test-Path -LiteralPath $statePath) {
-    $expectedServerId = (Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json).serverId
+    $expectedServerId = (Get-Content -LiteralPath $statePath -Raw -Encoding UTF8 | ConvertFrom-Json).serverId
   }
 
   $releaseStamp = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
@@ -464,7 +464,7 @@ try {
     $expectedVersion = $null
     $activeMetadata = Join-Path $currentLink "release.json"
     if (Test-Path -LiteralPath $activeMetadata) {
-      $expectedVersion = (Get-Content -LiteralPath $activeMetadata -Raw | ConvertFrom-Json).version
+      $expectedVersion = (Get-Content -LiteralPath $activeMetadata -Raw -Encoding UTF8 | ConvertFrom-Json).version
     }
     Start-ScheduledTask -TaskName $taskName
     for ($attempt = 0; $attempt -lt 60; $attempt++) {
