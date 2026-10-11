@@ -200,7 +200,16 @@ try {
     $failureCode = $LASTEXITCODE
   } finally { $ErrorActionPreference = $savedErrorPreference }
   Check "failed candidate exits nonzero" ($failureCode -ne 0)
-  Check "rollback is reported healthy only after probe" (($failureOutput -join "`n") -match "previous release restored and healthy")
+  # Windows PowerShell formats native stderr for the console and can wrap
+  # a single error message across lines. Preserve it for diagnosis, then match
+  # semantic words independently of presentation whitespace.
+  $failureText = $failureOutput -join "`n"
+  Write-Host "Candidate failure output (verbatim):`n$failureText"
+  $recoveryPattern = "previous\s+release\s+restored\s+and\s+healthy"
+  Check "rollback is reported healthy only after probe" ($failureText -match $recoveryPattern)
+  if ($failureText -match $recoveryPattern -and $failureText -notmatch "previous release restored and healthy") {
+    Write-Host "diagnostic: recovery message was wrapped by native stderr formatting"
+  }
   $recovered = Invoke-RestMethod -UseBasicParsing -Uri "http://127.0.0.1:$Port/.well-known/aru.json" -TimeoutSec 10
   Check "failed candidate preserves identity" ($recovered.serverId -eq $manifest.serverId)
 
