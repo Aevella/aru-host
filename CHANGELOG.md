@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.36.0
 
 - Add public HTTPS and Tailscale connection-address editing to Windows/Linux Console, including credential-free Host identity checks, revision-checked save, removal and retained drafts after failure.
 
