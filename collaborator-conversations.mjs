@@ -272,7 +272,7 @@ return { replicaInstructions, proactiveReplicaSeed, messageContentWithTime, hist
 
 // src/conversations/attachment-chunks.mjs
 const module4 = (() => {
-const { createHash, randomUUID } = node0;
+const { randomUUID } = node0;
 const { existsSync, readFileSync, writeFileSync, renameSync, rmSync, statSync, openSync, fsyncSync, closeSync } = node2;
 const { join } = node1;
 
@@ -338,15 +338,17 @@ function createAttachmentChunkTransfer({ HttpError, recordDirectory, loadAttachm
         sendJSON(res, 200, projection(record)); return true;
       }
       if (projection(record).upload.received.length !== count(record)) throw new HttpError(409, "attachment.incomplete", "upload has missing chunks");
-      // Verify before finalization; a corrupt transfer can be repaired on retry.
-      const hash = createHash("sha256");
-      for (let i = 0; i < count(record); i++) hash.update(readFileSync(path(record, i)));
-      if (hash.digest("hex") !== record.sha256) {
-        for (let i = 0; i < count(record); i++) rmSync(path(record, i), { force: true });
-        throw new HttpError(422, "attachment.sha256_mismatch", "uploaded bytes failed integrity validation");
-      }
       const stream = (async function* () { for (let i = 0; i < count(record); i++) yield readFileSync(path(record, i)); })();
-      const result = await complete(stream, record);
+      let result;
+      try { result = await complete(stream, record); }
+      catch (error) {
+        // The final-content owner rejects corrupt bytes. Allow a retry to repair
+        // those pieces instead of repeatedly finalizing the same corrupt upload.
+        if (error.code === "attachment.sha256_mismatch") {
+          for (let i = 0; i < count(record); i++) rmSync(path(record, i), { force: true });
+        }
+        throw error;
+      }
       for (let i = 0; i < count(record); i++) rmSync(path(record, i), { force: true });
       sendJSON(res, 200, result); return true;
     } finally { active.delete(record.attachmentId); }
