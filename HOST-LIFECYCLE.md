@@ -366,8 +366,9 @@ upload after a process restart. Ready content still requires normal message bind
 Legacy whole-file PUT remains supported for distributed clients; older Hosts omit
 the upload projection and new clients use their existing whole-file outlet.
 
-Deletion invalidates in-flight writers, and chunk/whole-file completion share an
-in-process admission lock. Unbound transfer directories use the existing seven-day
+Deletion invalidates in-flight writers. Chunk reception does not lock out retries;
+late pieces re-read current state before publishing and cannot rewind completion.
+Finalization and legacy whole-file writes share an in-process admission lock. Unbound transfer directories use the existing seven-day
 cleanup at startup. Phone foreground drafts retain the client identity for manual
 retry after connection failure; this is not phone process-death/background recovery.
 Focused synthetic tests cover lost receipts, restart, incomplete/conflicting pieces,

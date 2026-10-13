@@ -67,7 +67,7 @@ test("deleting an in-flight chunk cannot resurrect the upload", async t => {
   const stream = (async function* () { started(); await gate; yield f.bytes.subarray(0, 262144); })();
   const pending = f.call("PUT", `${root}/chunks/0`, stream);
   await entering;
-  await assert.rejects(f.call("PUT", `${root}/chunks/1`, f.bytes.subarray(262144, 524288)), e => e.code === "attachment.busy");
+  await f.call("PUT", `${root}/chunks/1`, f.bytes.subarray(262144, 524288));
   await f.call("DELETE", root); release();
   await assert.rejects(pending, e => e.status === 404);
   f.restart();
@@ -80,4 +80,19 @@ test("legacy whole-file completion also clears earlier pieces", async t => {
   assert.equal((await f.call("PUT", `${root}/content`, f.bytes)).state, "ready");
   const files = readdirSync(join(f.dataDir, "collaborator-conversation-attachments", "col", "conv", a.attachmentId));
   assert.deepEqual(files.sort(), ["content.bin", "metadata.json"]);
+});
+
+test("a stalled connection does not block retry or rewind completed state", async t => {
+  const f = fixture(t); const a = await f.admit(); const root = `/attachments/${a.attachmentId}`;
+  let release; let started;
+  const gate = new Promise(resolve => { release = resolve; });
+  const entering = new Promise(resolve => { started = resolve; });
+  const stream = (async function* () { started(); await gate; yield f.bytes.subarray(0, 262144); })();
+  const stale = f.call("PUT", `${root}/chunks/0`, stream);
+  await entering;
+  for (let i = 0; i < 3; i++) await f.call("PUT", `${root}/chunks/${i}`, f.bytes.subarray(i * 262144, Math.min((i + 1) * 262144, f.bytes.length)));
+  assert.equal((await f.call("POST", `${root}/complete`)).state, "ready");
+  release();
+  assert.equal((await stale).state, "ready");
+  assert.equal((await f.call("GET", `${root}/upload`)).state, "ready");
 });

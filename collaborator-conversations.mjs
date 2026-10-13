@@ -300,14 +300,17 @@ function createAttachmentChunkTransfer({ HttpError, recordDirectory, loadAttachm
   async function route(req, res, { suffix, collaboratorId, conversationId, device, sendJSON }) {
     const match = suffix.match(/^\/attachments\/([A-Za-z0-9_-]+)\/(upload|complete|chunks\/(\d+))$/);
     if (!match) return false;
-    const record = loadAttachment(collaboratorId, conversationId, match[1]);
+    let record = loadAttachment(collaboratorId, conversationId, match[1]);
     if (record.createdByDeviceId !== device.deviceId) throw new HttpError(403, "attachment.owner", "upload belongs to another device");
     if (match[2] === "upload" && req.method === "GET") {
       sendJSON(res, 200, projection(record)); return true;
     }
     if (!((match[3] !== undefined && req.method === "PUT") || (match[2] === "complete" && req.method === "POST"))) return false;
-    if (active.has(record.attachmentId)) throw new HttpError(409, "attachment.busy", "upload is already receiving bytes");
-    active.add(record.attachmentId);
+    const finalizing = match[3] === undefined;
+    if (finalizing) {
+      if (active.has(record.attachmentId)) throw new HttpError(409, "attachment.busy", "attachment is being finalized");
+      active.add(record.attachmentId);
+    }
     try {
       if (record.state === "ready") { req.resume?.(); sendJSON(res, 200, projection(record)); return true; }
       if (record.state !== "uploading") throw new HttpError(409, "attachment.state_invalid", "attachment is not accepting content");
@@ -323,7 +326,9 @@ function createAttachmentChunkTransfer({ HttpError, recordDirectory, loadAttachm
         if (size !== length(record, index)) throw new HttpError(400, "attachment.chunk_size", "incomplete chunk");
         const bytes = Buffer.concat(buffers);
         // Deletion while receiving must never recreate the upload directory.
-        loadAttachment(collaboratorId, conversationId, record.attachmentId);
+        record = loadAttachment(collaboratorId, conversationId, record.attachmentId);
+        if (record.state === "ready") { sendJSON(res, 200, projection(record)); return true; }
+        if (record.state !== "uploading") throw new HttpError(409, "attachment.state_invalid", "attachment is not accepting content");
         const destination = path(record, index);
         if (existsSync(destination)) {
           if (!readFileSync(destination).equals(bytes)) throw new HttpError(409, "attachment.chunk_conflict", "chunk retry contains different bytes");
@@ -354,7 +359,7 @@ function createAttachmentChunkTransfer({ HttpError, recordDirectory, loadAttachm
       }
       discard(record);
       sendJSON(res, 200, result); return true;
-    } finally { active.delete(record.attachmentId); }
+    } finally { if (finalizing) active.delete(record.attachmentId); }
   }
   async function exclusive(record, operation) {
     if (active.has(record.attachmentId)) throw new HttpError(409, "attachment.busy", "upload is already receiving bytes");
