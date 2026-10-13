@@ -115,7 +115,10 @@ export function createCollaboratorConversationAttachmentHost({
   }
 
   async function receiveContent(req, record) {
-    if (record.state === "ready" || record.state === "bound") return publicAttachment(record);
+    if (record.state === "ready" || record.state === "bound") {
+      chunks.discard(record);
+      return publicAttachment(record);
+    }
     if (record.state !== "uploading") {
       throw new HttpError(409, "attachment.state_invalid", "attachment is not accepting content");
     }
@@ -155,6 +158,7 @@ export function createCollaboratorConversationAttachmentHost({
       record.state = "ready";
       record.updatedAt = now();
       saveAttachment(record);
+      chunks.discard(record);
       return publicAttachment(record);
     } catch (error) {
       writer.destroy();

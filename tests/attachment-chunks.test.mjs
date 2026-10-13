@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
@@ -72,4 +72,12 @@ test("deleting an in-flight chunk cannot resurrect the upload", async t => {
   await assert.rejects(pending, e => e.status === 404);
   f.restart();
   await assert.rejects(f.call("GET", `${root}/upload`), e => e.status === 404);
+});
+
+test("legacy whole-file completion also clears earlier pieces", async t => {
+  const f = fixture(t); const a = await f.admit(); const root = `/attachments/${a.attachmentId}`;
+  await f.call("PUT", `${root}/chunks/0`, f.bytes.subarray(0, 262144));
+  assert.equal((await f.call("PUT", `${root}/content`, f.bytes)).state, "ready");
+  const files = readdirSync(join(f.dataDir, "collaborator-conversation-attachments", "col", "conv", a.attachmentId));
+  assert.deepEqual(files.sort(), ["content.bin", "metadata.json"]);
 });

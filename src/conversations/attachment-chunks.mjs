@@ -20,6 +20,9 @@ export function createAttachmentChunkTransfer({ HttpError, recordDirectory, load
     }
     return { ...project(record), upload: { version: 1, chunkSize, received } };
   }
+  function discard(record) {
+    for (let i = 0; i < count(record); i++) rmSync(path(record, i), { force: true });
+  }
   async function route(req, res, { suffix, collaboratorId, conversationId, device, sendJSON }) {
     const match = suffix.match(/^\/attachments\/([A-Za-z0-9_-]+)\/(upload|complete|chunks\/(\d+))$/);
     if (!match) return false;
@@ -71,11 +74,11 @@ export function createAttachmentChunkTransfer({ HttpError, recordDirectory, load
         // The final-content owner rejects corrupt bytes. Allow a retry to repair
         // those pieces instead of repeatedly finalizing the same corrupt upload.
         if (error.code === "attachment.sha256_mismatch") {
-          for (let i = 0; i < count(record); i++) rmSync(path(record, i), { force: true });
+          discard(record);
         }
         throw error;
       }
-      for (let i = 0; i < count(record); i++) rmSync(path(record, i), { force: true });
+      discard(record);
       sendJSON(res, 200, result); return true;
     } finally { active.delete(record.attachmentId); }
   }
@@ -84,5 +87,5 @@ export function createAttachmentChunkTransfer({ HttpError, recordDirectory, load
     active.add(record.attachmentId);
     try { return await operation(); } finally { active.delete(record.attachmentId); }
   }
-  return { route, projection, exclusive };
+  return { route, projection, exclusive, discard };
 }
