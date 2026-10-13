@@ -16,6 +16,7 @@ import {
 } from "node:fs";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { once } from "node:events";
+import { createAttachmentChunkTransfer } from "./attachment-chunks.mjs";
 
 
 const ID = /^[A-Za-z0-9_-]+$/;
@@ -42,6 +43,10 @@ export function createCollaboratorConversationAttachmentHost({
 }) {
   const root = join(dataDir, "collaborator-conversation-attachments");
   mkdirSync(root, { recursive: true, mode: 0o700 });
+  const chunks = createAttachmentChunkTransfer({
+    HttpError, recordDirectory, loadAttachment, saveAttachment, now,
+    complete: receiveContent, project: publicAttachment,
+  });
   cleanupUnbound();
 
   async function route(req, res, { suffix, collaboratorId, conversationId, device, conversation }) {
@@ -50,12 +55,13 @@ export function createCollaboratorConversationAttachmentHost({
       sendJSON(res, 201, createUpload(collaboratorId, conversationId, body, device));
       return true;
     }
+    if (await chunks.route(req, res, { suffix, collaboratorId, conversationId, device, sendJSON })) return true;
     const match = suffix.match(/^\/attachments\/([^/]+)(\/content)?$/);
     if (!match) return false;
     const attachmentId = validatedId(match[1], "attachment");
     const record = loadAttachment(collaboratorId, conversationId, attachmentId);
     if (match[2] === "/content" && req.method === "PUT") {
-      sendJSON(res, 200, await receiveContent(req, record));
+      sendJSON(res, 200, await chunks.exclusive(record, () => receiveContent(req, record)));
       return true;
     }
     if (match[2] === "/content" && req.method === "GET") {
@@ -79,10 +85,11 @@ export function createCollaboratorConversationAttachmentHost({
     const existing = attachmentsForConversation(collaboratorId, conversationId)
       .find((record) => record.clientUploadId === input.clientUploadId);
     if (existing) {
+      if (existing.createdByDeviceId !== device.deviceId) throw new HttpError(403, "attachment.owner", "upload belongs to another device");
       if (!sameUpload(existing, input)) {
         throw new HttpError(409, "attachment.upload_identity_conflict", "clientUploadId already owns different bytes");
       }
-      return publicAttachment(existing);
+      return chunks.projection(existing);
     }
     const timestamp = now();
     const record = {
@@ -104,7 +111,7 @@ export function createCollaboratorConversationAttachmentHost({
       boundAt: null,
     };
     saveAttachment(record);
-    return publicAttachment(record);
+    return chunks.projection(record);
   }
 
   async function receiveContent(req, record) {
@@ -143,6 +150,7 @@ export function createCollaboratorConversationAttachmentHost({
       }
       validateDeclaredMIME(temporary, record.mimeType, record.kind, HttpError);
       chmodSync(temporary, 0o600);
+      loadAttachment(record.collaboratorId, record.conversationId, record.attachmentId);
       renameSync(temporary, destination);
       record.state = "ready";
       record.updatedAt = now();
@@ -294,11 +302,7 @@ export function createCollaboratorConversationAttachmentHost({
     if (!existsSync(directory)) return [];
     return readdirSync(directory)
       .filter((name) => ID.test(name))
-      .map((attachmentId) => {
-        try { return loadAttachment(collaboratorId, conversationId, attachmentId); }
-        catch (error) { if (requireReadable) throw error; return null; }
-      })
-      .filter(Boolean);
+      .map((attachmentId) => loadAttachment(collaboratorId, conversationId, attachmentId));
   }
 
   function loadAttachment(collaboratorId, conversationId, attachmentId) {

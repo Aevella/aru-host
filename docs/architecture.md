@@ -265,3 +265,10 @@ It does not create a grant registry or infer revocation from rule counts. It sup
 recovering a delegated executor after a phone residence link disappears. Revocation
 continues to use the existing source/epoch endpoint; executor deletion still rejects
 any remaining grant, including one admitted after the client read the inventory.
+
+Conversation attachment transfer: `src/conversations/attachments.mjs` retains
+metadata, final-content admission and message binding. `attachment-chunks.mjs`
+owns atomic temporary pieces and scoped transfer serialization; its disk inventory
+is the resume receipt, not a second metadata ledger. Authenticated conversation
+routing admits the device before either outlet. Completion hands verified streams
+back to the existing attachment owner.

@@ -352,3 +352,24 @@ current grant; storage, transport and post-import ACK failures stay retryable.
 Old Hosts without this endpoint return an error; clients never substitute a success
 ACK. Local fault tests cover restart after journal/publication, sibling preservation
 and repeated terminal receipts. No new logging or user management surface is added.
+
+## Resumable conversation attachments
+
+The attachment owner admits metadata under a device-scoped clientUploadId. Its
+optional upload v1 projection advertises 256 KiB pieces and the indices present
+on disk. PUT chunks/:index publishes a complete piece atomically after flushing
+its bytes; interrupted pieces are never acknowledged. Repeated equal pieces are
+idempotent and conflicting bytes fail. POST complete requires all pieces and
+whole-file SHA-256/MIME validation before the existing owner marks content ready.
+Upload and completion receipts can be recovered with repeated admission or GET
+upload after a process restart. Ready content still requires normal message binding.
+Legacy whole-file PUT remains supported for distributed clients; older Hosts omit
+the upload projection and new clients use their existing whole-file outlet.
+
+Deletion invalidates in-flight writers, and chunk/whole-file completion share an
+in-process admission lock. Unbound transfer directories use the existing seven-day
+cleanup at startup. Phone foreground drafts retain the client identity for manual
+retry after connection failure; this is not phone process-death/background recovery.
+Focused synthetic tests cover lost receipts, restart, incomplete/conflicting pieces,
+integrity rejection, device isolation and deletion during transfer. No deployed
+upgrade or real-phone slow-network acceptance is implied.

@@ -270,6 +270,97 @@ function publicWorkspacePath(value, workspace) {
 return { replicaInstructions, proactiveReplicaSeed, messageContentWithTime, historyRoleLabel, isoTimestamp, validatedReplicaRole, dynamicTool, driverConfigurationFingerprint, collaboratorInstructions, driverApprovalKind, driverApprovalTitle, publicApprovalDetail, driverApprovalResponse, publicDriverItem, publicWorkspacePath };
 })();
 
+// src/conversations/attachment-chunks.mjs
+const module4 = (() => {
+const { createHash, randomUUID } = node0;
+const { existsSync, readFileSync, writeFileSync, renameSync, rmSync, statSync, openSync, fsyncSync, closeSync } = node2;
+const { join } = node1;
+
+// Each acknowledged piece is an atomically published file. Metadata never claims
+// bytes that have not landed. The complete-file owner retains MIME/hash admission.
+function createAttachmentChunkTransfer({ HttpError, recordDirectory, loadAttachment,
+  saveAttachment, now, complete, project }) {
+  const chunkSize = 256 * 1024;
+  const active = new Set();
+  const path = (record, index) => join(recordDirectory(record), `part-${index}`);
+  const count = (record) => Math.ceil(record.byteCount / chunkSize);
+  const length = (record, index) => Math.min(chunkSize, record.byteCount - index * chunkSize);
+  function projection(record) {
+    const received = [];
+    if (record.state === "uploading") {
+      for (let i = 0; i < count(record); i++) {
+        if (existsSync(path(record, i)) && statSync(path(record, i)).size === length(record, i)) received.push(i);
+      }
+    }
+    return { ...project(record), upload: { version: 1, chunkSize, received } };
+  }
+  async function route(req, res, { suffix, collaboratorId, conversationId, device, sendJSON }) {
+    const match = suffix.match(/^\/attachments\/([A-Za-z0-9_-]+)\/(upload|complete|chunks\/(\d+))$/);
+    if (!match) return false;
+    const record = loadAttachment(collaboratorId, conversationId, match[1]);
+    if (record.createdByDeviceId !== device.deviceId) throw new HttpError(403, "attachment.owner", "upload belongs to another device");
+    if (match[2] === "upload" && req.method === "GET") {
+      sendJSON(res, 200, projection(record)); return true;
+    }
+    if (!((match[3] !== undefined && req.method === "PUT") || (match[2] === "complete" && req.method === "POST"))) return false;
+    if (active.has(record.attachmentId)) throw new HttpError(409, "attachment.busy", "upload is already receiving bytes");
+    active.add(record.attachmentId);
+    try {
+      if (record.state === "ready") { req.resume?.(); sendJSON(res, 200, projection(record)); return true; }
+      if (record.state !== "uploading") throw new HttpError(409, "attachment.state_invalid", "attachment is not accepting content");
+      if (match[3] !== undefined) {
+        const index = Number(match[3]);
+        if (!Number.isSafeInteger(index) || index < 0 || index >= count(record)) throw new HttpError(400, "attachment.chunk_index", "invalid chunk index");
+        const buffers = []; let size = 0;
+        for await (const value of req) {
+          const bytes = Buffer.from(value); size += bytes.length;
+          if (size > length(record, index)) throw new HttpError(413, "attachment.chunk_size", "chunk exceeds admitted size");
+          buffers.push(bytes);
+        }
+        if (size !== length(record, index)) throw new HttpError(400, "attachment.chunk_size", "incomplete chunk");
+        const bytes = Buffer.concat(buffers);
+        // Deletion while receiving must never recreate the upload directory.
+        loadAttachment(collaboratorId, conversationId, record.attachmentId);
+        const destination = path(record, index);
+        if (existsSync(destination)) {
+          if (!readFileSync(destination).equals(bytes)) throw new HttpError(409, "attachment.chunk_conflict", "chunk retry contains different bytes");
+        } else {
+          const temporary = `${destination}.${randomUUID()}.tmp`;
+          try {
+            writeFileSync(temporary, bytes, { mode: 0o600 });
+            const descriptor = openSync(temporary, "r");
+            try { fsyncSync(descriptor); } finally { closeSync(descriptor); }
+            renameSync(temporary, destination);
+          }
+          finally { rmSync(temporary, { force: true }); }
+        }
+        record.updatedAt = now(); saveAttachment(record);
+        sendJSON(res, 200, projection(record)); return true;
+      }
+      if (projection(record).upload.received.length !== count(record)) throw new HttpError(409, "attachment.incomplete", "upload has missing chunks");
+      // Verify before finalization; a corrupt transfer can be repaired on retry.
+      const hash = createHash("sha256");
+      for (let i = 0; i < count(record); i++) hash.update(readFileSync(path(record, i)));
+      if (hash.digest("hex") !== record.sha256) {
+        for (let i = 0; i < count(record); i++) rmSync(path(record, i), { force: true });
+        throw new HttpError(422, "attachment.sha256_mismatch", "uploaded bytes failed integrity validation");
+      }
+      const stream = (async function* () { for (let i = 0; i < count(record); i++) yield readFileSync(path(record, i)); })();
+      const result = await complete(stream, record);
+      for (let i = 0; i < count(record); i++) rmSync(path(record, i), { force: true });
+      sendJSON(res, 200, result); return true;
+    } finally { active.delete(record.attachmentId); }
+  }
+  async function exclusive(record, operation) {
+    if (active.has(record.attachmentId)) throw new HttpError(409, "attachment.busy", "upload is already receiving bytes");
+    active.add(record.attachmentId);
+    try { return await operation(); } finally { active.delete(record.attachmentId); }
+  }
+  return { route, projection, exclusive };
+}
+return { createAttachmentChunkTransfer };
+})();
+
 // src/conversations/attachments.mjs
 const module3 = (() => {
 const { createHash, randomUUID } = node0;
@@ -290,6 +381,7 @@ const {
 } = node2;
 const { basename, dirname, extname, isAbsolute, join, relative, resolve } = node1;
 const { once } = node3;
+const { createAttachmentChunkTransfer } = module4;
 
 
 const ID = /^[A-Za-z0-9_-]+$/;
@@ -316,6 +408,10 @@ function createCollaboratorConversationAttachmentHost({
 }) {
   const root = join(dataDir, "collaborator-conversation-attachments");
   mkdirSync(root, { recursive: true, mode: 0o700 });
+  const chunks = createAttachmentChunkTransfer({
+    HttpError, recordDirectory, loadAttachment, saveAttachment, now,
+    complete: receiveContent, project: publicAttachment,
+  });
   cleanupUnbound();
 
   async function route(req, res, { suffix, collaboratorId, conversationId, device, conversation }) {
@@ -324,12 +420,13 @@ function createCollaboratorConversationAttachmentHost({
       sendJSON(res, 201, createUpload(collaboratorId, conversationId, body, device));
       return true;
     }
+    if (await chunks.route(req, res, { suffix, collaboratorId, conversationId, device, sendJSON })) return true;
     const match = suffix.match(/^\/attachments\/([^/]+)(\/content)?$/);
     if (!match) return false;
     const attachmentId = validatedId(match[1], "attachment");
     const record = loadAttachment(collaboratorId, conversationId, attachmentId);
     if (match[2] === "/content" && req.method === "PUT") {
-      sendJSON(res, 200, await receiveContent(req, record));
+      sendJSON(res, 200, await chunks.exclusive(record, () => receiveContent(req, record)));
       return true;
     }
     if (match[2] === "/content" && req.method === "GET") {
@@ -353,10 +450,11 @@ function createCollaboratorConversationAttachmentHost({
     const existing = attachmentsForConversation(collaboratorId, conversationId)
       .find((record) => record.clientUploadId === input.clientUploadId);
     if (existing) {
+      if (existing.createdByDeviceId !== device.deviceId) throw new HttpError(403, "attachment.owner", "upload belongs to another device");
       if (!sameUpload(existing, input)) {
         throw new HttpError(409, "attachment.upload_identity_conflict", "clientUploadId already owns different bytes");
       }
-      return publicAttachment(existing);
+      return chunks.projection(existing);
     }
     const timestamp = now();
     const record = {
@@ -378,7 +476,7 @@ function createCollaboratorConversationAttachmentHost({
       boundAt: null,
     };
     saveAttachment(record);
-    return publicAttachment(record);
+    return chunks.projection(record);
   }
 
   async function receiveContent(req, record) {
@@ -417,6 +515,7 @@ function createCollaboratorConversationAttachmentHost({
       }
       validateDeclaredMIME(temporary, record.mimeType, record.kind, HttpError);
       chmodSync(temporary, 0o600);
+      loadAttachment(record.collaboratorId, record.conversationId, record.attachmentId);
       renameSync(temporary, destination);
       record.state = "ready";
       record.updatedAt = now();
@@ -568,11 +667,7 @@ function createCollaboratorConversationAttachmentHost({
     if (!existsSync(directory)) return [];
     return readdirSync(directory)
       .filter((name) => ID.test(name))
-      .map((attachmentId) => {
-        try { return loadAttachment(collaboratorId, conversationId, attachmentId); }
-        catch (error) { if (requireReadable) throw error; return null; }
-      })
-      .filter(Boolean);
+      .map((attachmentId) => loadAttachment(collaboratorId, conversationId, attachmentId));
   }
 
   function loadAttachment(collaboratorId, conversationId, attachmentId) {
@@ -719,7 +814,7 @@ return { createCollaboratorConversationAttachmentHost };
 })();
 
 // src/conversations/replica-delivery-recovery.mjs
-const module4 = (() => {
+const module5 = (() => {
 function createReplicaDeliveryRecovery({ loadConversations, publicConversation, publicTurn, message }) {
   // Startup-only reconciliation of the delivery owner's outstanding attempts.
   // Conversation storage owns completion evidence; callers never read its files.
@@ -744,7 +839,7 @@ return { createReplicaDeliveryRecovery };
 })();
 
 // src/conversations/turn-execution.mjs
-const module5 = (() => {
+const module6 = (() => {
 // Runtime of one admitted turn. Durable state and projection stay in the
 // conversation owner; this object only holds cancellable work and its receipts.
 function createTurnExecution() {
@@ -788,7 +883,7 @@ return { createTurnExecution, waitForTurnStop };
 })();
 
 // src/conversations/collaborator-conversation-lifecycle.mjs
-const module6 = (() => {
+const module7 = (() => {
 // Metadata lifecycle, independent of message execution. A running turn must be
 // stopped through its owner before its conversation can leave the live list.
 function mutateConversationLifecycle({ conversation, body, deleting, deviceId, now, save, HttpError }) {
@@ -816,9 +911,9 @@ const module0 = (() => {
 const { SYNC_SCHEMA, messagePage, syncProjection } = module1;
 const { replicaInstructions, proactiveReplicaSeed, messageContentWithTime, historyRoleLabel, isoTimestamp, validatedReplicaRole, dynamicTool, driverConfigurationFingerprint, collaboratorInstructions, driverApprovalKind, driverApprovalTitle, publicApprovalDetail, driverApprovalResponse, publicDriverItem, publicWorkspacePath } = module2;
 const { createCollaboratorConversationAttachmentHost } = module3;
-const { createReplicaDeliveryRecovery } = module4;
-const { createTurnExecution, waitForTurnStop } = module5;
-const { mutateConversationLifecycle } = module6;
+const { createReplicaDeliveryRecovery } = module5;
+const { createTurnExecution, waitForTurnStop } = module6;
+const { mutateConversationLifecycle } = module7;
 const { createHash, randomUUID } = node0;
 const {
   chmodSync,
