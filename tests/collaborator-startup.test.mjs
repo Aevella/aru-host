@@ -43,7 +43,7 @@ test("startup settlement disk failure is contained and same Host recovers withou
   rmSync(scheduler); mkdirSync(scheduler);
   await host.start();
   assert.equal(logs.length, 1);
-  assert.match(logs[0], /EISDIR|ENOTDIR|EEXIST/);
+  assert.match(logs[0], process.platform === "win32" ? /EPERM/ : /EISDIR|ENOTDIR|EEXIST/);
   assert.match(logs[0], /recovery pending/);
   const response = {};
   await host.route({ method: "GET" }, response, "/aru/v1/agent-drivers", () => ({}));
