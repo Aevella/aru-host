@@ -1,5 +1,5 @@
 import { lstatSync, constants, openSync, closeSync, fsyncSync } from "node:fs";
-import { spawnSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import {
   chmodSync,
@@ -21,13 +21,13 @@ const LINUX_AVAILABILITY_PROBE_ACCOUNT = "availability-probe";
 const LINUX_ENCRYPTED_VAULT_SCHEMA = "aru.provider-secret.v1";
 export const LINUX_AVAILABILITY_CACHE_MILLISECONDS = 5_000;
 
-export function lookupLinuxSecret({
-  run = spawnSync,
+export async function lookupLinuxSecret({
+  run = runSecretCommand,
   service,
   account,
   timeout = 5_000,
 }) {
-  const result = run(LINUX_SECRET_TOOL, [
+  const result = await run(LINUX_SECRET_TOOL, [
     "lookup", "service", service, "account", account,
   ], {
     encoding: "utf8",
@@ -49,8 +49,8 @@ export function lookupLinuxSecret({
   return { outcome: "unavailable", value: null };
 }
 
-export function probeLinuxSecretService(run = spawnSync) {
-  const result = lookupLinuxSecret({
+export async function probeLinuxSecretService(run = runSecretCommand) {
+  const result = await lookupLinuxSecret({
     run,
     service: LINUX_AVAILABILITY_PROBE_SERVICE,
     account: LINUX_AVAILABILITY_PROBE_ACCOUNT,
@@ -103,7 +103,7 @@ export function windowsDpapiScripts(secretPath) {
 export function createProviderSecretStore({
   platform = process.platform,
   service = DEFAULT_SERVICE,
-  run = spawnSync,
+  run = runSecretCommand,
   now = Date.now,
   env = process.env,
 } = {}) {
@@ -115,16 +115,22 @@ export function createProviderSecretStore({
   let cachedAvailability;
   let availabilityCheckedAt = 0;
 
-  function availability({ retry = false } = {}) {
+  let availabilityAttempt;
+  function availability(options = {}) {
+    if (!availabilityAttempt) availabilityAttempt = Promise.resolve().then(() => probeAvailability(options))
+      .finally(() => { availabilityAttempt = null; });
+    return availabilityAttempt;
+  }
+  async function probeAvailability({ retry = false } = {}) {
     if (platform === "linux") {
       const timestamp = now();
       if (cachedAvailability
           && timestamp - availabilityCheckedAt < LINUX_AVAILABILITY_CACHE_MILLISECONDS) {
         return cachedAvailability;
       }
-      const detected = probeLinuxSecretService(run);
+      const detected = await probeLinuxSecretService(run);
       cachedAvailability = detected;
-      availabilityCheckedAt = timestamp;
+      availabilityCheckedAt = now();
       return detected;
     }
     // Coalesce inventory probes, but do not turn a transient failure into a
@@ -133,7 +139,7 @@ export function createProviderSecretStore({
         && now() - availabilityCheckedAt < LINUX_AVAILABILITY_CACHE_MILLISECONDS))) return cachedAvailability;
     availabilityCheckedAt = now();
     if (platform === "win32") {
-      const result = run("powershell.exe", [
+      const result = await run("powershell.exe", [
         ...WINDOWS_POWERSHELL_FLAGS, windowsDpapiScripts("").probe,
       ], {
         encoding: "utf8",
@@ -154,6 +160,7 @@ export function createProviderSecretStore({
           exitCode: Number.isInteger(result.status) ? result.status : null,
         };
       }
+      availabilityCheckedAt = now();
       return cachedAvailability;
     }
     if (platform !== "darwin") {
@@ -162,9 +169,10 @@ export function createProviderSecretStore({
         storage: "unavailable",
         failure: "platform-secret-store-unavailable",
       };
+      availabilityCheckedAt = now();
       return cachedAvailability;
     }
-    const result = run("/usr/bin/security", ["help"], {
+    const result = await run("/usr/bin/security", ["help"], {
       encoding: "utf8",
       timeout: 3_000,
       windowsHide: true,
@@ -172,17 +180,14 @@ export function createProviderSecretStore({
     cachedAvailability = result.error?.code === "ENOENT"
       ? { supported: false, storage: "unavailable", failure: "security-command-not-found" }
       : { supported: true, storage: "macos-keychain", failure: null };
+    availabilityCheckedAt = now();
     return cachedAvailability;
   }
 
-  function read(profileId) {
-    requireAvailable();
+  async function read(profileId) {
+    await requireAvailable();
     if (platform === "linux") {
-      const result = lookupLinuxSecret({
-        run,
-        service,
-        account: account(profileId),
-      });
+      const result = await lookupLinuxSecret({ run, service, account: account(profileId) });
       if (result.outcome === "missing") return null;
       if (result.outcome === "tool-missing") {
         throw new Error("Linux 系统没有安装 secret-tool，无法读取模型 API 密钥");
@@ -193,7 +198,7 @@ export function createProviderSecretStore({
       return result.value;
     }
     if (platform === "win32") {
-      const result = run("powershell.exe", [
+      const result = await run("powershell.exe", [
         ...WINDOWS_POWERSHELL_FLAGS,
         windowsDpapiScripts(windowsSecretFilePath(service, account(profileId))).read,
       ], {
@@ -205,7 +210,7 @@ export function createProviderSecretStore({
       if (result.status !== 0) throw new Error("无法从 Windows 数据保护存储读取模型 API 密钥");
       return String(result.stdout ?? "").replace(/[\r\n]+$/, "");
     }
-    const result = run("/usr/bin/security", [
+    const result = await run("/usr/bin/security", [
       "find-generic-password",
       "-a", account(profileId),
       "-s", service,
@@ -220,11 +225,11 @@ export function createProviderSecretStore({
     return String(result.stdout ?? "").replace(/[\r\n]+$/, "");
   }
 
-  function write(profileId, secret) {
-    requireAvailable();
+  async function write(profileId, secret) {
+    await requireAvailable();
     const value = validatedSecret(secret);
     if (platform === "linux") {
-      const result = run(LINUX_SECRET_TOOL, [
+      const result = await run(LINUX_SECRET_TOOL, [
         "store", "--label=Aru Host provider", "service", service, "account", account(profileId),
       ], {
         input: `${value}\n`,
@@ -241,7 +246,7 @@ export function createProviderSecretStore({
       return;
     }
     if (platform === "win32") {
-      const result = run("powershell.exe", [
+      const result = await run("powershell.exe", [
         ...WINDOWS_POWERSHELL_FLAGS,
         windowsDpapiScripts(windowsSecretFilePath(service, account(profileId))).write,
       ], {
@@ -253,7 +258,7 @@ export function createProviderSecretStore({
       if (result.status !== 0) throw new Error("无法把模型 API 密钥保存到 Windows 数据保护存储");
       return;
     }
-    const result = run("/usr/bin/security", [
+    const result = await run("/usr/bin/security", [
       "add-generic-password",
       "-a", account(profileId),
       "-s", service,
@@ -268,10 +273,10 @@ export function createProviderSecretStore({
     if (result.status !== 0) throw new Error("无法把模型 API 密钥保存到 macOS 钥匙串");
   }
 
-  function remove(profileId) {
-    requireAvailable();
+  async function remove(profileId) {
+    await requireAvailable();
     if (platform === "linux") {
-      const result = run(LINUX_SECRET_TOOL, [
+      const result = await run(LINUX_SECRET_TOOL, [
         "clear", "service", service, "account", account(profileId),
       ], {
         encoding: "utf8",
@@ -287,7 +292,7 @@ export function createProviderSecretStore({
       return;
     }
     if (platform === "win32") {
-      const result = run("powershell.exe", [
+      const result = await run("powershell.exe", [
         ...WINDOWS_POWERSHELL_FLAGS,
         windowsDpapiScripts(windowsSecretFilePath(service, account(profileId))).remove,
       ], {
@@ -298,7 +303,7 @@ export function createProviderSecretStore({
       if (result.status !== 0) throw new Error("无法从 Windows 数据保护存储删除模型 API 密钥");
       return;
     }
-    const result = run("/usr/bin/security", [
+    const result = await run("/usr/bin/security", [
       "delete-generic-password",
       "-a", account(profileId),
       "-s", service,
@@ -311,8 +316,8 @@ export function createProviderSecretStore({
     if (result.status !== 0) throw new Error("无法从 macOS 钥匙串删除模型 API 密钥");
   }
 
-  function requireAvailable() {
-    const current = availability();
+  async function requireAvailable() {
+    const current = await availability();
     if (current.supported) return;
     if (current.failure === "secret-tool-not-found") {
       throw new Error("当前 Linux 系统没有安装 secret-tool");
@@ -395,7 +400,7 @@ export function createHeadlessProviderSecretStore(root, { legacyKeyFile } = {}) 
     // A bounded, one-time import from the old desktop backend. Unknown/unreadable
     // keys remain absent and are re-entered through the profile editor; no
     // permanent read-old/read-new fallback participates in normal requests.
-    adoptLegacyProfiles(profiles) {
+    async adoptLegacyProfiles(profiles) {
       checkedKey();
       // Import the former native encrypted-file format once, before any ordinary
       // read can report those credentials absent. Never swallow a decryption error.
@@ -419,12 +424,12 @@ export function createHeadlessProviderSecretStore(root, { legacyKeyFile } = {}) 
       const marker = join(root, "legacy-import-complete");
       try { readFileSync(marker); return; } catch (e) { if (e.code !== "ENOENT") throw e; }
       const legacy = createProviderSecretStore({ platform: "linux", env: {} });
-      if (legacy.availability().supported) {
+      if ((await legacy.availability()).supported) {
         for (const profile of profiles) {
           if (profile.authMode === "none") continue;
           try {
             if (read(profile.profileId)) continue;
-            const value = legacy.read(profile.profileId);
+            const value = await legacy.read(profile.profileId);
             if (value) {
               write(profile.profileId, value);
               if (read(profile.profileId) !== value) throw new Error("Secret import verification failed");
@@ -443,4 +448,18 @@ export function createHeadlessProviderSecretStore(root, { legacyKeyFile } = {}) 
     read, write,
     remove(id) { checkedKey(); try { unlinkSync(pathFor(id)); } catch (e) { if (e.code !== "ENOENT") throw e; } },
   };
+}
+
+
+// Wait for OS credential helpers without blocking HTTP or turn cancellation.
+// Input travels through stdin, never command arguments or a temporary file.
+export function runSecretCommand(command, args, { input, ...options }) {
+  return new Promise(resolve => {
+    const child = execFile(command, args, { ...options, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
+      resolve({ status: error ? (typeof error.code === "number" ? error.code : null) : 0,
+        error, stdout, stderr });
+    });
+    child.stdin.on("error", () => {}); // The process result owns early-exit errors.
+    child.stdin.end(input);
+  });
 }

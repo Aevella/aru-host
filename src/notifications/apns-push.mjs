@@ -1,4 +1,3 @@
-import { spawnSync } from "node:child_process";
 import {
   createPrivateKey, createPublicKey, generateKeyPairSync, diffieHellman, hkdfSync, randomBytes, createCipheriv,
   createHash,
@@ -8,6 +7,7 @@ import { connect as connectHTTP2, constants as http2Constants } from "node:http2
 import {
   LINUX_AVAILABILITY_CACHE_MILLISECONDS,
   lookupLinuxSecret,
+  runSecretCommand,
   probeLinuxSecretService,
   windowsDpapiScripts,
   windowsSecretFilePath,
@@ -44,10 +44,17 @@ export function createAPNsPushHost({
   state.liveActivityRegistrations ??= [];
   normalizeRegistrations();
   normalizeLiveActivityRegistrations();
+  let credentialStatus = "checking";
+  let credentialAvailability = { supported: false, storage: "unavailable" };
+  let credentialRead = null;
+  // Begin one asynchronous observation. Manifest reads are pure projections:
+  // polling for a version never launches a credential subprocess.
+  void refreshProviderStatus();
 
   async function route(req, res, path, requireDevice) {
     if (path === "/aru/v1/live-activities/current") {
       const device = requireDevice();
+      await refreshProviderStatus();
       if (req.method === "PUT") {
         const body = await readJSONBody(req, 64 * 1024);
         const registration = registerLiveActivity(device, body);
@@ -78,6 +85,7 @@ export function createAPNsPushHost({
     }
     if (path !== "/aru/v1/push-devices/current") return false;
     const device = requireDevice();
+    await refreshProviderStatus();
     if (req.method === "GET") {
       sendJSON(res, 200, publicStatus(device.deviceId));
       return true;
@@ -218,7 +226,8 @@ export function createAPNsPushHost({
       schema: STATUS_SCHEMA,
       serverId,
       topic,
-      credentialStorage: credentialStore.availability(),
+      credentialStorage: credentialAvailability,
+      credentialState: credentialStatus,
       deliveryTransport: registrations.some((item) => item.relay) ? "relay" : "direct",
       providerConfigured: providerConfigured() || Boolean(relayBaseURL && registrations.some((item) => item.relay)),
       registrations: registrations.map((item) => ({
@@ -246,7 +255,7 @@ export function createAPNsPushHost({
     if (registrations.length === 0) return;
     let credentials;
     try {
-      credentials = credentialStore.read();
+      credentials = await readCredentials();
     } catch (error) {
       log(`direct push credentials unavailable: ${safePushFailure(error)}`);
     }
@@ -328,7 +337,7 @@ export function createAPNsPushHost({
     let credentials = null;
     if (registrations.some((item) => !item.relay)) {
       try {
-        credentials = credentialStore.read();
+        credentials = await readCredentials();
       } catch (error) {
         log(`direct push credentials unavailable: ${safePushFailure(error)}`);
       }
@@ -389,7 +398,7 @@ export function createAPNsPushHost({
     if (registrations.length === 0) return;
     let credentials;
     try {
-      credentials = credentialStore.read();
+      credentials = await readCredentials();
     } catch (error) {
       log(`Live Activity push skipped: ${safePushFailure(error)}`);
       return;
@@ -491,13 +500,27 @@ export function createAPNsPushHost({
     });
   }
 
-  function providerConfigured() {
-    try {
-      return credentialStore.read() !== null;
-    } catch (error) {
-      log(`remote push credential status unavailable: ${safePushFailure(error)}`);
-      return false;
-    }
+  function providerConfigured() { return credentialStatus === "configured"; }
+
+  function readCredentials() {
+    if (credentialRead) return credentialRead;
+    credentialRead = Promise.resolve().then(async () => {
+      try {
+        credentialAvailability = await credentialStore.availability();
+        const credentials = await credentialStore.read();
+        credentialStatus = credentials ? "configured" : "missing";
+        return credentials;
+      } catch (error) {
+        credentialStatus = "unavailable";
+        throw error;
+      } finally { credentialRead = null; }
+    });
+    return credentialRead;
+  }
+
+  async function refreshProviderStatus() {
+    try { await readCredentials(); }
+    catch (error) { log(`remote push credential status unavailable: ${safePushFailure(error)}`); }
   }
 
   return {
@@ -514,6 +537,7 @@ export function createAPNsPushHost({
         transport: "apns-http2-token",
         registration: "paired-device-owned",
         providerConfigured: providerConfigured(),
+        credentialState: credentialStatus,
       };
     },
   };
@@ -523,25 +547,33 @@ export function createAPNsCredentialStore({
   platform = process.platform,
   service = DEFAULT_SERVICE,
   account = DEFAULT_ACCOUNT,
-  run = spawnSync,
+  run = runSecretCommand,
   now = Date.now,
 } = {}) {
   let cachedAvailability;
   let availabilityCheckedAt = 0;
 
+  let availabilityAttempt;
   function availability() {
+    if (!availabilityAttempt) {
+      availabilityAttempt = Promise.resolve().then(probeAvailability)
+        .finally(() => { availabilityAttempt = null; });
+    }
+    return availabilityAttempt;
+  }
+  async function probeAvailability() {
     if (platform === "linux") {
       const timestamp = now();
       if (cachedAvailability
           && timestamp - availabilityCheckedAt < LINUX_AVAILABILITY_CACHE_MILLISECONDS) {
         return cachedAvailability;
       }
-      const detected = probeLinuxSecretService(run);
+      const detected = await probeLinuxSecretService(run);
       const publicAvailability = detected.supported
         ? { supported: true, storage: "linux-secret-service" }
         : { supported: false, storage: "unavailable" };
       cachedAvailability = publicAvailability;
-      availabilityCheckedAt = timestamp;
+      availabilityCheckedAt = now();
       return publicAvailability;
     }
     // Negative probes are transient. Reads coalesce them briefly, while a later
@@ -550,16 +582,17 @@ export function createAPNsCredentialStore({
         || now() - availabilityCheckedAt < LINUX_AVAILABILITY_CACHE_MILLISECONDS)) return cachedAvailability;
     availabilityCheckedAt = now();
     if (platform === "darwin") {
-      const result = run("/usr/bin/security", ["help"], {
+      const result = await run("/usr/bin/security", ["help"], {
         encoding: "utf8", timeout: 3_000, windowsHide: true,
       });
       cachedAvailability = result.error?.code === "ENOENT"
         ? { supported: false, storage: "unavailable" }
         : { supported: true, storage: "macos-keychain" };
+      availabilityCheckedAt = now();
       return cachedAvailability;
     }
     if (platform === "win32") {
-      const result = run("powershell.exe", [
+      const result = await run("powershell.exe", [
         ...WINDOWS_POWERSHELL_FLAGS, windowsDpapiScripts("").probe,
       ], {
         encoding: "utf8", timeout: 10_000, windowsHide: true,
@@ -567,18 +600,19 @@ export function createAPNsCredentialStore({
       cachedAvailability = result.error?.code === "ENOENT" || result.status !== 0
         ? { supported: false, storage: "unavailable" }
         : { supported: true, storage: "windows-dpapi" };
+      availabilityCheckedAt = now();
       return cachedAvailability;
     }
     cachedAvailability = { supported: false, storage: "unavailable" };
     return cachedAvailability;
   }
 
-  function read() {
-    if (!availability().supported) {
+  async function read() {
+    if (!(await availability()).supported) {
       throw Object.assign(new Error("APNs credential storage is temporarily unavailable; a later delivery will retry"), { code: "apns.credential_storage_unavailable" });
     }
     if (platform === "linux") {
-      const result = lookupLinuxSecret({ run, service, account });
+      const result = await lookupLinuxSecret({ run, service, account });
       if (result.outcome === "missing") return null;
       if (result.outcome === "tool-missing") {
         throw new Error("Linux 系统没有安装 secret-tool，无法读取 APNs provider key");
@@ -589,10 +623,10 @@ export function createAPNsCredentialStore({
       return decodedCredentials(result.value);
     }
     const result = platform === "darwin"
-      ? run("/usr/bin/security", ["find-generic-password", "-a", account, "-s", service, "-w"], {
+      ? await run("/usr/bin/security", ["find-generic-password", "-a", account, "-s", service, "-w"], {
         encoding: "utf8", timeout: 5_000, windowsHide: true,
       })
-      : run("powershell.exe", [
+      : await run("powershell.exe", [
         ...WINDOWS_POWERSHELL_FLAGS,
         windowsDpapiScripts(windowsSecretFilePath(service, account)).read,
       ], {

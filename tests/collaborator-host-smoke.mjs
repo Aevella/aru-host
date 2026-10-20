@@ -199,13 +199,14 @@ for (const suffix of ["a", "b"]) {
   });
 }
 
+await host.route({ method: "GET" }, {}, "/aru/v1/provider-profiles", () => ({}), () => {});
 const withUnhealthyAPI = host.driverInventory();
 assert.equal(withUnhealthyAPI.drivers.find((driver) => driver.id === "api").status, "unhealthy");
 assert.equal(withUnhealthyAPI.execution.enabled, true);
 
 secretReadCount = 0;
 const collaborators = host.collaboratorInventory().collaborators;
-assert.equal(secretReadCount, 1);
+assert.equal(secretReadCount, 0, "inventory reads the snapshot without OS credential IO");
 assert.equal(collaborators.length, 2);
 assert.equal(collaborators.every((item) => item.turnExecution), true);
 assert.equal(collaborators.every((item) => item.activationStatus === "driver-unhealthy"), true);

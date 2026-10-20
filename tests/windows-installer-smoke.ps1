@@ -237,13 +237,13 @@ try {
   $dpapiProbe = @"
 import { createProviderSecretStore } from '$secretStoreUri';
 const store = createProviderSecretStore();
-const availability = store.availability();
+const availability = await store.availability();
 if (!availability.supported || availability.storage !== 'windows-dpapi') { console.error(availability); process.exit(1); }
 const id = 'provider_0000abcd0000';
-store.write(id, 'smoke-secret-value');
-if (store.read(id) !== 'smoke-secret-value') { console.error('read mismatch'); process.exit(1); }
-store.remove(id);
-if (store.read(id) !== null) { console.error('remove failed'); process.exit(1); }
+await store.write(id, 'smoke-secret-value');
+if ((await store.read(id)) !== 'smoke-secret-value') { console.error('read mismatch'); process.exit(1); }
+await store.remove(id);
+if ((await store.read(id)) !== null) { console.error('remove failed'); process.exit(1); }
 console.log('dpapi-roundtrip-ok');
 "@
   $probePath = Join-Path $baseRoot "dpapi-probe.mjs"

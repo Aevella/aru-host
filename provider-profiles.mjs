@@ -18,14 +18,50 @@ export function createProviderProfileHost({
   now = Date.now,
 }) {
   state.providerProfiles ??= [];
-  if (secretStore.adoptLegacyProfiles && secretStore.availability().supported) {
-    secretStore.adoptLegacyProfiles(state.providerProfiles);
+  let storage = { supported: false, storage: "unavailable", failure: "checking" };
+  const observations = new Map();
+  let refreshAttempt, refreshedAt = -Infinity;
+  async function refresh({ force = false } = {}) {
+    if (refreshAttempt) return refreshAttempt;
+    if (!force && now() - refreshedAt < 5_000) return;
+    refreshAttempt = Promise.resolve().then(async () => {
+      try {
+        storage = await secretStore.availability();
+        if (secretStore.adoptLegacyProfiles && storage.supported) await secretStore.adoptLegacyProfiles(state.providerProfiles);
+        await Promise.all(state.providerProfiles.map(async profile => {
+          const revision = profile.revision;
+          let observation;
+          try { observation = { hasSecret: profile.authMode !== "none" && Boolean(await secretStore.read(profile.profileId)) }; }
+          catch { observation = { hasSecret: false, unreadable: true }; }
+          if (state.providerProfiles.includes(profile) && profile.revision === revision) observations.set(profile.profileId, observation);
+        }));
+      } catch {
+        storage = { supported: false, storage: "unavailable", failure: "credential-storage-unavailable" };
+        for (const profile of state.providerProfiles) {
+          if (!observations.has(profile.profileId)) observations.set(profile.profileId, { hasSecret: false, unreadable: true });
+        }
+      }
+      finally { refreshedAt = now(); refreshAttempt = null; }
+    });
+    return refreshAttempt;
   }
+  void refresh();
 
-  async function route(req, res, path, requireDevice, requireLocalHostConsole) {
+  const mutations = new Map();
+  function route(req, res, path, requireDevice, requireLocalHostConsole) {
+    const invoke = () => routeRequest(req, res, path, requireDevice, requireLocalHostConsole);
+    if (!path.startsWith("/aru/v1/provider-profiles") || req.method === "GET") return invoke();
+    const key = path.replace(/\/test$/, "");
+    const previous = mutations.get(key) ?? Promise.resolve();
+    const attempt = previous.catch(() => {}).then(invoke);
+    mutations.set(key, attempt);
+    return attempt.finally(() => { if (mutations.get(key) === attempt) mutations.delete(key); });
+  }
+  async function routeRequest(req, res, path, requireDevice, requireLocalHostConsole) {
     if (path === "/aru/v1/provider-profiles") {
       if (req.method === "GET") {
         requireDevice();
+        await refresh({ force: true });
         sendJSON(res, 200, inventory());
         return true;
       }
@@ -51,6 +87,7 @@ export function createProviderProfileHost({
     }
     if (match[2]) return false;
     if (req.method === "GET") {
+      await refresh();
       sendJSON(res, 200, publicProfile(profile));
       return true;
     }
@@ -63,7 +100,7 @@ export function createProviderProfileHost({
       if (isProfileInUse(profile.profileId)) {
         throw new HttpError(409, "provider_profile.in_use", "先把使用这个 API 配置的电脑协作者换到别的驱动");
       }
-      removeStoredSecret(profile);
+      await removeStoredSecret(profile);
       state.providerProfiles = state.providerProfiles.filter((item) => item.profileId !== profile.profileId);
       saveState();
       sendJSON(res, 200, { schema: PROFILE_SCHEMA, profileId: profile.profileId, deleted: true });
@@ -75,7 +112,7 @@ export function createProviderProfileHost({
   function inventory() {
     return {
       schema: INVENTORY_SCHEMA,
-      secretStorage: secretStore.availability(),
+      secretStorage: storage,
       profiles: state.providerProfiles.map(publicProfile),
     };
   }
@@ -99,8 +136,9 @@ export function createProviderProfileHost({
       lastError: null,
     }, body);
     if (profile.authMode !== "none") {
-      requireSecretStorage();
-      secretStore.write(profile.profileId, body.apiKey);
+      await requireSecretStorage();
+      await secretStore.write(profile.profileId, body.apiKey);
+      observations.set(profile.profileId, { hasSecret: true });
     }
     state.providerProfiles.push(profile);
     saveState();
@@ -121,10 +159,11 @@ export function createProviderProfileHost({
       throw new HttpError(400, "provider_profile.secret_required", "更换接口地址时需要重新填写 API key");
     }
     if (normalized.authMode === "none") {
-      removeStoredSecret(profile);
+      await removeStoredSecret(profile);
     } else if (body.apiKey !== undefined && body.apiKey !== "") {
-      requireSecretStorage();
-      secretStore.write(profile.profileId, body.apiKey);
+      await requireSecretStorage();
+      await secretStore.write(profile.profileId, body.apiKey);
+      observations.set(profile.profileId, { hasSecret: true });
     }
     Object.assign(profile, normalized);
     profile.revision += 1;
@@ -151,15 +190,17 @@ export function createProviderProfileHost({
 
   function profileForId(profileId) {
     const profile = storedProfileForId(profileId);
-    return { ...profile, hasSecret: profile.authMode !== "none" && hasSecret(profileId) };
+    return publicProfile(profile);
   }
 
   function publicProfile(profile) {
     const { hasSecret: _, ...metadata } = profile;
-    let availableSecret = false;
-    let secretFailure = null;
-    try { availableSecret = profile.authMode !== "none" && hasSecret(profile.profileId); }
-    catch { secretFailure = "模型密钥无法读取，请恢复 Host 密钥存储，或重新填写此配置的 API Key。配置和协作者仍保留。"; }
+    const observation = observations.get(profile.profileId);
+    const availableSecret = profile.authMode !== "none" && observation?.hasSecret === true;
+    const credentialState = profile.authMode === "none" ? "not-required" : !observation ? "checking"
+      : observation.unreadable ? "unavailable" : availableSecret ? "present" : "missing";
+    let secretFailure = credentialState === "checking" ? "模型 API Key 正在检查；配置和协作者仍保留。"
+      : credentialState === "unavailable" ? "模型 API Key 暂时无法读取，请恢复 Host 密钥存储或重新填写；配置和协作者仍保留。" : null;
     if (!availableSecret && profile.authMode !== "none" && !secretFailure) {
       secretFailure = "此配置需要重新填写 API Key；原有配置、协作者和聊天记录仍保留。";
     }
@@ -168,11 +209,12 @@ export function createProviderProfileHost({
       ...metadata,
       maxToolRounds: profile.maxToolRounds ?? null,
       hasSecret: availableSecret,
+      credentialState,
       ...(secretFailure ? { health: "unhealthy", lastError: secretFailure } : {}),
     };
   }
 
-  return { route, inventory, profileForId };
+  return { route, inventory, profileForId, refresh };
 
   function storedProfileForId(profileId) {
     const profile = state.providerProfiles.find((item) => item.profileId === profileId);
@@ -279,20 +321,18 @@ export function createProviderProfileHost({
     return text;
   }
 
-  function hasSecret(profileId) {
-    return Boolean(secretStore.read(profileId));
-  }
-
   // A keyless profile never wrote a key, so a Host without secret storage can
   // still save, switch and delete it. A keyed profile's key must be removable.
-  function removeStoredSecret(profile) {
-    if (profile.authMode === "none" && !secretStore.availability().supported) return;
-    requireSecretStorage();
-    secretStore.remove(profile.profileId);
+  async function removeStoredSecret(profile) {
+    if (profile.authMode === "none" && !(await secretStore.availability()).supported) return;
+    await requireSecretStorage();
+    await secretStore.remove(profile.profileId);
+    observations.delete(profile.profileId);
   }
 
-  function requireSecretStorage() {
-    const availability = secretStore.availability({ retry: true });
+  async function requireSecretStorage() {
+    const availability = await secretStore.availability({ retry: true });
+    storage = availability;
     if (!availability.supported) {
       throw new HttpError(
         409,

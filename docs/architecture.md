@@ -280,3 +280,12 @@ and resumes admission. Storage recovery never invokes a model. APNs credential
 availability uses a short negative cache; a later event reads again without
 replaying an earlier notification. No global recovery manager or second state
 registry is introduced.
+
+Credential IO and inventory projection: `provider-secret-store.mjs` owns the
+asynchronous OS subprocess outlet (shared by APNs), retaining DPAPI, Keychain and
+Secret Service behavior. `provider-profiles.mjs` owns nonsecret, revision-checked
+credential observations and serializes mutations per profile. Its synchronous
+inventory and metadata lookup perform no OS IO; actual reads and explicit refresh
+are awaited. `apns-push.mjs` owns its coalesced read and status projection. The
+server manifest consumes these snapshots through the existing collaborator and
+notification owners. No key is added to durable state or the projections.

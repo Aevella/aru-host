@@ -414,3 +414,26 @@ credential storage throws distinctly from a missing key. Focused local fault
 injection covers same-instance recovery, sibling progress, retained results,
 startup cancellation and stale transport isolation. No Windows device, APNs
 service or released-installer acceptance is implied.
+
+2026-10-21 credential subprocess responsiveness (source): desktop credential
+probe/read/write/remove use asynchronous execFile with the existing OS backends
+and deadlines. Secret input stays on stdin. Concurrent probes share one attempt;
+negative backoff starts when the probe finishes. The Linux service-file vault
+retains its existing local filesystem ownership and format.
+
+The version manifest reads APNs and provider-profile observations only, never
+launching a credential helper. APNs starts one asynchronous status observation;
+explicit push status and new deliveries refresh it. Provider profiles own
+revision-checked, nonsecret observations; explicit profile/driver reads refresh
+them, and actual API execution awaits credential readiness.
+Checking, unreadable, missing and present remain distinct. A temporarily
+unreadable key permits a fresh execution attempt; actual execution still must
+read a valid key. Profile writes serialize per target; a late inspection cannot
+overwrite a newer revision. Cancellation during an API key read ends the waiter
+and cannot start a model call when the old read later completes.
+
+Focused tests exercise HTTP version responses while credential probes/reads are
+pending, the real async subprocess runner with a synthetic helper, collaborator
+manifest projection, stale revision isolation and cancellation before model
+admission. This does not establish that credential blocking caused a previously
+reported unknown version, nor replace Windows DPAPI/device acceptance.
