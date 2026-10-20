@@ -4,6 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import QRCode from "qrcode";
 import { parsePairingLink, readInstalledVersion, readPort, validateHostRequest } from "./runtime.mjs";
+import { createHostRequest } from "./host-request.mjs";
 import { waitForCoreRelease } from "./core-release.mjs";
 import { waitForContainerRuntime } from "./container-readiness.mjs";
 import { verifyConnectionAddress } from "./connection-address.mjs";
@@ -203,37 +204,7 @@ async function issuePairingLink() {
   return parsePairingLink(await platform.issuePairingOutput());
 }
 
-async function requestHost(method, path, body, authenticated = true, extraHeaders = {}, signal) {
-  const request = validateHostRequest(method, path);
-  let contents = "";
-  try { contents = await readFile(platform.nodeEnvPath, "utf8"); } catch {}
-  const url = new URL(request.path, `http://127.0.0.1:${readPort(contents)}`);
-  const headers = { Accept: "application/json", ...extraHeaders };
-  if (body !== undefined) headers["Content-Type"] = "application/json";
-  if (authenticated) {
-    const credential = await platform.readCredential();
-    if (!credential) throw new Error("The secure Console connection is unavailable");
-    headers.Authorization = `Bearer ${credential}`;
-  }
-  const response = await fetch(url, {
-    signal,
-    method: request.method,
-    headers,
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  if (response.status === 401 || response.status === 403) {
-    const error = new Error("The Console credential is no longer accepted");
-    error.code = "credential_rejected";
-    throw error;
-  }
-  if (!response.ok) {
-    const failure = await response.json().catch(() => ({}));
-    throw new Error(failure.message ?? failure.error ?? `Host returned HTTP ${response.status}`);
-  }
-  if (response.status === 204) return null;
-  const contentType = response.headers.get("content-type") ?? "";
-  return contentType.includes("json") ? response.json() : response.text();
-}
+const requestHost = createHostRequest({ platform });
 
 async function loadMCPCatalog() {
   let contents = "";

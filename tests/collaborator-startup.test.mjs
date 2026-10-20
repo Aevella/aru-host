@@ -9,7 +9,7 @@ class HttpError extends Error {
   constructor(status, code, message) { super(message); this.status = status; this.code = code; }
 }
 
-test("startup settlement disk failure is contained and durable evidence survives restart", async (context) => {
+test("startup settlement disk failure is contained and same Host recovers without replay", async (context) => {
   const root = mkdtempSync(join(tmpdir(), "aru-startup-failure-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
   const folder = join(root, "mobile-collaborator-replicas");
@@ -43,15 +43,14 @@ test("startup settlement disk failure is contained and durable evidence survives
   rmSync(scheduler); mkdirSync(scheduler);
   await host.start();
   assert.equal(logs.length, 1);
-  assert.match(logs[0], /EISDIR|ENOTDIR|EEXIST/);
-  assert.match(logs[0], /startup recovery failed; scheduling stopped until Host restart/);
+  assert.match(logs[0], process.platform === "win32" ? /EPERM/ : /EISDIR|ENOTDIR|EEXIST/);
+  assert.match(logs[0], /recovery pending/);
   const response = {};
   await host.route({ method: "GET" }, response, "/aru/v1/agent-drivers", () => ({}));
   assert.equal(response.status, 200);
-  host.stop();
   rmSync(scheduler, { recursive: true }); writeFileSync(scheduler, durable);
-  host = createCollaboratorHost(options);
-  await host.start(); host.stop();
+  await new Promise(resolve => setTimeout(resolve, 5_200));
+  host.stop();
   const delivery = JSON.parse(readFileSync(join(folder, "records-v2/deliveries/phone/1/delivery.json")));
   const execution = JSON.parse(readFileSync(join(folder, "records-v2/executions/phone/1/delivery.json")));
   assert.equal(delivery.assistantContent, "saved reply");

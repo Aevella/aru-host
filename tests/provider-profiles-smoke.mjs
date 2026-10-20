@@ -143,8 +143,8 @@ const cachedAvailabilityStore = createProviderSecretStore({
     return { status: 0, stdout: "", stderr: "" };
   },
 });
-assert.equal(cachedAvailabilityStore.availability().supported, true);
-assert.equal(cachedAvailabilityStore.availability().supported, true);
+assert.equal((await cachedAvailabilityStore.availability()).supported, true);
+assert.equal((await cachedAvailabilityStore.availability()).supported, true);
 assert.equal(availabilityProbeCount, 1);
 
 const linuxSecretCalls = [];
@@ -160,14 +160,14 @@ const linuxSecretStore = createProviderSecretStore({
     return { status: 0, stdout: "", stderr: "" };
   },
 });
-assert.deepEqual(linuxSecretStore.availability(), {
+assert.deepEqual(await linuxSecretStore.availability(), {
   supported: true,
   storage: "linux-secret-service",
   failure: null,
 });
-assert.equal(linuxSecretStore.read("provider_deadbeef"), "linux-key");
-linuxSecretStore.write("provider_deadbeef", "new-linux-key");
-linuxSecretStore.remove("provider_deadbeef");
+assert.equal(await linuxSecretStore.read("provider_deadbeef"), "linux-key");
+await linuxSecretStore.write("provider_deadbeef", "new-linux-key");
+await linuxSecretStore.remove("provider_deadbeef");
 assert.equal(linuxSecretCalls[0].command, "/usr/bin/secret-tool");
 assert.deepEqual(linuxSecretCalls.map((call) => call.args[0]), ["lookup", "lookup", "store", "clear"]);
 assert.equal(linuxSecretCalls[2].input, "new-linux-key\n");
@@ -221,27 +221,27 @@ const unavailableLinuxSecretStore = createProviderSecretStore({
     };
   },
 });
-assert.deepEqual(unavailableLinuxSecretStore.availability(), {
+assert.deepEqual(await unavailableLinuxSecretStore.availability(), {
   supported: false,
   storage: "unavailable",
   failure: "linux-secret-service-unavailable",
 });
-assert.equal(unavailableLinuxSecretStore.availability().supported, false);
+assert.equal((await unavailableLinuxSecretStore.availability()).supported, false);
 assert.equal(unavailableProbeCount, 1, "one inventory projection must not probe once per profile");
 unavailableProbeClock += 5_001;
-assert.equal(unavailableLinuxSecretStore.availability().supported, false);
+assert.equal((await unavailableLinuxSecretStore.availability()).supported, false);
 assert.equal(unavailableProbeCount, 2, "a recovered Secret Service must not require a Host restart");
 
 const absentLinuxSecretToolStore = createProviderSecretStore({
   platform: "linux",
   run: () => ({ status: null, stdout: "", stderr: "", error: { code: "ENOENT" } }),
 });
-assert.deepEqual(absentLinuxSecretToolStore.availability(), {
+assert.deepEqual(await absentLinuxSecretToolStore.availability(), {
   supported: false,
   storage: "unavailable",
   failure: "secret-tool-not-found",
 });
-assert.throws(
+await assert.rejects(
   () => absentLinuxSecretToolStore.read("provider_deadbeef"),
   /没有安装 secret-tool/,
 );
@@ -253,7 +253,7 @@ const missingLinuxSecretStore = createProviderSecretStore({
     return { status: 1, stdout: "", stderr: "" };
   },
 });
-assert.equal(missingLinuxSecretStore.read("provider_deadbeef"), null);
+assert.equal(await missingLinuxSecretStore.read("provider_deadbeef"), null);
 
 const failingLinuxSecretStore = createProviderSecretStore({
   platform: "linux",
@@ -262,7 +262,7 @@ const failingLinuxSecretStore = createProviderSecretStore({
     return { status: 1, stdout: "", stderr: "secret-tool: Cannot autolaunch D-Bus\n" };
   },
 });
-assert.throws(
+await assert.rejects(
   () => failingLinuxSecretStore.read("provider_deadbeef"),
   /Linux Secret Service.*(?:不可访问|读取)/,
 );
@@ -274,7 +274,7 @@ const failingLinuxSecretRemovalStore = createProviderSecretStore({
     return { status: 1, stdout: "", stderr: "secret-tool: Cannot autolaunch D-Bus\n" };
   },
 });
-assert.throws(
+await assert.rejects(
   () => failingLinuxSecretRemovalStore.remove("provider_deadbeef"),
   /Linux Secret Service.*不可访问/,
 );

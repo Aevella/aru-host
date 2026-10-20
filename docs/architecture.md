@@ -265,3 +265,27 @@ It does not create a grant registry or infer revocation from rule counts. It sup
 recovering a delegated executor after a phone residence link disappears. Revocation
 continues to use the existing source/epoch endpoint; executor deletion still rejects
 any remaining grant, including one admitted after the client read the inventory.
+
+Conversation attachment transfer: `src/conversations/attachments.mjs` retains
+metadata, final-content admission and message binding. `attachment-chunks.mjs`
+owns atomic temporary pieces and scoped finalization serialization; its disk inventory
+is the resume receipt, not a second metadata ledger. Authenticated conversation
+routing admits the device before either outlet. Completion hands verified streams
+back to the existing attachment owner.
+
+Same-process failure recovery stays inside these owners: the Codex driver owns
+transport initialization and cancellation; the replica record store owns frozen
+transaction replay; the mobile scheduler reconciles live versus orphan attempts
+and resumes admission. Storage recovery never invokes a model. APNs credential
+availability uses a short negative cache; a later event reads again without
+replaying an earlier notification. No global recovery manager or second state
+registry is introduced.
+
+Credential IO and inventory projection: `provider-secret-store.mjs` owns the
+asynchronous OS subprocess outlet (shared by APNs), retaining DPAPI, Keychain and
+Secret Service behavior. `provider-profiles.mjs` owns nonsecret, revision-checked
+credential observations and serializes mutations per profile. Its synchronous
+inventory and metadata lookup perform no OS IO; actual reads and explicit refresh
+are awaited. `apns-push.mjs` owns its coalesced read and status projection. The
+server manifest consumes these snapshots through the existing collaborator and
+notification owners. No key is added to durable state or the projections.

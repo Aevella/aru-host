@@ -12,7 +12,8 @@ export function createDirectAPIDriver({ profileForId, readSecret, fetchImpl = fe
     return {
       status() {
         const profile = profileForId(profileId);
-        return profile?.hasSecret || profile?.authMode === "none" ? "ready" : "unavailable";
+        return profile?.hasSecret || profile?.authMode === "none"
+          || ["checking", "unavailable"].includes(profile?.credentialState) ? "ready" : "unavailable";
       },
       validateAttachments(attachments) {
         validateDirectAttachments(profileForId(profileId), attachments);
@@ -20,8 +21,10 @@ export function createDirectAPIDriver({ profileForId, readSecret, fetchImpl = fe
       async startTurn(options) {
         const profile = profileForId(profileId);
         if (!profile) throw new Error("这个模型 API 配置已经不存在");
-        const secret = profile.authMode === "none" ? null : readSecret(profileId);
+        const secret = profile.authMode === "none" ? null : await credentialForTurn(readSecret(profileId), options.signal);
         if (!secret && profile.authMode !== "none") throw new Error("这个模型 API 配置缺少钥匙串密钥");
+        options.signal?.throwIfAborted();
+        if (profileForId(profileId)?.revision !== profile.revision) throw new Error("模型 API 配置已改变，请重新发送");
         const threadId = options.threadId ?? `api_thread_${randomUUID()}`;
         const turnId = `api_turn_${randomUUID()}`;
         const controller = new AbortController();
@@ -54,8 +57,9 @@ export function createDirectAPIDriver({ profileForId, readSecret, fetchImpl = fe
   async function testProfile(profileId) {
     const profile = profileForId(profileId);
     if (!profile) throw new Error("unknown provider profile");
-    const secret = profile.authMode === "none" ? null : readSecret(profileId);
+    const secret = profile.authMode === "none" ? null : await readSecret(profileId);
     if (!secret && profile.authMode !== "none") throw new Error("API key is missing from the operating-system secret store");
+    if (profileForId(profileId)?.revision !== profile.revision) throw new Error("模型 API 配置已改变，请重新测试");
     try {
       const request = profile.protocol === "anthropic-messages"
         ? anthropicRequest(profile, secret, "", anthropicHistory([], "只回复 OK", []), [], 1)
@@ -641,4 +645,14 @@ function publicFailure(error, secrets = []) {
     if (typeof secret === "string" && secret) message = message.replaceAll(secret, "[REDACTED]");
   }
   return message;
+}
+
+function credentialForTurn(value, signal) {
+  if (!signal) return Promise.resolve(value);
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(signal.reason ?? new Error("Turn cancelled"));
+    if (signal.aborted) abort();
+    else signal.addEventListener("abort", abort, { once: true });
+    Promise.resolve(value).then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+  });
 }

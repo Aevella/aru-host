@@ -352,3 +352,96 @@ current grant; storage, transport and post-import ACK failures stay retryable.
 Old Hosts without this endpoint return an error; clients never substitute a success
 ACK. Local fault tests cover restart after journal/publication, sibling preservation
 and repeated terminal receipts. No new logging or user management surface is added.
+
+## Resumable conversation attachments
+
+The attachment owner admits metadata under a device-scoped clientUploadId. Its
+optional upload v1 projection advertises 256 KiB pieces and the indices present
+on disk. PUT chunks/:index publishes a complete piece atomically after flushing
+its bytes; interrupted pieces are never acknowledged. Repeated equal pieces are
+idempotent and conflicting bytes fail. POST complete requires all pieces and
+whole-file SHA-256/MIME validation before the existing owner marks content ready.
+Upload and completion receipts can be recovered with repeated admission or GET
+upload after a process restart. Ready content still requires normal message binding.
+Legacy whole-file PUT remains supported for distributed clients; older Hosts omit
+the upload projection and new clients use their existing whole-file outlet.
+
+Deletion invalidates in-flight writers. Chunk reception does not lock out retries;
+late pieces re-read current state before publishing and cannot rewind completion.
+Finalization and legacy whole-file writes share an in-process admission lock. Unbound transfer directories use the existing seven-day
+cleanup at startup. Phone foreground drafts retain the client identity for manual
+retry after connection failure; this is not phone process-death/background recovery.
+Focused synthetic tests cover lost receipts, restart, incomplete/conflicting pieces,
+integrity rejection, device isolation and deletion during transfer. No deployed
+upgrade or real-phone slow-network acceptance is implied.
+
+2026-10-20 Windows failure recovery (source): failed DPAPI availability remains
+briefly cached for inventory reads and expires after five seconds; explicit
+credential mutation retries immediately in the same Core process. Successful probes retain the existing DPAPI backend and cipher
+files. Failed probes project only stage, failure category and exit status; no key,
+raw stderr or machine paths enter diagnostics. The existing save error includes
+this evidence. Inventory reads within the five-second failure window share the probe result.
+
+Console request handling retains configuration, connection, HTTP, parsing and
+manifest-validation failures in the startup error. Only a valid manifest with an
+explicit different release can authorize the existing repair path. A subsequent
+failed read invalidates an earlier mismatch; identity changes still reject
+activation, and results after the deadline cannot accept startup. Error evidence
+stays in memory and the existing UI error surface; no new diagnostic file is added.
+Focused recovery tests and the 38-test Console suite pass locally. Generated
+payload checks pass. These are not Windows DPAPI/Electron device acceptance or a
+published installer; the original device-specific first failure remains unknown.
+
+2026-10-20 same-process recovery (source): Codex readiness requires completed
+initialization. Failed/abandoned transports are retired, startup has a 120-second
+deadline and per-waiter cancellation, and old transport callbacks cannot change a
+new connection. This deadline bounds startup, not model generation. A shared
+startup remains alive while another caller needs it.
+
+Replica publication retains a frozen storage transaction after an IO failure.
+The scheduler retries publication in the same process every five seconds while
+storage remains unavailable, then reconciles receipts before admitting new work.
+It never repeats a model/tool call. An admission known in this process to have failed publication before trigger
+remains queued and executes once after publication recovers. Only an orphan
+with no proof of non-execution becomes uncertain and releases its rule. Completed
+content remains durable and is not discarded as a failed notification. Ordinary
+replica requests also attempt storage recovery. Persistent disk failure still
+prevents unsafe writes; repairing the disk no longer requires restarting Core.
+
+APNs negative credential probes expire after five seconds. New events/status
+reads can recover; old notifications are not queued for replay. Unavailable
+credential storage throws distinctly from a missing key. Focused local fault
+injection covers same-instance recovery, sibling progress, retained results,
+startup cancellation and stale transport isolation. No Windows device, APNs
+service or released-installer acceptance is implied.
+
+2026-10-21 credential subprocess responsiveness (source): desktop credential
+probe/read/write/remove use asynchronous execFile with the existing OS backends
+and deadlines. Secret input stays on stdin. Concurrent probes share one attempt;
+negative backoff starts when the probe finishes. The Linux service-file vault
+retains its existing local filesystem ownership and format.
+
+The version manifest reads APNs and provider-profile observations only, never
+launching a credential helper. APNs starts one asynchronous status observation;
+explicit push status and new deliveries refresh it. Provider profiles own
+revision-checked, nonsecret observations; explicit profile/driver reads refresh
+them, and actual API execution awaits credential readiness.
+Checking, unreadable, missing and present remain distinct. A temporarily
+unreadable key permits a fresh execution attempt; actual execution still must
+read a valid key. Profile writes serialize per target; a late inspection cannot
+overwrite a newer revision. Cancellation during an API key read ends the waiter
+and cannot start a model call when the old read later completes.
+
+Focused tests exercise HTTP version responses while credential probes/reads are
+pending, the real async subprocess runner with a synthetic helper, collaborator
+manifest projection, stale revision isolation and cancellation before model
+admission. This does not establish that credential blocking caused a previously
+reported unknown version, nor replace Windows DPAPI/device acceptance.
+
+2026-10-21 async credential follow-up: the subprocess adapter normalizes an
+execFile deadline kill (killed, null code, expected timeout signal) to ETIMEDOUT.
+Numeric process exits, missing executables and output-buffer errors retain their
+categories. A forced credential probe that shares a failed inventory attempt
+then performs one coalesced forced retry. Model execution reads only its selected
+profile, awaiting legacy adoption when applicable without refreshing every key.
+Real subprocess timeout and non-timeout counterexamples cover this boundary.

@@ -90,11 +90,11 @@ const linuxCredentialStore = createAPNsCredentialStore({
     return { status: 1, stdout: "", stderr: "" };
   },
 });
-assert.deepEqual(linuxCredentialStore.availability(), {
+assert.deepEqual(await linuxCredentialStore.availability(), {
   supported: true,
   storage: "linux-secret-service",
 });
-assert.equal(linuxCredentialStore.read(), null);
+assert.equal(await linuxCredentialStore.read(), null);
 assert.ok(linuxSecretCalls.every((call) => !call.args.includes("--version")));
 
 await registerLiveActivity("phone_one", "cc".repeat(32), "sandbox");

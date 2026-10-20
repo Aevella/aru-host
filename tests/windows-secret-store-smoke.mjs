@@ -24,8 +24,8 @@ function transcriptRun(transcript, responses = {}) {
 {
   const transcript = [];
   const store = createProviderSecretStore({ platform: "win32", run: transcriptRun(transcript) });
-  const first = store.availability();
-  const second = store.availability();
+  const first = await store.availability();
+  const second = await store.availability();
   assert.deepEqual(first, { supported: true, storage: "windows-dpapi", failure: null });
   assert.equal(second, first);
   assert.equal(transcript.length, 1, "availability is probed exactly once");
@@ -39,10 +39,11 @@ function transcriptRun(transcript, responses = {}) {
     platform: "win32",
     run: () => ({ status: null, error: { code: "ENOENT" } }),
   });
-  assert.deepEqual(store.availability(), {
+  assert.deepEqual(await store.availability(), {
     supported: false, storage: "unavailable", failure: "powershell-not-found",
+    diagnostic: { stage: "windows-dpapi-probe", reason: "executable-missing", exitCode: null },
   });
-  assert.throws(() => store.write("provider_abc123", "sk-test"), /安全凭据存储/);
+  await assert.rejects(() => store.write("provider_abc123", "sk-test"), /安全凭据存储/);
 }
 
 // 3. Write/read/remove transcript: stdin-only secret, deterministic path, exit 44 = null.
@@ -56,14 +57,14 @@ function transcriptRun(transcript, responses = {}) {
   const transcript = [];
   const store = createProviderSecretStore({ platform: "win32", run: transcriptRun(transcript) });
 
-  store.write(profileId, "sk-secret-value");
+  await store.write(profileId, "sk-secret-value");
   const writeCall = transcript.at(-1);
   assert.equal(writeCall.input, "sk-secret-value\n", "secret travels over stdin");
   assert.doesNotMatch(writeCall.args.join(" "), /sk-secret-value/, "secret never appears in argv");
   assert.match(writeCall.args.join(" "), /ProtectedData\]::Protect/);
   assert.match(writeCall.args.join(" "), /provider_ABCDEF123456\.dpapi/);
 
-  store.remove(profileId);
+  await store.remove(profileId);
   assert.match(transcript.at(-1).args.join(" "), /Remove-Item/);
 
   const readingStore = createProviderSecretStore({
@@ -74,7 +75,7 @@ function transcriptRun(transcript, responses = {}) {
       return { status: 0, stdout: "" };
     },
   });
-  assert.equal(readingStore.read(profileId), "sk-secret-value");
+  assert.equal(await readingStore.read(profileId), "sk-secret-value");
 
   const missingStore = createProviderSecretStore({
     platform: "win32",
@@ -83,7 +84,7 @@ function transcriptRun(transcript, responses = {}) {
       return { status: 0, stdout: "" };
     },
   });
-  assert.equal(missingStore.read(profileId), null, "exit 44 is not-found, not an error");
+  assert.equal(await missingStore.read(profileId), null, "exit 44 is not-found, not an error");
 }
 
 // 4. APNs credential store shares the win32 backend and stays read-only.
@@ -102,8 +103,8 @@ function transcriptRun(transcript, responses = {}) {
       return { status: 0, stdout: "" };
     },
   });
-  assert.deepEqual(store.availability(), { supported: true, storage: "windows-dpapi" });
-  const credentials = store.read();
+  assert.deepEqual(await store.availability(), { supported: true, storage: "windows-dpapi" });
+  const credentials = await store.read();
   assert.equal(credentials.keyId, "KEY1234567");
   assert.equal(store.write, undefined, "APNs store remains read-only by design");
   assert.ok(transcript.every((call) => call.command === "powershell.exe"));
@@ -115,13 +116,13 @@ function transcriptRun(transcript, responses = {}) {
       return { status: 0, stdout: "" };
     },
   });
-  assert.equal(absent.read(), null);
+  assert.equal(await absent.read(), null);
 }
 
 // 5. Non-windows platforms are untouched by the new backend.
 {
   const store = createProviderSecretStore({ platform: "sunos", run: () => ({ status: 0 }) });
-  assert.deepEqual(store.availability(), {
+  assert.deepEqual(await store.availability(), {
     supported: false, storage: "unavailable", failure: "platform-secret-store-unavailable",
   });
 }

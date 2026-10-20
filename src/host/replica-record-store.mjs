@@ -21,9 +21,11 @@ export function createReplicaRecordStore(root, { fault = () => {}, onRead = () =
   function atomic(path, value) {
     mkdirSync(join(path, '..'), { recursive: true, mode: 0o700 });
     const temp = `${path}.${randomUUID()}.tmp`;
-    const fd = openSync(temp, 'wx', 0o600);
-    try { writeFileSync(fd, JSON.stringify(value)); fsyncSync(fd); } finally { closeSync(fd); }
-    renameSync(temp, path);
+    try {
+      const fd = openSync(temp, 'wx', 0o600);
+      try { writeFileSync(fd, JSON.stringify(value)); fsyncSync(fd); } finally { closeSync(fd); }
+      renameSync(temp, path);
+    } finally { if (existsSync(temp)) unlinkSync(temp); }
   }
   function recordOps(kind, record) {
     const { sourceCollaboratorId: source, epoch, deliveryId: id } = record;
@@ -77,9 +79,24 @@ export function createReplicaRecordStore(root, { fault = () => {}, onRead = () =
   const ledger = read(join(directory, 'scheduler.json'));
   if (ledger.schema !== 'aru.selfhost.mobile-collaborator-ledger.v2' || !Array.isArray(ledger.replicas)) throw new Error('unreadable replica scheduler state');
   let failed = false;
+  let retryTransaction = null;
   let operations = [];
   const staged = new Map();
-  function assertHealthy() { if (failed) throw new Error('replica storage write failed; restart Host to recover'); }
+  function assertHealthy() { if (failed) throw new Error('replica storage write failed; recovery will retry without restarting Host'); }
+  function recover() {
+    if (!failed) return false;
+    // Freeze at admission, not at retry: callers may have rolled their draft
+    // back after commit threw. Never journal those later mutations as success.
+    const transaction = retryTransaction ?? read(pendingTransaction);
+    atomic(pendingTransaction, transaction);
+    apply(directory, transaction);
+    unlinkSync(pendingTransaction);
+    const restored = read(join(directory, 'scheduler.json'));
+    for (const key of Object.keys(ledger)) delete ledger[key];
+    Object.assign(ledger, restored);
+    operations = []; staged.clear(); retryTransaction = null; failed = false;
+    return true;
+  }
   function get(kind, source, epoch, id) {
     assertHealthy();
     const key = pathFor(kind, source, epoch, id);
@@ -116,7 +133,7 @@ export function createReplicaRecordStore(root, { fault = () => {}, onRead = () =
       .map(name => get(kind, source, epoch, name.slice(0, -5)));
   }
   return {
-    ledger, get, put, indexed, pending,
+    ledger, get, put, indexed, pending, recover, needsRecovery: () => failed,
     continuation(source, epoch, conversationId, limit) {
       assertHealthy();
       const files = names(join(directory, 'continuation', scope(source, epoch))).sort().reverse();
@@ -149,13 +166,15 @@ export function createReplicaRecordStore(root, { fault = () => {}, onRead = () =
     commit(ledger) {
       assertHealthy();
       try {
-        const transaction = { ledger, operations };
+        const transaction = structuredClone({ ledger, operations });
+        retryTransaction = transaction;
+        fault('before-journal');
         atomic(pendingTransaction, transaction);
         fault('after-journal');
         apply(directory, transaction);
         fault('after-publication');
         unlinkSync(pendingTransaction);
-        operations = []; staged.clear();
+        operations = []; staged.clear(); retryTransaction = null;
       } catch (error) { failed = true; throw error; }
     },
   };

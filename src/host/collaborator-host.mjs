@@ -168,7 +168,7 @@ export function createCollaboratorHost({
   let providerProfiles;
   const directAPIDriver = createDirectAPIDriver({
     profileForId: (profileId) => providerProfiles.profileForId(profileId),
-    readSecret: (profileId) => providerSecretStore.read(profileId),
+    readSecret: (profileId) => providerProfiles.readSecret(profileId),
     log,
   });
   providerProfiles = createProviderProfileHost({
@@ -405,17 +405,20 @@ export function createCollaboratorHost({
     }
     if (path === "/aru/v1/agent-drivers" && req.method === "GET") {
       requireDevice();
+      await providerProfiles.refresh();
       retryStaleDriverProbes();
       sendJSON(res, 200, driverInventory());
       return true;
     }
     if (path === "/aru/v1/agent-drivers/refresh" && req.method === "POST") {
       requireDevice();
+      await providerProfiles.refresh({ force: true });
       sendJSON(res, 200, await refreshDriversAsync());
       return true;
     }
     if (path === "/aru/v1/hosted-collaborators" && req.method === "GET") {
       requireDevice();
+      await providerProfiles.refresh();
       sendJSON(res, 200, collaboratorInventory());
       return true;
     }
@@ -691,7 +694,7 @@ export function createCollaboratorHost({
     const claudeCodeReady = drivers.some(
       (driver) => driver.id === "claude-code" && driver.status === "ready",
     );
-    const apiConfigured = providerInventory.profiles.some((profile) => (profile.hasSecret || profile.authMode === "none"));
+    const apiConfigured = providerInventory.profiles.some((profile) => providerProfileCanAttempt(profile));
     if (!codexReady && !claudeCodeReady && !apiConfigured) {
       return { enabled: false, status: "driver-unavailable" };
     }
@@ -715,7 +718,7 @@ export function createCollaboratorHost({
   }
 
   function apiDriverInventory(inventory = providerProfiles.inventory()) {
-    const configured = inventory.profiles.filter((profile) => (profile.hasSecret || profile.authMode === "none"));
+    const configured = inventory.profiles.filter((profile) => providerProfileCanAttempt(profile));
     const ready = configured.filter((profile) => profile.health === "ready");
     return {
       ...API_DRIVER_DEFINITION,
@@ -730,10 +733,15 @@ export function createCollaboratorHost({
     };
   }
 
+  function providerProfileCanAttempt(profile) {
+    return profile?.hasSecret === true || profile?.authMode === "none"
+      || ["checking", "unavailable"].includes(profile?.credentialState);
+  }
+
   function collaboratorTurnExecution(collaborator, driver, providerProfile) {
     if (collaborator.driverId === "codex") return driver?.status === "ready";
     if (collaborator.driverId === "claude-code") return driver?.status === "ready";
-    if (collaborator.driverId === "api") return providerProfile?.hasSecret === true || providerProfile?.authMode === "none";
+    if (collaborator.driverId === "api") return providerProfileCanAttempt(providerProfile);
     return false;
   }
 
@@ -768,10 +776,7 @@ export function createCollaboratorHost({
     },
     start() {
       initiative.start();
-      return mobileReplicas.start().catch((error) => {
-        mobileReplicas.stop();
-        log(`mobile collaborator startup recovery failed; scheduling stopped until Host restart: ${error?.message ?? error}`);
-      });
+      return mobileReplicas.start();
     },
     stop() {
       initiative.stop();
