@@ -292,12 +292,12 @@ export function createProviderProfileHost({
   }
 
   function requireSecretStorage() {
-    const availability = secretStore.availability();
+    const availability = secretStore.availability({ retry: true });
     if (!availability.supported) {
       throw new HttpError(
         409,
         "provider_profile.secret_storage_unavailable",
-        "这台 Host 没有可用的安全密钥存储，暂时不能保存模型 API 配置",
+        `这台 Host 没有可用的安全密钥存储，暂时不能保存模型 API 配置${availability.diagnostic ? `（${availability.diagnostic.stage}: ${availability.diagnostic.reason}${availability.diagnostic.exitCode === null ? "" : `, exit=${availability.diagnostic.exitCode}`}）` : ""}`,
       );
     }
   }

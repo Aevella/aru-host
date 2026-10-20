@@ -41,6 +41,7 @@ function transcriptRun(transcript, responses = {}) {
   });
   assert.deepEqual(store.availability(), {
     supported: false, storage: "unavailable", failure: "powershell-not-found",
+    diagnostic: { stage: "windows-dpapi-probe", reason: "executable-missing", exitCode: null },
   });
   assert.throws(() => store.write("provider_abc123", "sk-test"), /安全凭据存储/);
 }

@@ -374,3 +374,20 @@ retry after connection failure; this is not phone process-death/background recov
 Focused synthetic tests cover lost receipts, restart, incomplete/conflicting pieces,
 integrity rejection, device isolation and deletion during transfer. No deployed
 upgrade or real-phone slow-network acceptance is implied.
+
+2026-10-20 Windows failure recovery (source): failed DPAPI availability remains
+cached for inventory reads, but an explicit credential mutation retries it in the
+same Core process. Successful probes retain the existing DPAPI backend and cipher
+files. Failed probes project only stage, failure category and exit status; no key,
+raw stderr or machine paths enter diagnostics. The existing save error includes
+this evidence. Inventory polling does not repeatedly launch synchronous probes.
+
+Console request handling retains configuration, connection, HTTP, parsing and
+manifest-validation failures in the startup error. Only a valid manifest with an
+explicit different release can authorize the existing repair path. A subsequent
+failed read invalidates an earlier mismatch; identity changes still reject
+activation, and results after the deadline cannot accept startup. Error evidence
+stays in memory and the existing UI error surface; no new diagnostic file is added.
+Focused recovery tests and the 38-test Console suite pass locally. Generated
+payload checks pass. These are not Windows DPAPI/Electron device acceptance or a
+published installer; the original device-specific first failure remains unknown.

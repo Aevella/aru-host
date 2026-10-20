@@ -82,7 +82,7 @@ function windowsQuote(value) {
 export function windowsDpapiScripts(secretPath) {
   const quoted = windowsQuote(secretPath);
   return {
-    probe: "Add-Type -AssemblyName System.Security; "
+    probe: "$ErrorActionPreference='Stop'; Add-Type -AssemblyName System.Security; "
       + "[void][Security.Cryptography.ProtectedData]::Protect([byte[]](1),$null,[Security.Cryptography.DataProtectionScope]::CurrentUser)",
     read: "$ErrorActionPreference='Stop'; Add-Type -AssemblyName System.Security; "
       + `$p=${quoted}; if(!(Test-Path -LiteralPath $p)){exit 44}; `
@@ -115,7 +115,7 @@ export function createProviderSecretStore({
   let cachedAvailability;
   let availabilityCheckedAt = 0;
 
-  function availability() {
+  function availability({ retry = false } = {}) {
     if (platform === "linux") {
       const timestamp = now();
       if (cachedAvailability
@@ -127,7 +127,9 @@ export function createProviderSecretStore({
       availabilityCheckedAt = timestamp;
       return detected;
     }
-    if (cachedAvailability) return cachedAvailability;
+    // Inventory reads never repeat the blocking Windows probe. An explicit
+    // credential mutation can retry a failed attempt without restarting Core.
+    if (cachedAvailability && !(platform === "win32" && retry && !cachedAvailability.supported)) return cachedAvailability;
     if (platform === "win32") {
       const result = run("powershell.exe", [
         ...WINDOWS_POWERSHELL_FLAGS, windowsDpapiScripts("").probe,
@@ -141,6 +143,15 @@ export function createProviderSecretStore({
         : result.status !== 0
           ? { supported: false, storage: "unavailable", failure: "windows-dpapi-unavailable" }
           : { supported: true, storage: "windows-dpapi", failure: null };
+      if (!cachedAvailability.supported) {
+        cachedAvailability.diagnostic = {
+          stage: "windows-dpapi-probe",
+          reason: result.error?.code === "ETIMEDOUT" ? "timeout"
+            : result.error?.code === "ENOENT" ? "executable-missing"
+            : result.error ? "process-start-failed" : "process-exit-failed",
+          exitCode: Number.isInteger(result.status) ? result.status : null,
+        };
+      }
       return cachedAvailability;
     }
     if (platform !== "darwin") {
