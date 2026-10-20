@@ -36,3 +36,21 @@ test('missing executable and timeout remain distinguishable without exposing std
  assert.equal(JSON.stringify(f.store.availability()).includes('private'),false);
  }
 });
+test('a saved key becomes readable after a transient probe failure without saving it again', () => {
+ let now=0, calls=0;
+ const store=createProviderSecretStore({platform:'win32',now:()=>now,run:()=>++calls===1
+   ? {status:null,error:{code:'ETIMEDOUT'}} : {status:0,stdout:'synthetic-existing-key'}});
+ assert.throws(()=>store.read('provider_aaaa'),/安全凭据存储/);
+ for(let i=0;i<3;i++) assert.throws(()=>store.read('provider_aaaa'),/安全凭据存储/);
+ assert.equal(calls,1);
+ now=5_001;
+ assert.equal(store.read('provider_aaaa'),'synthetic-existing-key');
+ assert.equal(calls,3);
+});
+test('inventory reports unreadable storage rather than claiming a saved key is absent', () => {
+ const state={providerProfiles:[{profileId:'profile',authMode:'bearer'}]};
+ const store=createProviderSecretStore({platform:'win32',run:()=>({status:null,error:{code:'ETIMEDOUT'}})});
+ const host=createProviderProfileHost({state,secretStore:store,saveState(){},HttpError});
+ const profile=host.inventory().profiles[0];
+ assert.match(profile.lastError,/无法读取/);
+});

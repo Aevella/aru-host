@@ -376,11 +376,11 @@ integrity rejection, device isolation and deletion during transfer. No deployed
 upgrade or real-phone slow-network acceptance is implied.
 
 2026-10-20 Windows failure recovery (source): failed DPAPI availability remains
-cached for inventory reads, but an explicit credential mutation retries it in the
-same Core process. Successful probes retain the existing DPAPI backend and cipher
+briefly cached for inventory reads and expires after five seconds; explicit
+credential mutation retries immediately in the same Core process. Successful probes retain the existing DPAPI backend and cipher
 files. Failed probes project only stage, failure category and exit status; no key,
 raw stderr or machine paths enter diagnostics. The existing save error includes
-this evidence. Inventory polling does not repeatedly launch synchronous probes.
+this evidence. Inventory reads within the five-second failure window share the probe result.
 
 Console request handling retains configuration, connection, HTTP, parsing and
 manifest-validation failures in the startup error. Only a valid manifest with an
@@ -401,8 +401,9 @@ startup remains alive while another caller needs it.
 Replica publication retains a frozen storage transaction after an IO failure.
 The scheduler retries publication in the same process every five seconds while
 storage remains unavailable, then reconciles receipts before admitting new work.
-It never repeats a model/tool call. An orphan admission becomes uncertain and
-releases its rule; a consumed one-time occurrence stays consumed. Completed
+It never repeats a model/tool call. An admission known in this process to have failed publication before trigger
+remains queued and executes once after publication recovers. Only an orphan
+with no proof of non-execution becomes uncertain and releases its rule. Completed
 content remains durable and is not discarded as a failed notification. Ordinary
 replica requests also attempt storage recovery. Persistent disk failure still
 prevents unsafe writes; repairing the disk no longer requires restarting Core.

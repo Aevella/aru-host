@@ -240,6 +240,8 @@ function createMobileCollaboratorReplicaHost({
   let started = false;
   let dueAttempt;
   const activeExecutions = new Set();
+  // Same-process evidence: publication failed before trigger was invoked.
+  const unstartedAdmissions = new Map();
   const executionKey = (source, epoch, id) => `${source}/${epoch}/${id}`;
   // Complete results are reconciled before old in-flight markers are cleared.
   // No model/tool action is retried during recovery.
@@ -487,7 +489,7 @@ function createMobileCollaboratorReplicaHost({
     // no live attempt must be reconciled against conversation evidence.
     for (const execution of records.running()) {
       const key = executionKey(execution.sourceCollaboratorId, execution.epoch, execution.deliveryId);
-      if (activeExecutions.has(key)) continue;
+      if (activeExecutions.has(key) || unstartedAdmissions.has(key)) continue;
       const event = recoverDelivery(execution.sourceCollaboratorId, execution.deliveryId, execution.epoch);
       if (event) {
         if (!recoveryEvents.some(item => item.turn.deliveryId === execution.deliveryId
@@ -532,7 +534,7 @@ function createMobileCollaboratorReplicaHost({
     if (!started) return;
     if (timer) clearTimer(timer);
     timer = null;
-    if (records.needsRecovery() || reconciliationNeeded || recoveryEvents.length) {
+    if (records.needsRecovery() || reconciliationNeeded || recoveryEvents.length || unstartedAdmissions.size) {
       timer = setTimer(() => { void runDue(); }, 5_000);
       return;
     }
@@ -559,6 +561,14 @@ function createMobileCollaboratorReplicaHost({
 
   async function runDueWork() {
     timer = null;
+    for (const [key, admission] of unstartedAdmissions) {
+      const replica = replicaForId(admission.source, false);
+      const rule = replica?.epoch === admission.epoch
+        ? replica.rules.find(item => item.inFlightDeliveryId === admission.id) : null;
+      if (rule && !executionRevoked(admission.source, admission.epoch)) {
+        dispatchAdmission(replica, rule, admission.id);
+      } else unstartedAdmissions.delete(key);
+    }
     const due = [];
     const timestamp = now();
     for (const replica of ledger.replicas) {
@@ -577,25 +587,32 @@ function createMobileCollaboratorReplicaHost({
       rule.lastFiredAt = rule.nextFireAt;
       records.put("executions", executionRecord(replica, rule, deliveryId));
       advanceRule(rule, timestamp);
+      unstartedAdmissions.set(executionKey(replica.sourceCollaboratorId, replica.epoch, deliveryId),
+        { source: replica.sourceCollaboratorId, epoch: replica.epoch, id: deliveryId });
       saveLedger();
-      try {
-        const executor = collaboratorForId(replica.executorHostCollaboratorId);
-        activeExecutions.add(executionKey(replica.sourceCollaboratorId, replica.epoch, deliveryId));
-        trigger(executor, replicaContinuingOwnDeliveries(replica, rule), rule, deliveryId);
-      } catch (error) {
-        activeExecutions.delete(executionKey(replica.sourceCollaboratorId, replica.epoch, deliveryId));
-        rule.inFlightDeliveryId = null;
-        rule.inFlightRuleVersion = null;
-        const execution = records.get("executions", replica.sourceCollaboratorId, replica.epoch, deliveryId);
-        execution.state = "uncertain";
-        execution.failure = String(error?.message ?? error);
-        execution.updatedAt = now();
-        records.put("executions", execution);
-        log(`mobile collaborator proactive trigger failed: ${error?.message ?? error}`);
-        saveLedger();
-      }
+      dispatchAdmission(replica, rule, deliveryId);
     }
     schedule();
+  }
+
+  function dispatchAdmission(replica, rule, deliveryId) {
+    unstartedAdmissions.delete(executionKey(replica.sourceCollaboratorId, replica.epoch, deliveryId));
+    try {
+      const executor = collaboratorForId(replica.executorHostCollaboratorId);
+      activeExecutions.add(executionKey(replica.sourceCollaboratorId, replica.epoch, deliveryId));
+      trigger(executor, replicaContinuingOwnDeliveries(replica, rule), rule, deliveryId);
+    } catch (error) {
+      activeExecutions.delete(executionKey(replica.sourceCollaboratorId, replica.epoch, deliveryId));
+      rule.inFlightDeliveryId = null;
+      rule.inFlightRuleVersion = null;
+      const execution = records.get("executions", replica.sourceCollaboratorId, replica.epoch, deliveryId);
+      execution.state = "uncertain";
+      execution.failure = String(error?.message ?? error);
+      execution.updatedAt = now();
+      records.put("executions", execution);
+      log(`mobile collaborator proactive trigger failed: ${error?.message ?? error}`);
+      saveLedger();
+    }
   }
 
   // While the phone has not uploaded a replica that includes the Host's own

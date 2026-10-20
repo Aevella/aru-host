@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, readdirSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createMobileCollaboratorReplicaHost } from '../mobile-collaborator-replicas.mjs';
-test('failed admission ends once; storage repair resumes sibling work in the same scheduler', async t => {
+test('known unstarted admission executes once after storage repair, then sibling work continues', async t => {
   const root = mkdtempSync(join(tmpdir(), 'aru-mobile-recovery-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const folder = join(root, 'mobile-collaborator-replicas'); mkdirSync(folder);
@@ -19,14 +19,15 @@ test('failed admission ends once; storage repair resumes sibling work in the sam
   const scheduler = join(folder, 'records-v2/scheduler.json'); const original = readFileSync(scheduler);
   await host.start(); rmSync(scheduler); mkdirSync(scheduler);
   await host.runDue(); assert.deepEqual(calls, []);
+  await host.runDue(); assert.deepEqual(calls, [], "persistent storage failure must not dispatch");
   rmSync(scheduler, { recursive: true }); writeFileSync(scheduler, original);
   callback(); await host.runDue();
-  assert.deepEqual(calls, ['sibling']);
-  await host.runDue(); assert.deepEqual(calls, ['sibling']);
+  assert.deepEqual(calls, ['first', 'sibling']);
+  await host.runDue(); assert.deepEqual(calls, ['first', 'sibling']);
   const records = join(folder, 'records-v2/executions/first/1');
   const first = JSON.parse(readFileSync(join(records, readdirSync(records)[0])));
-  assert.equal(first.state, 'uncertain');
+  assert.equal(first.state, 'running');
   const saved = JSON.parse(readFileSync(scheduler));
-  assert.equal(saved.replicas[0].rules[0].inFlightDeliveryId, null);
+  assert.equal(saved.replicas[0].rules[0].inFlightDeliveryId, first.deliveryId);
   assert.equal(saved.replicas[0].rules[0].nextFireAt, null);
 });

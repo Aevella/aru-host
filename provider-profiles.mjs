@@ -151,14 +151,14 @@ export function createProviderProfileHost({
 
   function profileForId(profileId) {
     const profile = storedProfileForId(profileId);
-    return { ...profile, hasSecret: hasSecret(profileId) };
+    return { ...profile, hasSecret: profile.authMode !== "none" && hasSecret(profileId) };
   }
 
   function publicProfile(profile) {
     const { hasSecret: _, ...metadata } = profile;
     let availableSecret = false;
     let secretFailure = null;
-    try { availableSecret = hasSecret(profile.profileId); }
+    try { availableSecret = profile.authMode !== "none" && hasSecret(profile.profileId); }
     catch { secretFailure = "模型密钥无法读取，请恢复 Host 密钥存储，或重新填写此配置的 API Key。配置和协作者仍保留。"; }
     if (!availableSecret && profile.authMode !== "none" && !secretFailure) {
       secretFailure = "此配置需要重新填写 API Key；原有配置、协作者和聊天记录仍保留。";
@@ -280,7 +280,6 @@ export function createProviderProfileHost({
   }
 
   function hasSecret(profileId) {
-    if (!secretStore.availability().supported) return false;
     return Boolean(secretStore.read(profileId));
   }
 

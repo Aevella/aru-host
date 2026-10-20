@@ -127,9 +127,11 @@ export function createProviderSecretStore({
       availabilityCheckedAt = timestamp;
       return detected;
     }
-    // Inventory reads never repeat the blocking Windows probe. An explicit
-    // credential mutation can retry a failed attempt without restarting Core.
-    if (cachedAvailability && !(platform === "win32" && retry && !cachedAvailability.supported)) return cachedAvailability;
+    // Coalesce inventory probes, but do not turn a transient failure into a
+    // process-lifetime ban on reading an already saved credential.
+    if (cachedAvailability && (cachedAvailability.supported || (!retry
+        && now() - availabilityCheckedAt < LINUX_AVAILABILITY_CACHE_MILLISECONDS))) return cachedAvailability;
+    availabilityCheckedAt = now();
     if (platform === "win32") {
       const result = run("powershell.exe", [
         ...WINDOWS_POWERSHELL_FLAGS, windowsDpapiScripts("").probe,
