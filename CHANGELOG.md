@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.37.0
+
+- Resume interrupted conversation attachments from durable chunks without blocking retries behind an old connection.
+- Recover Codex initialization, cancelled startup, replica storage publication and proactive scheduling without restarting Host.
+- Preserve known unstarted one-time tasks through storage recovery; never rerun a model call to replay storage.
+- Run OS credential helpers asynchronously, keep version manifests free of credential IO, and read only the selected profile for model execution.
+- Retry transient Windows credential failures, retain accurate timeout diagnostics, and preserve Console startup errors without stale repair attempts.
+- See [upgrade instructions and verification boundaries](docs/releases/0.37.0.md).
+
 ## 0.36.0
 
 - Add public HTTPS and Tailscale connection-address editing to Windows/Linux Console, including credential-free Host identity checks, revision-checked save, removal and retained drafts after failure.

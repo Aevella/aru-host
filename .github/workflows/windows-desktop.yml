@@ -26,6 +26,8 @@ jobs:
           node --test tests/driver-launch.test.mjs
           node tests/windows-npm-shim-probe-smoke.mjs
           node tests/windows-secret-store-smoke.mjs
+          node --test tests/windows-secret-recovery.test.mjs tests/provider-nonblocking.test.mjs tests/apns-nonblocking.test.mjs tests/apns-credential-recovery.test.mjs
+          node --test tests/codex-startup-recovery.test.mjs tests/mobile-storage-recovery.test.mjs tests/collaborator-startup.test.mjs
           node --test tests/claude-code-command.test.mjs
           node tests/provider-profiles-smoke.mjs
           node --test tests/container-runtime-setup.test.mjs tests/container-status-http.test.mjs
