@@ -21,13 +21,29 @@ export function createProviderProfileHost({
   let storage = { supported: false, storage: "unavailable", failure: "checking" };
   const observations = new Map();
   let refreshAttempt, refreshedAt = -Infinity;
+  let adoptionAttempt;
+  function adoptLegacyProfiles() {
+    if (!secretStore.adoptLegacyProfiles) return Promise.resolve();
+    if (!adoptionAttempt) adoptionAttempt = Promise.resolve().then(async () => {
+      if (!(await secretStore.availability()).supported) throw new Error("Credential storage unavailable");
+      await secretStore.adoptLegacyProfiles(state.providerProfiles);
+    }).catch(error => { adoptionAttempt = null; throw error; });
+    return adoptionAttempt;
+  }
+
+  async function readSecret(profileId) {
+    storedProfileForId(profileId);
+    await adoptLegacyProfiles();
+    return secretStore.read(profileId);
+  }
+
   async function refresh({ force = false } = {}) {
     if (refreshAttempt) return refreshAttempt;
     if (!force && now() - refreshedAt < 5_000) return;
     refreshAttempt = Promise.resolve().then(async () => {
       try {
         storage = await secretStore.availability();
-        if (secretStore.adoptLegacyProfiles && storage.supported) await secretStore.adoptLegacyProfiles(state.providerProfiles);
+        if (storage.supported) await adoptLegacyProfiles();
         await Promise.all(state.providerProfiles.map(async profile => {
           const revision = profile.revision;
           let observation;
@@ -214,7 +230,7 @@ export function createProviderProfileHost({
     };
   }
 
-  return { route, inventory, profileForId, refresh };
+  return { route, inventory, profileForId, refresh, readSecret };
 
   function storedProfileForId(profileId) {
     const profile = state.providerProfiles.find((item) => item.profileId === profileId);

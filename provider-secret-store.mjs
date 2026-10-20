@@ -118,14 +118,21 @@ export function createProviderSecretStore({
 
   let availabilityAttempt;
   function availability(options = {}) {
-    if (!availabilityAttempt) availabilityAttempt = Promise.resolve().then(() => probeAvailability(options))
-      .finally(() => { availabilityAttempt = null; });
-    return availabilityAttempt;
+    if (availabilityAttempt) {
+      const attempt = availabilityAttempt;
+      return attempt.promise.then(result => options.retry && !attempt.retry && !result.supported
+        ? availability(options) : result);
+    }
+    const attempt = { retry: options.retry === true };
+    availabilityAttempt = attempt;
+    attempt.promise = Promise.resolve().then(() => probeAvailability(options))
+      .finally(() => { if (availabilityAttempt === attempt) availabilityAttempt = null; });
+    return attempt.promise;
   }
   async function probeAvailability({ retry = false } = {}) {
     if (platform === "linux") {
       const timestamp = now();
-      if (cachedAvailability
+      if (cachedAvailability && (!retry || cachedAvailability.supported)
           && timestamp - availabilityCheckedAt < LINUX_AVAILABILITY_CACHE_MILLISECONDS) {
         return cachedAvailability;
       }
@@ -457,6 +464,10 @@ export function createHeadlessProviderSecretStore(root, { legacyKeyFile } = {}) 
 export function runSecretCommand(command, args, { input, ...options }) {
   return new Promise(resolve => {
     const child = execFile(command, args, { ...options, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
+      // execFile reports its deadline kill with a null code, unlike spawnSync.
+      // Do not relabel buffer overflow, spawn errors or an external signal.
+      if (error?.killed && error.code == null && options.timeout > 0
+          && error.signal === (options.killSignal ?? "SIGTERM")) error.code = "ETIMEDOUT";
       resolve({ status: error ? (typeof error.code === "number" ? error.code : null) : 0,
         error, stdout, stderr });
     });

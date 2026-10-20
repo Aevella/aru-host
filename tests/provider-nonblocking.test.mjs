@@ -101,3 +101,47 @@ test('a key read across a profile revision change cannot send credentials to the
   await assert.rejects(attempt, /配置已改变/);
   assert.equal(sent, 0);
 });
+
+test('real credential subprocess deadline is diagnosed as timeout, not process startup failure', async () => {
+  const { runSecretCommand } = await import('../provider-secret-store.mjs');
+  const store = createProviderSecretStore({ platform: 'win32', run: (_command, _args, options) =>
+    runSecretCommand(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { ...options, timeout: 40 }) });
+  const status = await store.availability();
+  assert.equal(status.supported, false);
+  assert.equal(status.diagnostic.reason, 'timeout');
+  assert.equal(status.diagnostic.exitCode, null);
+});
+
+test('non-timeout subprocess failures retain their original categories', async () => {
+  const { runSecretCommand } = await import('../provider-secret-store.mjs');
+  const exit = await runSecretCommand(process.execPath, ['-e', 'process.exit(3)'], { timeout: 5_000 });
+  assert.equal(exit.status, 3); assert.equal(exit.error.code, 3);
+  const missing = await runSecretCommand('aru-missing-command-for-credential-test', [], { timeout: 5_000 });
+  assert.equal(missing.error.code, 'ENOENT');
+  const overflow = await runSecretCommand(process.execPath, ['-e', 'process.stdout.write("x".repeat(2*1024*1024))'], { timeout: 5_000 });
+  assert.equal(overflow.error.code, 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER');
+});
+
+test('explicit save probe retries after sharing a failed inventory probe', async () => {
+  const pending = deferred(); let calls = 0;
+  const store = createProviderSecretStore({ platform: 'win32', run: () => ++calls === 1 ? pending.promise : { status: 0 } });
+  const inventory = store.availability();
+  const save = store.availability({ retry: true });
+  const anotherSave = store.availability({ retry: true });
+  pending.resolve({ status: 1 });
+  assert.equal((await inventory).supported, false);
+  assert.equal((await save).supported, true);
+  assert.equal((await anotherSave).supported, true);
+  assert.equal(calls, 2, 'concurrent saves share the one forced retry');
+});
+
+test('actual model key read touches only its selected profile, even after inventory cache expiry', async () => {
+  let now = 0; const reads = [];
+  const host = createProviderProfileHost({ state: { providerProfiles: ['aaaa', 'bbbb'].map(id =>
+    ({ profileId: `provider_${id}`, authMode: 'bearer', revision: 1 })) }, now: () => now, secretStore: {
+      availability: () => ({ supported: true }), read: id => { reads.push(id); return 'synthetic'; },
+    } });
+  await host.refresh(); reads.length = 0; now = 10_000;
+  assert.equal(await host.readSecret('provider_aaaa'), 'synthetic');
+  assert.deepEqual(reads, ['provider_aaaa']);
+});

@@ -168,10 +168,7 @@ export function createCollaboratorHost({
   let providerProfiles;
   const directAPIDriver = createDirectAPIDriver({
     profileForId: (profileId) => providerProfiles.profileForId(profileId),
-    readSecret: async (profileId) => {
-      await providerProfiles.refresh();
-      return providerSecretStore.read(profileId);
-    },
+    readSecret: (profileId) => providerProfiles.readSecret(profileId),
     log,
   });
   providerProfiles = createProviderProfileHost({

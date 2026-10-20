@@ -437,3 +437,11 @@ pending, the real async subprocess runner with a synthetic helper, collaborator
 manifest projection, stale revision isolation and cancellation before model
 admission. This does not establish that credential blocking caused a previously
 reported unknown version, nor replace Windows DPAPI/device acceptance.
+
+2026-10-21 async credential follow-up: the subprocess adapter normalizes an
+execFile deadline kill (killed, null code, expected timeout signal) to ETIMEDOUT.
+Numeric process exits, missing executables and output-buffer errors retain their
+categories. A forced credential probe that shares a failed inventory attempt
+then performs one coalesced forced retry. Model execution reads only its selected
+profile, awaiting legacy adoption when applicable without refreshing every key.
+Real subprocess timeout and non-timeout counterexamples cover this boundary.
