@@ -10,10 +10,11 @@ const INITIALIZE_CLIENT = {
   version: "1",
 };
 
-export function createCodexAppServerDriver({ executable, resolveExecutable, log = () => {}, interruptTimeoutMs = 10_000 }) {
+export function createCodexAppServerDriver({ executable, resolveExecutable, log = () => {}, interruptTimeoutMs = 10_000, startupTimeoutMs = 120_000, spawnProcess = spawn }) {
   let process = null;
   let socket = null;
   let connecting = null;
+  let initialized = false;
   let knownExecutable = executable ?? null;
   let requestSequence = 0;
   const pendingRequests = new Map();
@@ -24,56 +25,61 @@ export function createCodexAppServerDriver({ executable, resolveExecutable, log 
   const completionWaiters = new Map();
 
   function status() {
-    if (socket?.readyState === SOCKET_OPEN) return "running";
+    if (initialized && socket?.readyState === SOCKET_OPEN) return "running";
     if (connecting) return "starting";
     return knownExecutable ? "ready" : "unavailable";
   }
 
-  async function ensureConnected() {
-    if (socket?.readyState === SOCKET_OPEN) return;
-    const command = refreshExecutable();
-    if (!command) throw new Error("codex executable is unavailable");
-    if (typeof WebSocket !== "function") {
-      throw new Error("Aru Host requires Node.js with WebSocket support");
+  async function ensureConnected(signal) {
+    signal?.throwIfAborted();
+    if (initialized && socket?.readyState === SOCKET_OPEN) return;
+    if (!connecting || connecting.controller.signal.aborted) {
+      const command = refreshExecutable();
+      if (!command) throw new Error("codex executable is unavailable");
+      if (typeof WebSocket !== "function") throw new Error("Aru Host requires Node.js with WebSocket support");
+      const attempt = { controller: new AbortController(), users: 0, child: null, socket: null };
+      connecting = attempt;
+      const timer = setTimeout(() => attempt.controller.abort(new Error("Codex startup did not become ready; retry connecting.")), startupTimeoutMs);
+      attempt.promise = connect(command, attempt).catch(error => {
+        // A retired attempt must never tear down its successor.
+        if (connecting === attempt) handleDisconnect("Codex initialization failed");
+        attempt.socket?.close?.();
+        attempt.child?.kill();
+        throw error;
+      }).finally(() => { clearTimeout(timer); if (connecting === attempt) connecting = null; });
     }
-    if (connecting) return connecting;
-    connecting = connect(command);
-    try {
-      await connecting;
-    } finally {
-      connecting = null;
+    const attempt = connecting;
+    attempt.users++;
+    try { await withAbort(attempt.promise, signal); }
+    finally {
+      attempt.users--;
+      if (!attempt.users && connecting === attempt && !initialized) {
+        // Nobody still needs this uninitialized transport. No model turn has
+        // been admitted through it; abandoning it cannot cancel another turn.
+        attempt.controller.abort(new Error("Codex startup cancelled"));
+      }
     }
   }
 
-  async function connect(command) {
-    // `command` is either a bare executable path or the launch spec resolved
-    // by the Host ({ file, args, shell }), e.g. `node <npm entry>` on Windows.
-    const launch = typeof command === "string"
-      ? { file: command, args: [], shell: false }
-      : command;
-    process = spawn(launch.file, [
-      ...launch.args,
-      "app-server",
-      "-c",
-      "project_doc_max_bytes=0",
-      "--listen",
-      "ws://127.0.0.1:0",
-    ], {
+  async function connect(command, attempt) {
+    const signal = attempt.controller.signal;
+    const launch = typeof command === "string" ? { file: command, args: [], shell: false } : command;
+    const child = spawnProcess(launch.file, [...launch.args, "app-server", "-c", "project_doc_max_bytes=0", "--listen", "ws://127.0.0.1:0"], {
       env: { ...globalThis.process.env, NO_COLOR: "1" },
-      stdio: ["ignore", "ignore", "pipe"],
-      windowsHide: true,
-      shell: launch.shell === true,
+      stdio: ["ignore", "ignore", "pipe"], windowsHide: true, shell: launch.shell === true,
     });
-    const url = await listeningURL(process);
-    socket = await openSocket(url);
-    socket.addEventListener("message", handleMessage);
-    socket.addEventListener("close", () => handleDisconnect("Codex connection closed"));
-    socket.addEventListener("error", () => handleDisconnect("Codex connection failed"));
-    await request("initialize", {
-      clientInfo: INITIALIZE_CLIENT,
-      capabilities: { experimentalApi: true },
-    });
+    process = attempt.child = child;
+    const url = await withAbort(listeningURL(child), signal);
+    const connection = await openSocket(url, signal);
+    signal.throwIfAborted();
+    socket = attempt.socket = connection;
+    connection.addEventListener("message", event => { if (socket === connection) void handleMessage(event, connection); });
+    connection.addEventListener("close", () => { if (socket === connection) handleDisconnect("Codex connection closed"); });
+    connection.addEventListener("error", () => { if (socket === connection) handleDisconnect("Codex connection failed"); });
+    await withAbort(request("initialize", { clientInfo: INITIALIZE_CLIENT, capabilities: { experimentalApi: true } }), signal);
+    signal.throwIfAborted();
     notify("initialized", {});
+    initialized = true;
     log("computer collaborator Codex driver ready");
   }
 
@@ -87,8 +93,9 @@ export function createCodexAppServerDriver({ executable, resolveExecutable, log 
     attachments = [],
     userMessageId,
     handler,
+    signal,
   }) {
-    await ensureConnected();
+    await ensureConnected(signal);
     let resolvedThreadId = threadId;
     if (resolvedThreadId) {
       try {
@@ -98,11 +105,13 @@ export function createCodexAppServerDriver({ executable, resolveExecutable, log 
           baseInstructions: instructions,
           approvalPolicy: "on-request",
           sandbox: "workspace-write",
-        });
+        }, startupTimeoutMs, signal);
       } catch {
+        signal?.throwIfAborted();
         resolvedThreadId = null;
       }
     }
+    signal?.throwIfAborted();
     if (!resolvedThreadId) {
       const started = await request("thread/start", {
         cwd,
@@ -112,9 +121,10 @@ export function createCodexAppServerDriver({ executable, resolveExecutable, log 
         sandbox: "workspace-write",
         dynamicTools: tools,
         ephemeral: false,
-      });
+      }, startupTimeoutMs, signal);
       resolvedThreadId = started.thread.id;
     }
+    signal?.throwIfAborted();
     threadHandlers.set(resolvedThreadId, handler);
     threadTurnIds.delete(resolvedThreadId);
     const startedTurn = await request("turn/start", {
@@ -159,21 +169,22 @@ export function createCodexAppServerDriver({ executable, resolveExecutable, log 
     }
   }
 
-  function request(method, params, timeoutMs = 0) {
-    if (!socket || socket.readyState !== SOCKET_OPEN) {
-      return Promise.reject(new Error("Codex connection is not open"));
-    }
+  function request(method, params, timeoutMs = 0, signal) {
+    if (!socket || socket.readyState !== SOCKET_OPEN) return Promise.reject(new Error("Codex connection is not open"));
     const id = ++requestSequence;
     return new Promise((resolve, reject) => {
-      const timer = timeoutMs ? setTimeout(() => {
-        pendingRequests.delete(id);
-        reject(new Error("Codex did not acknowledge the stop request; retry stopping this turn."));
-      }, timeoutMs) : null;
+      let timer;
+      const cleanup = () => { clearTimeout(timer); signal?.removeEventListener("abort", abort); pendingRequests.delete(id); };
+      const abort = () => { cleanup(); reject(signal.reason); };
+      if (timeoutMs) timer = setTimeout(() => { cleanup(); reject(new Error(`Codex did not acknowledge ${method}; retry the operation.`)); }, timeoutMs);
       pendingRequests.set(id, {
-        resolve: value => { clearTimeout(timer); resolve(value); },
-        reject: error => { clearTimeout(timer); reject(error); },
+        resolve: value => { cleanup(); resolve(value); },
+        reject: error => { cleanup(); reject(error); },
       });
-      socket.send(JSON.stringify({ id, method, params }));
+      signal?.addEventListener("abort", abort, { once: true });
+      if (signal?.aborted) { abort(); return; }
+      try { socket.send(JSON.stringify({ id, method, params })); }
+      catch (error) { cleanup(); reject(error); }
     });
   }
 
@@ -181,13 +192,14 @@ export function createCodexAppServerDriver({ executable, resolveExecutable, log 
     socket.send(JSON.stringify({ method, params }));
   }
 
-  async function handleMessage(event) {
+  async function handleMessage(event, connection = socket) {
     let message;
     try {
       message = JSON.parse(typeof event.data === "string" ? event.data : await event.data.text());
     } catch {
       return;
     }
+    if (socket !== connection) return;
     if (message.id !== undefined && !message.method) {
       const pending = pendingRequests.get(message.id);
       if (!pending) return;
@@ -207,7 +219,7 @@ export function createCodexAppServerDriver({ executable, resolveExecutable, log 
     const handler = threadHandlers.get(message.params?.threadId);
     if (!handler) return;
     if (message.id !== undefined) {
-      await handleServerRequest(message, handler);
+      await handleServerRequest(message, handler, connection);
       return;
     }
     await handler.onNotification?.(message.method, message.params ?? {});
@@ -219,10 +231,10 @@ export function createCodexAppServerDriver({ executable, resolveExecutable, log 
     }
   }
 
-  async function handleServerRequest(message, handler) {
+  async function handleServerRequest(message, handler, connection) {
     const respond = (result) => {
-      if (socket?.readyState === SOCKET_OPEN) {
-        socket.send(JSON.stringify({ id: message.id, result }));
+      if (socket === connection && connection.readyState === SOCKET_OPEN) {
+        connection.send(JSON.stringify({ id: message.id, result }));
       }
     };
     if (message.method === "item/tool/call") {
@@ -260,6 +272,7 @@ export function createCodexAppServerDriver({ executable, resolveExecutable, log 
 
   function handleDisconnect(reason) {
     if (!socket && !process) return;
+    initialized = false;
     socket = null;
     process = null;
     const error = new Error(reason);
@@ -344,12 +357,24 @@ function listeningURL(child) {
   });
 }
 
-function openSocket(url) {
+function openSocket(url, signal) {
   return new Promise((resolve, reject) => {
     const value = new WebSocket(url);
-    value.addEventListener("open", () => resolve(value), { once: true });
-    value.addEventListener("error", () => reject(new Error("Could not connect to Codex app-server")), {
+    const abort = () => { value.close?.(); reject(signal.reason); };
+    signal.addEventListener("abort", abort, { once: true });
+    value.addEventListener("open", () => { signal.removeEventListener("abort", abort); resolve(value); }, { once: true });
+    value.addEventListener("error", () => { signal.removeEventListener("abort", abort); reject(new Error("Could not connect to Codex app-server")); }, {
       once: true,
     });
+  });
+}
+
+function withAbort(operation, signal) {
+  if (!signal) return operation;
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    signal.addEventListener("abort", abort, { once: true });
+    Promise.resolve(operation).then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+    if (signal.aborted) abort();
   });
 }

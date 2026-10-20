@@ -272,3 +272,11 @@ owns atomic temporary pieces and scoped finalization serialization; its disk inv
 is the resume receipt, not a second metadata ledger. Authenticated conversation
 routing admits the device before either outlet. Completion hands verified streams
 back to the existing attachment owner.
+
+Same-process failure recovery stays inside these owners: the Codex driver owns
+transport initialization and cancellation; the replica record store owns frozen
+transaction replay; the mobile scheduler reconciles live versus orphan attempts
+and resumes admission. Storage recovery never invokes a model. APNs credential
+availability uses a short negative cache; a later event reads again without
+replaying an earlier notification. No global recovery manager or second state
+registry is introduced.

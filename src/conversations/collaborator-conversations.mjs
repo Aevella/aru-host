@@ -448,6 +448,7 @@ export function createCollaboratorConversationHost({
       const canResumeDriverThread = conversation.driverConfigurationFingerprint === configurationFingerprint;
       if (!canResumeDriverThread) sessionToolGrants.delete(conversationKey(collaboratorId, conversationId));
       const started = await execution.start(() => driver.startTurn({
+        signal: execution.signal,
         threadId: canResumeDriverThread ? conversation.driverThreadId : null,
         cwd: workspace,
         instructions: requestInstructions(collaborator),

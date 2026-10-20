@@ -544,7 +544,11 @@ export function createAPNsCredentialStore({
       availabilityCheckedAt = timestamp;
       return publicAvailability;
     }
-    if (cachedAvailability) return cachedAvailability;
+    // Negative probes are transient. Reads coalesce them briefly, while a later
+    // status check or new delivery can recover without replaying old pushes.
+    if (cachedAvailability && (cachedAvailability.supported
+        || now() - availabilityCheckedAt < LINUX_AVAILABILITY_CACHE_MILLISECONDS)) return cachedAvailability;
+    availabilityCheckedAt = now();
     if (platform === "darwin") {
       const result = run("/usr/bin/security", ["help"], {
         encoding: "utf8", timeout: 3_000, windowsHide: true,
@@ -570,7 +574,9 @@ export function createAPNsCredentialStore({
   }
 
   function read() {
-    if (!availability().supported) return null;
+    if (!availability().supported) {
+      throw Object.assign(new Error("APNs credential storage is temporarily unavailable; a later delivery will retry"), { code: "apns.credential_storage_unavailable" });
+    }
     if (platform === "linux") {
       const result = lookupLinuxSecret({ run, service, account });
       if (result.outcome === "missing") return null;
@@ -592,7 +598,7 @@ export function createAPNsCredentialStore({
       ], {
         encoding: "utf8", timeout: 15_000, windowsHide: true,
       });
-    if (result.status === 44 || result.status === 1 || /could not be found/i.test(result.stderr ?? "")) {
+    if (result.status === 44 || (platform === "darwin" && (result.status === 1 || /could not be found/i.test(result.stderr ?? "")))) {
       return null;
     }
     if (result.status !== 0) throw new Error("无法从系统安全凭据存储读取 APNs provider key");

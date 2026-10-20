@@ -85,3 +85,22 @@ for (const point of ['after-journal', 'after-publication']) test(`rejected deliv
   assert.equal(rejected.acknowledgedAt, undefined);
   assert.equal(rejected.content, bad.content);
 });
+for (const point of ['before-journal', 'after-journal', 'after-publication']) test(`same store recovers frozen transaction at ${point} and accepts new work`, t => {
+  const root = fixture(t); let armed = false;
+  const store = createReplicaRecordStore(root, { fault: p => { if (armed && p === point) throw new Error('disk failure'); } });
+  const ledger = store.ledger;
+  store.put('deliveries', record(1)); ledger.marker = 'accepted'; armed = true;
+  assert.throws(() => store.commit(ledger), /disk failure/);
+  ledger.marker = 'caller rolled back';
+  assert.equal(store.needsRecovery(), true);
+  assert.throws(() => store.get('deliveries', 'phone', 1, 'delivery_1'), /recovery/);
+  assert.equal(store.recover(), true);
+  assert.equal(store.ledger, ledger);
+  assert.equal(ledger.marker, 'accepted');
+  assert.deepEqual(store.get('deliveries', 'phone', 1, 'delivery_1'), record(1));
+  assert.equal(store.recover(), false);
+  armed = false;
+  store.put('deliveries', { ...record(2), sourceCollaboratorId: 'other' }); store.commit(ledger);
+  assert.equal(store.pending('deliveries', 'phone', 1).length, 1);
+  assert.equal(store.pending('deliveries', 'other', 1).length, 1);
+});

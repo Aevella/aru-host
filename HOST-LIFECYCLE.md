@@ -391,3 +391,25 @@ stays in memory and the existing UI error surface; no new diagnostic file is add
 Focused recovery tests and the 38-test Console suite pass locally. Generated
 payload checks pass. These are not Windows DPAPI/Electron device acceptance or a
 published installer; the original device-specific first failure remains unknown.
+
+2026-10-20 same-process recovery (source): Codex readiness requires completed
+initialization. Failed/abandoned transports are retired, startup has a 120-second
+deadline and per-waiter cancellation, and old transport callbacks cannot change a
+new connection. This deadline bounds startup, not model generation. A shared
+startup remains alive while another caller needs it.
+
+Replica publication retains a frozen storage transaction after an IO failure.
+The scheduler retries publication in the same process every five seconds while
+storage remains unavailable, then reconciles receipts before admitting new work.
+It never repeats a model/tool call. An orphan admission becomes uncertain and
+releases its rule; a consumed one-time occurrence stays consumed. Completed
+content remains durable and is not discarded as a failed notification. Ordinary
+replica requests also attempt storage recovery. Persistent disk failure still
+prevents unsafe writes; repairing the disk no longer requires restarting Core.
+
+APNs negative credential probes expire after five seconds. New events/status
+reads can recover; old notifications are not queued for replay. Unavailable
+credential storage throws distinctly from a missing key. Focused local fault
+injection covers same-instance recovery, sibling progress, retained results,
+startup cancellation and stale transport isolation. No Windows device, APNs
+service or released-installer acceptance is implied.

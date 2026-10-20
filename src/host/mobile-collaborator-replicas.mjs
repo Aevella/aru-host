@@ -45,6 +45,9 @@ export function createMobileCollaboratorReplicaHost({
   for (const replica of ledger.replicas) records.retireContinuation(replica.sourceCollaboratorId, replica.epoch, replica.revision);
   let timer = null;
   let started = false;
+  let dueAttempt;
+  const activeExecutions = new Set();
+  const executionKey = (source, epoch, id) => `${source}/${epoch}/${id}`;
   // Complete results are reconciled before old in-flight markers are cleared.
   // No model/tool action is retried during recovery.
   const recoveryEvents = [];
@@ -80,6 +83,10 @@ export function createMobileCollaboratorReplicaHost({
   }
 
   async function route(req, res, path, requireDevice) {
+    if (path.startsWith("/aru/v1/mobile-collaborator-")) {
+      requireDevice();
+      recoverStorage();
+    }
     if (path === "/aru/v1/mobile-collaborator-execution-grants" && req.method === "GET") {
       requireDevice();
       const executor = validatedId(new URL(req.url, "http://localhost").searchParams.get("executor"), "executor collaborator");
@@ -255,6 +262,7 @@ export function createMobileCollaboratorReplicaHost({
   }
 
   function callSelfTool(name, args, _device, collaborator) {
+    if (name.startsWith("aru_mobile_replica_")) recoverStorage();
     if (name === "aru_mobile_replica_list") {
       return {
         matched: true,
@@ -278,11 +286,46 @@ export function createMobileCollaboratorReplicaHost({
     return { matched: false, value: null };
   }
 
+  let reconciliationNeeded = false;
+  function recoverStorage() {
+    if (records.recover()) reconciliationNeeded = true;
+    if (!reconciliationNeeded) return;
+    // Transactions are replayed, never model/tool calls. A running receipt with
+    // no live attempt must be reconciled against conversation evidence.
+    for (const execution of records.running()) {
+      const key = executionKey(execution.sourceCollaboratorId, execution.epoch, execution.deliveryId);
+      if (activeExecutions.has(key)) continue;
+      const event = recoverDelivery(execution.sourceCollaboratorId, execution.deliveryId, execution.epoch);
+      if (event) {
+        if (!recoveryEvents.some(item => item.turn.deliveryId === execution.deliveryId
+            && item.turn.sourceCollaboratorId === execution.sourceCollaboratorId
+            && item.turn.executionEpoch === execution.epoch)) recoveryEvents.push(event);
+      } else {
+        execution.state = "uncertain";
+        execution.failure = "Execution admission was interrupted; this occurrence will not be replayed";
+        execution.updatedAt = now();
+        records.put("executions", execution);
+        const replica = replicaForId(execution.sourceCollaboratorId, false);
+        const rule = replica?.epoch === execution.epoch
+          ? replica.rules.find(item => item.inFlightDeliveryId === execution.deliveryId) : null;
+        if (rule) { rule.inFlightDeliveryId = null; rule.inFlightRuleVersion = null; }
+      }
+    }
+    saveLedger();
+    reconciliationNeeded = false;
+  }
+
+  async function drainRecovery() {
+    while (recoveryEvents.length) {
+      await settle(recoveryEvents[0], false);
+      recoveryEvents.shift();
+    }
+  }
+
   async function start() {
-    // Settle without notification: the persisted result is fetched normally.
-    // Keep start/stop identity so a late startup cannot restart a stopped owner.
     started = true;
-    for (const event of recoveryEvents.splice(0)) await settle(event, false);
+    try { recoverStorage(); await drainRecovery(); }
+    catch (error) { log(`mobile collaborator recovery pending: ${error?.message ?? error}`); }
     schedule();
   }
 
@@ -296,6 +339,10 @@ export function createMobileCollaboratorReplicaHost({
     if (!started) return;
     if (timer) clearTimer(timer);
     timer = null;
+    if (records.needsRecovery() || reconciliationNeeded || recoveryEvents.length) {
+      timer = setTimer(() => { void runDue(); }, 5_000);
+      return;
+    }
     const nextFireAt = ledger.replicas.filter((replica) => !executionRevoked(replica.sourceCollaboratorId, replica.epoch)).flatMap((replica) => (replica.rules ?? [])
       .filter((rule) => rule.enabled && rule.nextFireAt && !rule.inFlightDeliveryId)
       .map((rule) => rule.nextFireAt)).sort((left, right) => left - right)[0];
@@ -303,7 +350,21 @@ export function createMobileCollaboratorReplicaHost({
     timer = setTimer(() => { void runDue(); }, Math.min(Math.max(0, nextFireAt - now()), 2_147_000_000));
   }
 
-  async function runDue() {
+  function runDue() {
+    if (dueAttempt) return dueAttempt;
+    const wasStarted = started;
+    dueAttempt = Promise.resolve().then(async () => {
+      try {
+        recoverStorage(); await drainRecovery();
+        if (wasStarted && !started) return;
+        await runDueWork();
+      } catch (error) { log(`mobile collaborator scheduling will retry after storage recovery: ${error?.message ?? error}`); }
+      finally { dueAttempt = undefined; schedule(); }
+    });
+    return dueAttempt;
+  }
+
+  async function runDueWork() {
     timer = null;
     const due = [];
     const timestamp = now();
@@ -326,8 +387,10 @@ export function createMobileCollaboratorReplicaHost({
       saveLedger();
       try {
         const executor = collaboratorForId(replica.executorHostCollaboratorId);
+        activeExecutions.add(executionKey(replica.sourceCollaboratorId, replica.epoch, deliveryId));
         trigger(executor, replicaContinuingOwnDeliveries(replica, rule), rule, deliveryId);
       } catch (error) {
+        activeExecutions.delete(executionKey(replica.sourceCollaboratorId, replica.epoch, deliveryId));
         rule.inFlightDeliveryId = null;
         rule.inFlightRuleVersion = null;
         const execution = records.get("executions", replica.sourceCollaboratorId, replica.epoch, deliveryId);
@@ -382,6 +445,8 @@ export function createMobileCollaboratorReplicaHost({
 
   async function settle(event, notify = true) {
     if (event?.turn?.source !== "mobile-replica-proactive") return false;
+    activeExecutions.delete(executionKey(event.turn.sourceCollaboratorId, event.turn.executionEpoch, event.turn.deliveryId));
+    recoverStorage();
     const replica = replicaForId(event.turn.sourceCollaboratorId, false);
     const rule = replica?.rules?.find((candidate) => candidate.ruleId === event.turn.ruleId);
     if (!replica || replica.epoch !== event.turn.executionEpoch || executionRevoked(replica.sourceCollaboratorId, replica.epoch)) return true;
@@ -459,7 +524,10 @@ export function createMobileCollaboratorReplicaHost({
     return ledger.revokedExecutions.some((item) => item.sourceCollaboratorId === sourceCollaboratorId && epoch <= item.epoch);
   }
 
-  function saveLedger() { records.commit(ledger); }
+  function saveLedger() {
+    try { records.commit(ledger); }
+    catch (error) { schedule(); throw error; }
+  }
 
   function replicaForId(sourceCollaboratorId, required) {
     const value = ledger.replicas.find((item) => item.sourceCollaboratorId === sourceCollaboratorId) ?? null;
@@ -469,6 +537,7 @@ export function createMobileCollaboratorReplicaHost({
 
   return { route, selfTools, callSelfTool, start, stop, settle, runDue,
     hasExecutionGrant(collaboratorId) {
+      recoverStorage();
       return ledger.replicas.some((replica) => replica.executorHostCollaboratorId === collaboratorId
         && !ledger.revokedExecutions.some((entry) => entry.sourceCollaboratorId === replica.sourceCollaboratorId && entry.epoch >= replica.epoch));
     },
