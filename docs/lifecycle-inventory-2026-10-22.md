@@ -48,7 +48,8 @@ Plugin runtime commands use asynchronous child processes, with control deadlines
 budgets. A timed-out command does not establish rollback or successful deletion.
 Per-plugin admission releases in `finally`; unrelated plugins and HTTP requests are
 not blocked by its subprocess. A failed deletion preserves the installed owner.
-Workspace container control similarly yields; startup cleanup failure becomes an
+Workspace container control similarly yields; startup reconciliation runs after HTTP starts and preserves cancellations made
+while cleanup awaits the engine. A cleanup failure becomes an
 explicit retryable job failure instead of silently rerunning beside an old container.
 
 ## Verification

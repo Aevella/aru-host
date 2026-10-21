@@ -457,3 +457,7 @@ reopen, and final-publication retry never replays the provider. Plugin and works
 container control is asynchronous; unconfirmed removal cannot silently become a
 successful uninstall or automatic job restart. Source/local proofs are distinct
 from Windows CI, customer devices and release distribution.
+Workspace startup reconciliation runs after the HTTP listener is available, so a
+stalled engine cannot block connection/diagnostics for unrelated work. A cancellation
+while cleanup is awaiting the engine remains cancelled when cleanup later completes.
+The focused cleanup-isolation and late-cancellation tests pass locally.

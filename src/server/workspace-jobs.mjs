@@ -624,12 +624,14 @@ async function recoverInterruptedJobs() {
     job.events ??= [];
     try { await removeStaleJobContainer(job.jobId); }
     catch {
+      if (!["queued", "preparing", "running"].includes(job.state)) continue;
       job.failureCode = "workspace.recovery_cleanup_failed";
       job.failureMessage = "Previous workspace container removal could not be confirmed; repair the container engine before retrying";
       job.completedAt = Date.now(); job.state = "failed";
       appendWorkspaceJobEvent(job, "failed", job.failureMessage);
       continue;
     }
+    if (!["queued", "preparing", "running"].includes(job.state)) continue;
     if (job.maximumRuntimeSeconds !== null && job.maximumRuntimeSeconds !== undefined &&
         job.startedAt !== null && job.startedAt !== undefined) {
       job.deadlineAt ??= job.startedAt + job.maximumRuntimeSeconds * 1000;

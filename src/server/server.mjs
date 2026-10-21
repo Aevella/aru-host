@@ -208,7 +208,6 @@ mkdirSync(join(config.dataDir, "artifacts"), { recursive: true });
 normalizeLegacyHostConsoleDevices();
 const { persistWorkspaceArtifacts, persistDirectArtifact, artifactInventory, handleArtifactDownload, handleArtifactDelete, deleteArtifact, artifactExtension, languageForWorkspacePath } = createArtifactVault({ config, state: { get artifacts() { return state.artifacts; }, set artifacts(value) { state.artifacts = value; } }, saveState, sendJSON, HttpError, log, sha256Hex, ARTIFACT_EXTENSIONS, ARTIFACT_METADATA_SCHEMA });
 const { publicWorkspaceJobPolicy, handleWorkspaceJobPolicyUpdate, handleWorkspaceJobSubmit, executeWorkspaceJob, workspaceJob, publicWorkspaceJob, workspaceJobInventory, matchWorkspaceJobRoute, handleWorkspaceJobStatus, handleWorkspaceJobEvents, handleWorkspaceJobCancel, cancelWorkspaceJob, handleWorkspaceJobRetry, retryWorkspaceJob, recoverInterruptedJobs } = createWorkspaceJobs({ config, state: { get jobs() { return state.jobs; }, set jobs(value) { state.jobs = value; }, get jobPolicy() { return state.jobPolicy; }, set jobPolicy(value) { state.jobPolicy = value; } }, saveState, sendJSON, readJSONBody, HttpError, log, sha256Hex, persistWorkspaceArtifacts, artifactExtension, CONTAINER_STOP_GRACE_SECONDS, WORKSPACE_JOB_EVENTS_SCHEMA, WORKSPACE_JOB_INVENTORY_SCHEMA, WORKSPACE_JOB_POLICY_SCHEMA, WORKSPACE_JOB_SCHEMA, WORKSPACE_RESULT_SCHEMA, WORKSPACE_RUNTIMES, WORKSPACE_RUN_SCHEMA });
-const recoveredJobIds = await recoverInterruptedJobs();
 const nodeControl = createNodeControl({
   config,
   state,
@@ -413,9 +412,11 @@ server.listen(config.port, config.listenHost, () => {
   console.log(pairingURL);
   console.log("");
   console.log("No secrets are logged past this point.");
-  for (const jobId of recoveredJobIds) {
-    setImmediate(() => executeWorkspaceJob(jobId));
-  }
+  // A stalled container engine must not prevent the Host from accepting
+  // connections, diagnostics or unrelated work during recovery.
+  void recoverInterruptedJobs().then(jobIds => {
+    for (const jobId of jobIds) setImmediate(() => executeWorkspaceJob(jobId));
+  }).catch(error => log(`workspace recovery failed: ${error?.message ?? error}`));
   setImmediate(() => pluginSupervisor.reconcileInstalledPlugins()
     .catch((error) => log(`plugin reconciliation failed: ${error?.message ?? error}`)));
 });
