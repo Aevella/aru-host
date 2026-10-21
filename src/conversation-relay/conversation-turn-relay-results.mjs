@@ -4,10 +4,10 @@ import { join } from "node:path";
 
 // Raw provider response storage. Turn state and acknowledgement stay with the
 // relay; this owner only manages temporary writes and atomic publication.
-export function createTurnResultFiles(directory) {
+export function createTurnResultFiles(directory, retained = []) {
   mkdirSync(directory, { recursive: true });
   for (const name of readdirSync(directory)) {
-    if (name.endsWith(".tmp")) rmSync(join(directory, name), { force: true });
+    if (name.endsWith(".tmp") && !retained.includes(name)) rmSync(join(directory, name), { force: true });
   }
   return {
     create(name) { writeFileSync(join(directory, name), Buffer.alloc(0), { mode: 0o600 }); },

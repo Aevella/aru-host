@@ -90,10 +90,10 @@ const { join } = node1;
 
 // Raw provider response storage. Turn state and acknowledgement stay with the
 // relay; this owner only manages temporary writes and atomic publication.
-function createTurnResultFiles(directory) {
+function createTurnResultFiles(directory, retained = []) {
   mkdirSync(directory, { recursive: true });
   for (const name of readdirSync(directory)) {
-    if (name.endsWith(".tmp")) rmSync(join(directory, name), { force: true });
+    if (name.endsWith(".tmp") && !retained.includes(name)) rmSync(join(directory, name), { force: true });
   }
   return {
     create(name) { writeFileSync(join(directory, name), Buffer.alloc(0), { mode: 0o600 }); },
@@ -227,9 +227,31 @@ function createConversationTurnRelay({
   onTurnUpdated = async () => {},
 }) {
   const resultDirectory = join(dataDir, "conversation-turns");
-  const results = createTurnResultFiles(resultDirectory);
   state.conversationTurns ??= [];
+  const results = createTurnResultFiles(resultDirectory, state.conversationTurns.map(turn => turn.resultFilename));
   const controllers = new Map();
+  const pendingPublication = new Set();
+  let publicationTimer;
+  function publish(turn) {
+    try {
+      saveState();
+      pendingPublication.delete(turn);
+      notifyTurnUpdated(turn);
+    } catch (error) {
+      pendingPublication.add(turn);
+      if (!publicationTimer) {
+        publicationTimer = setTimeout(() => {
+          publicationTimer = undefined;
+          try { retryPublication(); } catch { /* A later attempt retains the same result. */ }
+        }, 5_000);
+        publicationTimer.unref?.();
+      }
+      throw error;
+    }
+  }
+  function retryPublication() {
+    for (const turn of [...pendingPublication]) publish(turn);
+  }
 
   for (const turn of state.conversationTurns) {
     if (!ACTIVE_STATES.has(turn.state)) continue;
@@ -241,6 +263,7 @@ function createConversationTurnRelay({
   saveState();
 
   async function route(req, res, path, requireDevice) {
+    if (path.startsWith("/aru/v1/conversation-turns")) retryPublication();
     if (path === "/aru/v1/conversation-turns" && req.method === "POST") {
       await submit(req, res, requireDevice(req));
       return true;
@@ -334,23 +357,28 @@ function createConversationTurnRelay({
       updatedAt: now,
     };
     state.conversationTurns.push(turn);
-    saveState();
+    try { saveState(); }
+    catch (error) {
+      state.conversationTurns.splice(state.conversationTurns.indexOf(turn), 1);
+      throw error;
+    }
+    setImmediate(() => execute(turn, endpoint, headers, providerBody).catch(error => {
+      log(`conversation turn settlement failed: ${String(error?.message ?? error)}`);
+    }));
+    notifyTurnUpdated(turn);
     sendJSON(res, 202, publicTurn(turn));
-    await notifyTurnUpdated(turn);
-    setImmediate(() => execute(turn, endpoint, headers, providerBody));
     return true;
   }
 
   async function execute(turn, endpoint, headers, body) {
+    if (turn.state !== "accepted") return;
     const controller = new AbortController();
-    let temporaryPath = null;
     controllers.set(turn.turnId, controller);
     turn.state = "running";
     turn.startedAt = Date.now();
     turn.updatedAt = turn.startedAt;
-    saveState();
-    await notifyTurnUpdated(turn);
     try {
+      publish(turn);
       const response = await fetch(endpoint, {
         method: "POST",
         headers,
@@ -360,15 +388,13 @@ function createConversationTurnRelay({
       });
       const filename = `${turn.turnId}.response`;
       const finalPath = join(resultDirectory, filename);
-      temporaryPath = `${finalPath}.${process.pid}.tmp`;
       const temporaryFilename = `${filename}.${process.pid}.tmp`;
       results.create(temporaryFilename);
       turn.providerStatus = response.status;
       turn.providerContentType = response.headers.get("content-type") ?? "application/octet-stream";
       turn.resultFilename = temporaryFilename;
       turn.updatedAt = Date.now();
-      saveState();
-      await notifyTurnUpdated(turn);
+      publish(turn);
       const preview = createNotificationPreviewCollector(turn.protocolId, turn.providerContentType);
       if (response.body) {
         for await (const chunk of response.body) {
@@ -392,10 +418,12 @@ function createConversationTurnRelay({
       }
       turn.completedAt = Date.now();
       turn.updatedAt = turn.completedAt;
-      saveState();
-      await notifyTurnUpdated(turn);
+      publish(turn);
       log(`conversation turn ${turn.turnId} ${turn.state} via ${turn.providerHost}`);
-    } catch {
+    } catch (error) {
+      // A saved response awaiting state publication is not a provider failure.
+      // Re-publish its original outcome; never call the provider again.
+      if (TERMINAL_STATES.has(turn.state)) throw error;
       turn.state = controller.signal.aborted ? "cancelled" : "failed";
       turn.failureCode = controller.signal.aborted
         ? "conversation_turn.cancelled"
@@ -405,11 +433,9 @@ function createConversationTurnRelay({
         : "Host could not complete the provider request.";
       turn.completedAt = Date.now();
       turn.updatedAt = turn.completedAt;
-      saveState();
-      await notifyTurnUpdated(turn);
+      publish(turn);
       log(`conversation turn ${turn.turnId} ${turn.state}: ${turn.failureMessage}`);
     } finally {
-      if (temporaryPath) results.removePath(temporaryPath);
       controllers.delete(turn.turnId);
     }
   }
@@ -441,8 +467,7 @@ function createConversationTurnRelay({
       turn.failureMessage = "The remote turn was cancelled explicitly.";
       turn.completedAt = Date.now();
       turn.updatedAt = turn.completedAt;
-      saveState();
-      void notifyTurnUpdated(turn);
+      publish(turn);
     }
     return sendJSON(res, 200, publicTurn(turn));
   }
@@ -452,11 +477,13 @@ function createConversationTurnRelay({
     if (!TERMINAL_STATES.has(turn.state)) {
       throw new HttpError(409, "conversation_turn.still_running", "cannot acknowledge a running turn");
     }
-    purge(turn.turnId);
+    const previous = { resultFilename: turn.resultFilename, acknowledgedAt: turn.acknowledgedAt, updatedAt: turn.updatedAt };
     turn.resultFilename = null;
     turn.acknowledgedAt = turn.acknowledgedAt ?? Date.now();
     turn.updatedAt = turn.acknowledgedAt;
-    saveState();
+    try { saveState(); }
+    catch (error) { Object.assign(turn, previous); throw error; }
+    if (previous.resultFilename) results.remove(previous.resultFilename);
     sendJSON(res, 200, publicTurn(turn));
   }
 
@@ -510,12 +537,12 @@ function createConversationTurnRelay({
     if (turn.resultFilename) results.remove(turn.resultFilename);
   }
 
-  async function notifyTurnUpdated(turn) {
-    try {
-      await onTurnUpdated(turn);
-    } catch (error) {
+  function notifyTurnUpdated(turn) {
+    // Delivery observes an immutable transition and never owns execution progress.
+    const snapshot = structuredClone(turn);
+    Promise.resolve().then(() => onTurnUpdated(snapshot)).catch(error => {
       log(`conversation turn activity update failed: ${String(error?.message ?? error)}`);
-    }
+    });
   }
 
   return { route, diagnosticsCapability, purge };
