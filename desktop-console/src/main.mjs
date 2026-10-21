@@ -3,8 +3,9 @@ import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import QRCode from "qrcode";
-import { parsePairingLink, readInstalledVersion, readPort, validateHostRequest } from "./runtime.mjs";
+import { parsePairingLink, readPort, validateHostRequest } from "./runtime.mjs";
 import { createHostRequest } from "./host-request.mjs";
+import { createInstallationLifecycle } from "./installation-lifecycle.mjs";
 import { waitForCoreRelease } from "./core-release.mjs";
 import { waitForContainerRuntime } from "./container-readiness.mjs";
 import { verifyConnectionAddress } from "./connection-address.mjs";
@@ -21,6 +22,13 @@ const platform = createDesktopPlatform({
 const hostCoreRoot = app.isPackaged
   ? join(process.resourcesPath, "HostCore")
   : resolve(sourceRoot, "..", ".host-core");
+const installation = createInstallationLifecycle({
+  platform,
+  readRelease: async () => JSON.parse(await readFile(join(hostCoreRoot, "release.json"), "utf8")),
+  consoleVersion: app.getVersion(), hostCoreRoot,
+  readInstalled: () => readFile(platform.installEnvPath, "utf8"),
+  readManifest: signal => requestHost("GET", "/.well-known/aru.json", undefined, false, {}, signal),
+});
 let mainWindow;
 let containerSetupAttempt;
 
@@ -92,7 +100,7 @@ function registerIPC() {
     });
   });
   ipcMain.handle("host:bootstrap", async () => {
-    await ensureHostInstalled();
+    await installation.ensure();
     const manifest = await requestHost("GET", "/.well-known/aru.json", undefined, false);
     let credential = await platform.readCredential();
     if (!credential) credential = await pairConsole();
@@ -137,12 +145,8 @@ function registerIPC() {
     margin: 1, width: 360, color: { dark: "#4f4869", light: "#00000000" },
   }));
   ipcMain.handle("host:service", async (_event, action) => {
-    const previous = await requestHost("GET", "/.well-known/aru.json", undefined, false, {}, AbortSignal.timeout(3_000)).catch(() => null);
-    if (action === "start" || action === "restart") await platform.validateState(hostCoreRoot);
-    if (action === "start") await platform.startService();
-    else if (action === "restart") await platform.restartService();
-    else throw new Error("Unsupported service action");
-    await waitForCoreRelease(signal => requestHost("GET", "/.well-known/aru.json", undefined, false, {}, signal), { version: app.getVersion(), serverId: previous?.serverId });
+    if (action !== "start" && action !== "restart") throw new Error("Unsupported service action");
+    await installation.ensure({ restart: action === "restart" });
     return true;
   });
   ipcMain.handle("host:uninstall", async () => {
@@ -158,34 +162,6 @@ function registerIPC() {
   });
 }
 
-async function ensureHostInstalled() {
-  const release = JSON.parse(await readFile(join(hostCoreRoot, "release.json"), "utf8"));
-  if (release.schema !== "aru.host.release.v1" || release.version !== app.getVersion()) {
-    throw new Error("The bundled Host Core does not match this Console release");
-  }
-  const previous = await requestHost("GET", "/.well-known/aru.json", undefined, false, {}, AbortSignal.timeout(3_000)).catch(() => null);
-  let installedVersion = null;
-  try { installedVersion = readInstalledVersion(await readFile(platform.installEnvPath, "utf8")); } catch {}
-  if (installedVersion !== release.version || !platform.hostInstalled()) {
-    await platform.runInstaller(hostCoreRoot, release.version);
-  } else {
-    await platform.validateState(hostCoreRoot);
-    await platform.startService();
-    const running = await requestHost("GET", "/.well-known/aru.json", undefined, false, {}, AbortSignal.timeout(3_000)).catch(() => null);
-    if (running && running.releaseVersion !== release.version) await platform.restartService();
-  }
-  const verify = () => waitForCoreRelease(signal => requestHost("GET", "/.well-known/aru.json", undefined, false, {}, signal),
-    { version: release.version, serverId: previous?.serverId });
-  try { await verify(); }
-  catch (error) {
-    // A same-version receipt can survive an incomplete old installation. Repair
-    // only a responding, wrong-release Core; identity and connection failures
-    // are not permission to reinstall or accept another Host.
-    if (error.code !== "core_release_mismatch" || installedVersion !== release.version) throw error;
-    await platform.runInstaller(hostCoreRoot, release.version);
-    await verify();
-  }
-}
 
 async function pairConsole() {
   const link = await issuePairingLink();

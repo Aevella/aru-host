@@ -596,9 +596,9 @@ if [[ -z "$INSTALL_ROOT" && "$BASE_ROOT" == "$default_base_root" ]]; then
 fi
 
 start_instance() {
-  launchctl bootstrap "$(launch_domain)" "$LAUNCH_AGENT"
-  launchctl enable "$(launch_domain)/$LAUNCH_LABEL"
-  launchctl kickstart -k "$(launch_domain)/$LAUNCH_LABEL"
+  launchctl bootstrap "$(launch_domain)" "$LAUNCH_AGENT" || return 1
+  launchctl enable "$(launch_domain)/$LAUNCH_LABEL" || return 1
+  launchctl kickstart -k "$(launch_domain)/$LAUNCH_LABEL" || return 1
   local attempt
   for attempt in {1..120}; do
     if curl -fsS "http://127.0.0.1:$PORT/.well-known/aru.json" >/dev/null 2>&1; then
@@ -631,9 +631,11 @@ if [[ "$SKIP_START" != "true" ]]; then
     else
       rm -f "$LAUNCH_AGENT"
     fi
+    recovery_outcome="first installation failed; no previous release exists"
     if [[ -n "$old_release" ]]; then
       ln -sfn "$old_release" "$CURRENT_LINK"
-      start_instance || true
+      if start_instance; then recovery_outcome="previous release restored and healthy"
+      else recovery_outcome="previous release selected but recovery health check failed"; fi
     else
       rm -f "$CURRENT_LINK"
     fi
@@ -643,7 +645,7 @@ if [[ "$SKIP_START" != "true" ]]; then
       rm -f "$PREVIOUS_LINK"
     fi
     rm -rf "$RELEASES_DIR/$release_id"
-    die "new release failed its local manifest health check; previous release restored when available"
+    die "new release failed activation; $recovery_outcome"
   fi
 fi
 

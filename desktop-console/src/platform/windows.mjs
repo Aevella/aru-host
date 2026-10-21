@@ -66,7 +66,20 @@ export function createWindowsPlatform({
     nodeEnvPath: join(instanceRoot, "config", "node.env"),
     installEnvPath,
 
-    hostInstalled() {
+    async hostInstalled() {
+      // A same-version file receipt can survive a failed task registration.
+      // Enumeration failures are unreadable state, never permission to reinstall.
+      const { stdout } = await runPowerShellCommand([
+        "$ErrorActionPreference='Stop'",
+        `$t=Get-ScheduledTask -ErrorAction Stop | Where-Object { $_.TaskName -eq ${psQuote(taskName)} -and $_.TaskPath -eq '\\' }`,
+        "if(!$t){[Console]::Out.Write('missing');exit 0}",
+        `$runner=${psQuote(join(currentRoot, "run-node.ps1"))}`,
+        `$config=${psQuote(join(instanceRoot, "config", "node.env"))}`,
+        "if(@($t.Actions).Count -ne 1 -or !$t.Actions[0].Arguments.Contains($runner) -or !$t.Actions[0].Arguments.Contains($config)){throw 'Host task belongs to a different installation; preserve it and select the correct installation'}",
+        "[Console]::Out.Write('ready')",
+      ].join('; '));
+      if (stdout.trim() === "missing") return false;
+      if (stdout.trim() !== "ready") throw new Error("Host task inspection returned an invalid result");
       return fileExists(controlScript);
     },
 

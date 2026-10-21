@@ -39,7 +39,7 @@ export function createLinuxPlatform({
     installEnvPath: join(instanceRoot, "config", "install.env"),
 
     hostInstalled() {
-      return fileExists(controlPath);
+      return fileExists(controlPath) && fileExists(join(env.XDG_CONFIG_HOME ?? join(homeDir, ".config"), "systemd", "user", unitName));
     },
 
     async runInstaller(hostCoreRoot, releaseVersion) {

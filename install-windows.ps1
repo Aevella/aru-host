@@ -467,8 +467,11 @@ try {
       $expectedVersion = (Get-Content -LiteralPath $activeMetadata -Raw -Encoding UTF8 | ConvertFrom-Json).version
     }
     $script:lastProbeFailure = "Host did not become ready"
-    try { Start-ScheduledTask -TaskName $taskName }
-    catch { $script:lastProbeFailure = "Scheduled Task start failed: $($_.Exception.Message)"; return $false }
+    try {
+      RegisterHostTask
+      Start-ScheduledTask -TaskName $taskName
+    }
+    catch { $script:lastProbeFailure = "Scheduled Task registration/start failed: $($_.Exception.Message)"; return $false }
     for ($attempt = 0; $attempt -lt 60; $attempt++) {
       try {
         $live = Invoke-RestMethod -UseBasicParsing -Uri "http://127.0.0.1:$Port/.well-known/aru.json" -TimeoutSec 2
@@ -489,7 +492,6 @@ try {
   }
 
   if (-not $SkipStart) {
-    RegisterHostTask
     if (-not (StartHostAndProbe)) {
       $activationFailure = $script:lastProbeFailure
       $recoveryOutcome = "first installation failed; no previous release exists"
@@ -499,11 +501,12 @@ try {
         $backup = Join-Path $rollbackTemp $name
         if (Test-Path -LiteralPath $backup) {
           Copy-Item -LiteralPath $backup -Destination (Join-Path $configDir $name) -Force
+        } elseif ($name -eq "install.env") {
+          Remove-Item -LiteralPath $installEnv -Force -ErrorAction SilentlyContinue
         }
       }
       if ($oldRelease -and (Test-Path -LiteralPath (Join-Path $releasesDir $oldRelease))) {
         SetLink $currentLink (Join-Path $releasesDir $oldRelease) $currentPointer
-        RegisterHostTask
         if (StartHostAndProbe) {
           $recoveryOutcome = "previous release restored and healthy"
         } else {
