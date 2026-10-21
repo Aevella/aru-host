@@ -192,7 +192,8 @@ this is not a constant-time database index or a migration of all Host state.json
 
 Transactions are redo-only storage publication: persist the transaction, publish its
 record/index files and scheduler snapshot, then remove the journal. An in-process
-write failure blocks further store access until restart reconciliation. Legacy data
+write failure blocks further store access until the existing frozen transaction
+is safely replayed in the same process; startup also reconciles pending publication. Legacy data
 is copied completely before activation and retained as a recovery backup. This format
 works on Node 18 without adding a native SQLite dependency. The older experimental
 whole-Host SQLite branch requires Node 22.13+ and is archived separately; it is not
@@ -289,3 +290,14 @@ inventory and metadata lookup perform no OS IO; actual reads and explicit refres
 are awaited. `apns-push.mjs` owns its coalesced read and status projection. The
 server manifest consumes these snapshots through the existing collaborator and
 notification owners. No key is added to durable state or the projections.
+
+## Lifecycle entry consolidation (2026-10-22)
+
+`desktop-console/src/installation-lifecycle.mjs` owns Console activation coordination
+for bootstrap, start and restart. Platform installers retain installation truth and
+rollback; service inspection and live Core verification are required evidence.
+`src/conversation-relay/` owns notification-independent execution and result retention.
+The plugin supervisor owns per-plugin mutation admission and async container control;
+workspace jobs independently own cleanup/retry admission. No shared mutable lifecycle
+manager is introduced. See [the inventory](lifecycle-inventory-2026-10-22.md) for
+unchanged owners, focused proofs and outstanding platform acceptance.
