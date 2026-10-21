@@ -204,7 +204,7 @@ export function createPluginWorkshop({
     if (installed) {
       const abandonedRollbackDigest = installed.rollback?.manifest?.packageMode === "source-node"
         ? installed.rollback.manifest.image : null;
-      stopPlugin(installed);
+      await stopPlugin(installed);
       installed.rollback = {
         manifest: installed.manifest,
         grantedPermissions: installed.grantedPermissions,

@@ -208,7 +208,7 @@ mkdirSync(join(config.dataDir, "artifacts"), { recursive: true });
 normalizeLegacyHostConsoleDevices();
 const { persistWorkspaceArtifacts, persistDirectArtifact, artifactInventory, handleArtifactDownload, handleArtifactDelete, deleteArtifact, artifactExtension, languageForWorkspacePath } = createArtifactVault({ config, state: { get artifacts() { return state.artifacts; }, set artifacts(value) { state.artifacts = value; } }, saveState, sendJSON, HttpError, log, sha256Hex, ARTIFACT_EXTENSIONS, ARTIFACT_METADATA_SCHEMA });
 const { publicWorkspaceJobPolicy, handleWorkspaceJobPolicyUpdate, handleWorkspaceJobSubmit, executeWorkspaceJob, workspaceJob, publicWorkspaceJob, workspaceJobInventory, matchWorkspaceJobRoute, handleWorkspaceJobStatus, handleWorkspaceJobEvents, handleWorkspaceJobCancel, cancelWorkspaceJob, handleWorkspaceJobRetry, retryWorkspaceJob, recoverInterruptedJobs } = createWorkspaceJobs({ config, state: { get jobs() { return state.jobs; }, set jobs(value) { state.jobs = value; }, get jobPolicy() { return state.jobPolicy; }, set jobPolicy(value) { state.jobPolicy = value; } }, saveState, sendJSON, readJSONBody, HttpError, log, sha256Hex, persistWorkspaceArtifacts, artifactExtension, CONTAINER_STOP_GRACE_SECONDS, WORKSPACE_JOB_EVENTS_SCHEMA, WORKSPACE_JOB_INVENTORY_SCHEMA, WORKSPACE_JOB_POLICY_SCHEMA, WORKSPACE_JOB_SCHEMA, WORKSPACE_RESULT_SCHEMA, WORKSPACE_RUNTIMES, WORKSPACE_RUN_SCHEMA });
-const recoveredJobIds = recoverInterruptedJobs();
+const recoveredJobIds = await recoverInterruptedJobs();
 const nodeControl = createNodeControl({
   config,
   state,
@@ -518,7 +518,7 @@ async function route(req, res) {
     return handleWorkspaceJobCancel(res, jobRoute.jobId, requireDevice(req));
   }
   if (jobRoute && req.method === "POST" && jobRoute.action === "retry") {
-    return handleWorkspaceJobRetry(res, jobRoute.jobId, requireDevice(req));
+    return await handleWorkspaceJobRetry(res, jobRoute.jobId, requireDevice(req));
   }
   throw new HttpError(404, "route.unknown", "unknown route");
 }

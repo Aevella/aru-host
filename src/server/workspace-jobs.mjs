@@ -1,6 +1,8 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { spawn, spawnSync } from "node:child_process";
+import { spawn, execFile } from "node:child_process";
+import { promisify } from "node:util";
+const runContainerControl = promisify(execFile);
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
 export function createWorkspaceJobs({ config, state, saveState, sendJSON, readJSONBody, HttpError, log, sha256Hex, persistWorkspaceArtifacts, artifactExtension, CONTAINER_STOP_GRACE_SECONDS, WORKSPACE_JOB_EVENTS_SCHEMA, WORKSPACE_JOB_INVENTORY_SCHEMA, WORKSPACE_JOB_POLICY_SCHEMA, WORKSPACE_JOB_SCHEMA, WORKSPACE_RESULT_SCHEMA, WORKSPACE_RUNTIMES, WORKSPACE_RUN_SCHEMA }) {
@@ -261,17 +263,19 @@ function cancelWorkspaceJob(jobId, device) {
   return publicWorkspaceJob(job, true);
 }
 
-function handleWorkspaceJobRetry(res, jobId, device) {
-  const next = retryWorkspaceJob(jobId, device);
+async function handleWorkspaceJobRetry(res, jobId, device) {
+  const next = await retryWorkspaceJob(jobId, device);
   sendJSON(res, 202, next);
 }
 
-function retryWorkspaceJob(jobId, device) {
+async function retryWorkspaceJob(jobId, device) {
   const previous = workspaceJob(jobId);
   if (!previous) throw new HttpError(404, "job.unknown", "unknown workspace job");
   if (!["failed", "cancelled", "timed_out"].includes(previous.state)) {
     throw new HttpError(409, "job.retry_not_allowed", "only failed, cancelled, or timed-out jobs can be retried");
   }
+  try { await removeStaleJobContainer(previous.jobId); }
+  catch { throw new HttpError(503, "workspace.recovery_cleanup_failed", "Previous workspace container removal is not confirmed; repair the engine and retry"); }
   const run = {
     ...previous.input,
     runId: `retry_${randomUUID()}`,
@@ -543,12 +547,16 @@ function workspaceJobContainerName(jobId) {
 function stopActiveJobProcess(jobId) {
   const active = activeJobProcesses.get(jobId);
   if (!active) return;
-  spawnSync(active.containerRuntime, [
+  // Container control cannot block every HTTP request while an engine stalls.
+  // The local runner is terminated independently; cancelled output is never published.
+  void runContainerControl(active.containerRuntime, [
     "stop", "--time", String(CONTAINER_STOP_GRACE_SECONDS), active.containerName,
-  ], { stdio: "ignore" });
+  ], { timeout: Math.max(30_000, (CONTAINER_STOP_GRACE_SECONDS + 10) * 1000) })
+    .catch(() => log(`workspace job ${jobId} container stop was not confirmed`));
   terminateChildProcess(active.child, "SIGTERM");
   setTimeout(() => terminateChildProcess(active.child, "SIGKILL"),
              CONTAINER_STOP_GRACE_SECONDS * 1000);
+
 }
 
 function terminateChildProcess(child, signal) {
@@ -560,11 +568,15 @@ function terminateChildProcess(child, signal) {
   }
 }
 
-function removeStaleJobContainer(jobId) {
+async function removeStaleJobContainer(jobId) {
   if (!config.containerRuntime) return;
-  spawnSync(config.containerRuntime, ["rm", "-f", workspaceJobContainerName(jobId)], {
-    stdio: "ignore",
-  });
+  try {
+    await runContainerControl(config.containerRuntime, ["rm", "-f", workspaceJobContainerName(jobId)], { timeout: 30_000 });
+  } catch {
+    const remaining = await runContainerControl(config.containerRuntime,
+      ["ps", "-a", "--filter", `name=^/${workspaceJobContainerName(jobId)}$`, "--format", "{{.Names}}"], { timeout: 30_000 });
+    if (remaining.stdout.trim()) throw new Error("Previous workspace container is still present");
+  }
 }
 
 function readWorkspaceOutputs(root, excludedPath) {
@@ -604,13 +616,20 @@ function readWorkspaceOutputs(root, excludedPath) {
   return { files, binaryFiles };
 }
 
-function recoverInterruptedJobs() {
+async function recoverInterruptedJobs() {
   const interrupted = state.jobs.filter((job) =>
     ["queued", "preparing", "running"].includes(job.state));
   const recoveredJobIds = [];
   for (const job of interrupted) {
     job.events ??= [];
-    removeStaleJobContainer(job.jobId);
+    try { await removeStaleJobContainer(job.jobId); }
+    catch {
+      job.failureCode = "workspace.recovery_cleanup_failed";
+      job.failureMessage = "Previous workspace container removal could not be confirmed; repair the container engine before retrying";
+      job.completedAt = Date.now(); job.state = "failed";
+      appendWorkspaceJobEvent(job, "failed", job.failureMessage);
+      continue;
+    }
     if (job.maximumRuntimeSeconds !== null && job.maximumRuntimeSeconds !== undefined &&
         job.startedAt !== null && job.startedAt !== undefined) {
       job.deadlineAt ??= job.startedAt + job.maximumRuntimeSeconds * 1000;
