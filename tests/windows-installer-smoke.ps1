@@ -41,6 +41,35 @@ try {
   }
   Write-Host "ok: $($modules.Count) Host Core modules parse"
 
+  # Register failure occurs before Core start: preserve data and allow the same
+  # installer to succeed once the external permission condition is repaired.
+  $registrationProbe = Join-Path $baseRoot "registration-failure.ps1"
+  New-Item -ItemType Directory -Force -Path $baseRoot | Out-Null
+  $escapedInstaller = $installer.Replace("'", "''")
+  $escapedRoot = $baseRoot.Replace("'", "''")
+  $escapedSource = $selfhost.Replace("'", "''")
+  [IO.File]::WriteAllText($registrationProbe, @"
+# Load the ScheduledTasks functions before overriding one: otherwise module
+# auto-loading from New-ScheduledTaskAction replaces the injected function.
+Import-Module ScheduledTasks -ErrorAction Stop
+function global:Register-ScheduledTask {
+  [IO.File]::WriteAllText('$escapedRoot\registration-denied.marker', 'injected')
+  throw 'synthetic registration denied'
+}
+& '$escapedInstaller' -Instance '$Instance' -BaseRoot '$escapedRoot' -Port $Port -SourceDir '$escapedSource'
+"@)
+  $savedPreference = $ErrorActionPreference
+  try {
+    $ErrorActionPreference = "Continue"
+    $registrationOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $registrationProbe 2>&1
+    $registrationCode = $LASTEXITCODE
+  } finally { $ErrorActionPreference = $savedPreference }
+  Check "registration denial was actually injected" (Test-Path (Join-Path $baseRoot "registration-denied.marker"))
+  Check "registration failure exits nonzero" ($registrationCode -ne 0)
+  Check "registration failure enters activation recovery" (($registrationOutput -join " ") -match "first\s+installation\s+failed")
+  Check "registration failure leaves no completed receipt" (-not (Test-Path (Join-Path $instanceRoot "config\install.env")))
+  Check "registration failure preserves data directory" (Test-Path (Join-Path $instanceRoot "data"))
+
   # 1. Fresh install with real task registration and health probe.
   & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer `
     -Instance $Instance -BaseRoot $baseRoot -Port $Port -DisplayName $unicodeLabel -SourceDir $selfhost

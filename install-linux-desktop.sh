@@ -369,8 +369,8 @@ chmod 0600 "$UNIT_PATH"
 ln -sfn "$CURRENT_LINK/aru-selfhostctl-linux" "$CONTROL_LINK"
 
 start_service() {
-  systemctl --user daemon-reload
-  systemctl --user enable --now "$UNIT_NAME"
+  systemctl --user daemon-reload || return 1
+  systemctl --user enable --now "$UNIT_NAME" || return 1
   for _ in {1..60}; do
     curl -fsS "http://127.0.0.1:$PORT/.well-known/aru.json" >/dev/null 2>&1 && return
     sleep 0.25
@@ -384,11 +384,15 @@ if [[ "$SKIP_START" != "true" ]] && ! start_service; then
   [[ -f "$ROLLBACK_TMP/node.env" ]] && cp -p "$ROLLBACK_TMP/node.env" "$NODE_ENV"
   [[ -f "$ROLLBACK_TMP/install.env" ]] && cp -p "$ROLLBACK_TMP/install.env" "$INSTALL_ENV"
   [[ -f "$ROLLBACK_TMP/$UNIT_NAME" ]] && cp -p "$ROLLBACK_TMP/$UNIT_NAME" "$UNIT_PATH"
-  if [[ -n "$old_release" ]]; then ln -sfn "$old_release" "$CURRENT_LINK"; start_service || true
+  recovery_outcome="first installation failed; no previous release exists"
+  if [[ -n "$old_release" ]]; then
+    ln -sfn "$old_release" "$CURRENT_LINK"
+    if start_service; then recovery_outcome="previous release restored and healthy"
+    else recovery_outcome="previous release selected but recovery health check failed"; fi
   else rm -f "$CURRENT_LINK"; fi
   if [[ -n "$old_previous" ]]; then ln -sfn "$old_previous" "$PREVIOUS_LINK"; else rm -f "$PREVIOUS_LINK"; fi
   rm -rf "$RELEASES_DIR/$release_id"
-  die "new release failed health check; previous release restored"
+  die "new release failed activation; $recovery_outcome"
 fi
 
 rm -rf "$ROLLBACK_TMP"; ROLLBACK_TMP=""

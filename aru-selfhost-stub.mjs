@@ -5,20 +5,21 @@ import * as node1 from 'node:os';
 import * as node2 from 'node:crypto';
 import * as node3 from 'node:fs';
 import * as node4 from 'node:child_process';
-import * as node5 from 'node:path';
-import * as node6 from 'node:timers/promises';
-import * as node7 from 'node:events';
-import * as node8 from 'node:http';
-import * as node9 from 'node:url';
-import * as node10 from './plugin-supervisor.mjs';
-import * as node11 from './source-plugin-runtime.mjs';
-import * as node12 from './collaborator-host.mjs';
-import * as node13 from './node-workspaces.mjs';
-import * as node14 from './node-control.mjs';
-import * as node15 from './backup-settings.mjs';
-import * as node16 from './conversation-turn-relay.mjs';
-import * as node17 from './apns-push.mjs';
-import * as node18 from './wake-bridge.mjs';
+import * as node5 from 'node:util';
+import * as node6 from 'node:path';
+import * as node7 from 'node:timers/promises';
+import * as node8 from 'node:events';
+import * as node9 from 'node:http';
+import * as node10 from 'node:url';
+import * as node11 from './plugin-supervisor.mjs';
+import * as node12 from './source-plugin-runtime.mjs';
+import * as node13 from './collaborator-host.mjs';
+import * as node14 from './node-workspaces.mjs';
+import * as node15 from './node-control.mjs';
+import * as node16 from './backup-settings.mjs';
+import * as node17 from './conversation-turn-relay.mjs';
+import * as node18 from './apns-push.mjs';
+import * as node19 from './wake-bridge.mjs';
 
 // src/server/container-readiness.mjs
 const module1 = (() => {
@@ -371,8 +372,10 @@ return { createMCPGateway };
 const module4 = (() => {
 const { randomBytes, randomUUID } = node2;
 const { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } = node3;
-const { spawn, spawnSync } = node4;
-const { isAbsolute, join, relative, resolve, sep } = node5;
+const { spawn, execFile } = node4;
+const { promisify } = node5;
+const runContainerControl = promisify(execFile);
+const { isAbsolute, join, relative, resolve, sep } = node6;
 const { tmpdir } = node1;
 function createWorkspaceJobs({ config, state, saveState, sendJSON, readJSONBody, HttpError, log, sha256Hex, persistWorkspaceArtifacts, artifactExtension, CONTAINER_STOP_GRACE_SECONDS, WORKSPACE_JOB_EVENTS_SCHEMA, WORKSPACE_JOB_INVENTORY_SCHEMA, WORKSPACE_JOB_POLICY_SCHEMA, WORKSPACE_JOB_SCHEMA, WORKSPACE_RESULT_SCHEMA, WORKSPACE_RUNTIMES, WORKSPACE_RUN_SCHEMA }) {
 const activeJobProcesses = new Map();
@@ -632,17 +635,19 @@ function cancelWorkspaceJob(jobId, device) {
   return publicWorkspaceJob(job, true);
 }
 
-function handleWorkspaceJobRetry(res, jobId, device) {
-  const next = retryWorkspaceJob(jobId, device);
+async function handleWorkspaceJobRetry(res, jobId, device) {
+  const next = await retryWorkspaceJob(jobId, device);
   sendJSON(res, 202, next);
 }
 
-function retryWorkspaceJob(jobId, device) {
+async function retryWorkspaceJob(jobId, device) {
   const previous = workspaceJob(jobId);
   if (!previous) throw new HttpError(404, "job.unknown", "unknown workspace job");
   if (!["failed", "cancelled", "timed_out"].includes(previous.state)) {
     throw new HttpError(409, "job.retry_not_allowed", "only failed, cancelled, or timed-out jobs can be retried");
   }
+  try { await removeStaleJobContainer(previous.jobId); }
+  catch { throw new HttpError(503, "workspace.recovery_cleanup_failed", "Previous workspace container removal is not confirmed; repair the engine and retry"); }
   const run = {
     ...previous.input,
     runId: `retry_${randomUUID()}`,
@@ -914,12 +919,16 @@ function workspaceJobContainerName(jobId) {
 function stopActiveJobProcess(jobId) {
   const active = activeJobProcesses.get(jobId);
   if (!active) return;
-  spawnSync(active.containerRuntime, [
+  // Container control cannot block every HTTP request while an engine stalls.
+  // The local runner is terminated independently; cancelled output is never published.
+  void runContainerControl(active.containerRuntime, [
     "stop", "--time", String(CONTAINER_STOP_GRACE_SECONDS), active.containerName,
-  ], { stdio: "ignore" });
+  ], { timeout: Math.max(30_000, (CONTAINER_STOP_GRACE_SECONDS + 10) * 1000) })
+    .catch(() => log(`workspace job ${jobId} container stop was not confirmed`));
   terminateChildProcess(active.child, "SIGTERM");
   setTimeout(() => terminateChildProcess(active.child, "SIGKILL"),
              CONTAINER_STOP_GRACE_SECONDS * 1000);
+
 }
 
 function terminateChildProcess(child, signal) {
@@ -931,11 +940,15 @@ function terminateChildProcess(child, signal) {
   }
 }
 
-function removeStaleJobContainer(jobId) {
+async function removeStaleJobContainer(jobId) {
   if (!config.containerRuntime) return;
-  spawnSync(config.containerRuntime, ["rm", "-f", workspaceJobContainerName(jobId)], {
-    stdio: "ignore",
-  });
+  try {
+    await runContainerControl(config.containerRuntime, ["rm", "-f", workspaceJobContainerName(jobId)], { timeout: 30_000 });
+  } catch {
+    const remaining = await runContainerControl(config.containerRuntime,
+      ["ps", "-a", "--filter", `name=^/${workspaceJobContainerName(jobId)}$`, "--format", "{{.Names}}"], { timeout: 30_000 });
+    if (remaining.stdout.trim()) throw new Error("Previous workspace container is still present");
+  }
 }
 
 function readWorkspaceOutputs(root, excludedPath) {
@@ -975,13 +988,22 @@ function readWorkspaceOutputs(root, excludedPath) {
   return { files, binaryFiles };
 }
 
-function recoverInterruptedJobs() {
+async function recoverInterruptedJobs() {
   const interrupted = state.jobs.filter((job) =>
     ["queued", "preparing", "running"].includes(job.state));
   const recoveredJobIds = [];
   for (const job of interrupted) {
     job.events ??= [];
-    removeStaleJobContainer(job.jobId);
+    try { await removeStaleJobContainer(job.jobId); }
+    catch {
+      if (!["queued", "preparing", "running"].includes(job.state)) continue;
+      job.failureCode = "workspace.recovery_cleanup_failed";
+      job.failureMessage = "Previous workspace container removal could not be confirmed; repair the container engine before retrying";
+      job.completedAt = Date.now(); job.state = "failed";
+      appendWorkspaceJobEvent(job, "failed", job.failureMessage);
+      continue;
+    }
+    if (!["queued", "preparing", "running"].includes(job.state)) continue;
     if (job.maximumRuntimeSeconds !== null && job.maximumRuntimeSeconds !== undefined &&
         job.startedAt !== null && job.startedAt !== undefined) {
       job.deadlineAt ??= job.startedAt + job.maximumRuntimeSeconds * 1000;
@@ -1020,7 +1042,7 @@ return { createWorkspaceJobs };
 const module5 = (() => {
 const { randomUUID } = node2;
 const { existsSync, readFileSync, rmSync, writeFileSync } = node3;
-const { extname, join } = node5;
+const { extname, join } = node6;
 function createArtifactVault({ config, state, saveState, sendJSON, HttpError, log, sha256Hex, ARTIFACT_EXTENSIONS, ARTIFACT_METADATA_SCHEMA }) {
 function persistWorkspaceArtifacts(binaryFiles, run, device, jobId = null) {
   if (binaryFiles.length === 0) return [];
@@ -1222,8 +1244,8 @@ const module7 = (() => {
 const { createDraftReferences } = module8;
 const { randomBytes, randomUUID, createHash } = node2;
 const { mkdirSync, readFileSync, writeFileSync, openSync, closeSync, readSync, fsyncSync, renameSync, unlinkSync, readdirSync, lstatSync } = node3;
-const { join } = node5;
-const { setImmediate : yieldEventLoop } = node6;
+const { join } = node6;
+const { setImmediate : yieldEventLoop } = node7;
 
 const digest = (value) => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
 const identity = (value) => typeof value === "string" && /^[a-zA-Z0-9_-]{1,128}$/.test(value);
@@ -1500,7 +1522,7 @@ return { createBackupSnapshotStore };
 const module6 = (() => {
 const { createHash } = node2;
 const { createBackupSnapshotStore } = module7;
-const { join } = node5;
+const { join } = node6;
 
 function createBackupSnapshotRoutes({ config, serverId, sendJSON, HttpError, applyRetention }) {
   let snapshotStore;
@@ -1595,8 +1617,8 @@ return { createBackupSnapshotRoutes };
 const module9 = (() => {
 const { randomUUID, createHash } = node2;
 const { createWriteStream, createReadStream, existsSync, renameSync, unlinkSync, statSync, openSync, closeSync, readSync } = node3;
-const { join, resolve, sep } = node5;
-const { once } = node7;
+const { join, resolve, sep } = node6;
+const { once } = node8;
 function createBackupVault({ config, state, displayName = () => config.displayName, saveState, sendJSON, HttpError, log, applyRetention, ENCRYPTED_PACKAGE_CONTENT_TYPE, ENCRYPTED_PACKAGE_MAGIC, ENCRYPTED_PACKAGE_VERSION, ENVELOPE_FORMAT, MAX_ENCRYPTED_PACKAGE_CHUNK_BYTES, MAX_ENCRYPTED_PACKAGE_HEADER_BYTES, VAULT_METADATA_SCHEMA }) {
 async function handleUpload(req, res, device) {
   const temporaryFile = join(resolve(config.dataDir, "packages"), `.upload-${randomUUID()}.tmp`);
@@ -2360,7 +2382,7 @@ const { createHostStateStore } = module11;
 // envelopes); workspace code only runs inside a hardened disposable container;
 // nothing here logs secrets after the initial pairing printout.
 
-const { createServer } = node8;
+const { createServer } = node9;
 const { createHash, randomBytes, randomUUID, timingSafeEqual } = node2;
 const {
   chmodSync,
@@ -2382,23 +2404,23 @@ const {
   unlinkSync,
   writeFileSync,
 } = node3;
-const { once } = node7;
+const { once } = node8;
 const { spawn, spawnSync } = node4;
-const { dirname, extname, isAbsolute, join, relative, resolve, sep } = node5;
+const { dirname, extname, isAbsolute, join, relative, resolve, sep } = node6;
 const { homedir, tmpdir } = node1;
-const { fileURLToPath } = node9;
-const { createPluginSupervisor } = node10;
-const { createSourcePluginRuntime } = node11;
-const { createCollaboratorHost } = node12;
-const { createNodeWorkspaceHost } = node13;
-const { createNodeControl } = node14;
-const { createBackupSettings } = node15;
+const { fileURLToPath } = node10;
+const { createPluginSupervisor } = node11;
+const { createSourcePluginRuntime } = node12;
+const { createCollaboratorHost } = node13;
+const { createNodeWorkspaceHost } = node14;
+const { createNodeControl } = node15;
+const { createBackupSettings } = node16;
 const {
   createConversationTurnRelay,
   SUPPORTED_CONVERSATION_TURN_PROTOCOLS,
-} = node16;
-const { createAPNsCredentialStore, createAPNsPushHost } = node17;
-const { createWakeBridge } = node18;
+} = node17;
+const { createAPNsCredentialStore, createAPNsPushHost } = node18;
+const { createWakeBridge } = node19;
 
 class HttpError extends Error {
   constructor(status, code, message, { issues = [], recovery = null } = {}) {
@@ -2529,7 +2551,6 @@ mkdirSync(join(config.dataDir, "artifacts"), { recursive: true });
 normalizeLegacyHostConsoleDevices();
 const { persistWorkspaceArtifacts, persistDirectArtifact, artifactInventory, handleArtifactDownload, handleArtifactDelete, deleteArtifact, artifactExtension, languageForWorkspacePath } = createArtifactVault({ config, state: { get artifacts() { return state.artifacts; }, set artifacts(value) { state.artifacts = value; } }, saveState, sendJSON, HttpError, log, sha256Hex, ARTIFACT_EXTENSIONS, ARTIFACT_METADATA_SCHEMA });
 const { publicWorkspaceJobPolicy, handleWorkspaceJobPolicyUpdate, handleWorkspaceJobSubmit, executeWorkspaceJob, workspaceJob, publicWorkspaceJob, workspaceJobInventory, matchWorkspaceJobRoute, handleWorkspaceJobStatus, handleWorkspaceJobEvents, handleWorkspaceJobCancel, cancelWorkspaceJob, handleWorkspaceJobRetry, retryWorkspaceJob, recoverInterruptedJobs } = createWorkspaceJobs({ config, state: { get jobs() { return state.jobs; }, set jobs(value) { state.jobs = value; }, get jobPolicy() { return state.jobPolicy; }, set jobPolicy(value) { state.jobPolicy = value; } }, saveState, sendJSON, readJSONBody, HttpError, log, sha256Hex, persistWorkspaceArtifacts, artifactExtension, CONTAINER_STOP_GRACE_SECONDS, WORKSPACE_JOB_EVENTS_SCHEMA, WORKSPACE_JOB_INVENTORY_SCHEMA, WORKSPACE_JOB_POLICY_SCHEMA, WORKSPACE_JOB_SCHEMA, WORKSPACE_RESULT_SCHEMA, WORKSPACE_RUNTIMES, WORKSPACE_RUN_SCHEMA });
-const recoveredJobIds = recoverInterruptedJobs();
 const nodeControl = createNodeControl({
   config,
   state,
@@ -2734,9 +2755,11 @@ server.listen(config.port, config.listenHost, () => {
   console.log(pairingURL);
   console.log("");
   console.log("No secrets are logged past this point.");
-  for (const jobId of recoveredJobIds) {
-    setImmediate(() => executeWorkspaceJob(jobId));
-  }
+  // A stalled container engine must not prevent the Host from accepting
+  // connections, diagnostics or unrelated work during recovery.
+  void recoverInterruptedJobs().then(jobIds => {
+    for (const jobId of jobIds) setImmediate(() => executeWorkspaceJob(jobId));
+  }).catch(error => log(`workspace recovery failed: ${error?.message ?? error}`));
   setImmediate(() => pluginSupervisor.reconcileInstalledPlugins()
     .catch((error) => log(`plugin reconciliation failed: ${error?.message ?? error}`)));
 });
@@ -2839,7 +2862,7 @@ async function route(req, res) {
     return handleWorkspaceJobCancel(res, jobRoute.jobId, requireDevice(req));
   }
   if (jobRoute && req.method === "POST" && jobRoute.action === "retry") {
-    return handleWorkspaceJobRetry(res, jobRoute.jobId, requireDevice(req));
+    return await handleWorkspaceJobRetry(res, jobRoute.jobId, requireDevice(req));
   }
   throw new HttpError(404, "route.unknown", "unknown route");
 }

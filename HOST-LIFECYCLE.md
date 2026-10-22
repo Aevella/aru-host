@@ -445,3 +445,19 @@ categories. A forced credential probe that shares a failed inventory attempt
 then performs one coalesced forced retry. Model execution reads only its selected
 profile, awaiting legacy adoption when applicable without refreshing every key.
 Real subprocess timeout and non-timeout counterexamples cover this boundary.
+
+2026-10-22 owner inventory and closure: see
+[the lifecycle inventory](docs/lifecycle-inventory-2026-10-22.md) for every reviewed
+flow, its entrypoint and proof boundary. Desktop bootstrap/start/restart now share
+one installation coordinator; Windows admission inspects the task as well as files,
+and registration failure enters activation recovery. Unix service-command failure
+cannot be hidden by an older responding process. Relay notifications no longer
+block execution, accepted cancellation prevents dispatch, partial results survive
+reopen, and final-publication retry never replays the provider. Plugin and workspace
+container control is asynchronous; unconfirmed removal cannot silently become a
+successful uninstall or automatic job restart. Source/local proofs are distinct
+from Windows CI, customer devices and release distribution.
+Workspace startup reconciliation runs after the HTTP listener is available, so a
+stalled engine cannot block connection/diagnostics for unrelated work. A cancellation
+while cleanup is awaiting the engine remains cancelled when cleanup later completes.
+The focused cleanup-isolation and late-cancellation tests pass locally.
