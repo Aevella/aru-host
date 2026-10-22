@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.38.0
+
+- Unify desktop installation admission and activation recovery.
+- Decouple relay execution from notification and retain recoverable results.
+- Keep container control asynchronous and verify cleanup before recovery.
+- Serve Host while workspace recovery waits, preserving concurrent cancellation.
+- See [upgrade instructions and verification boundaries](docs/releases/0.38.0.md).
+
 ## 0.37.0
 
 - Resume interrupted conversation attachments from durable chunks without blocking retries behind an old connection.
