@@ -346,3 +346,14 @@ and success without a diagnostic read. No real engine hang, installer release or
 reporter-machine recovery was exercised. An unconfigured service still requires
 its actual configuration mismatch to be identified; these changes do not claim
 to repair all such mismatches.
+
+## Mobile delivery text boundary (2026-10-24)
+
+`src/host/assistant-delivery-content.mjs` removes only standalone timestamp JSON
+lines matching the four fields emitted by the Host request projection. The mobile
+replica settlement owner applies it before creating a new durable phone delivery;
+notification previews consume that same delivery. Original conversation messages
+and execution evidence remain intact, and existing saved deliveries are not rewritten.
+Fenced/indented examples, malformed or unknown envelopes, and thought prose remain
+unchanged. This is not a general reasoning-channel parser. Delivery identity and
+restart reconciliation remain owned by the existing replica ledger.

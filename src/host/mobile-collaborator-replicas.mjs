@@ -1,5 +1,6 @@
 export const replicaStorageVersion = 2;
 import { createReplicaRecordStore } from "./replica-record-store.mjs";
+import { assistantDeliveryContent } from "./assistant-delivery-content.mjs";
 import { randomUUID } from "node:crypto";
 import {
   chmodSync,
@@ -484,7 +485,7 @@ export function createMobileCollaboratorReplicaHost({
       rule.inFlightRuleVersion = null;
     }
     if (event.outcome === "completed") {
-      const assistantContent = String(event.assistantMessage?.content ?? "").trim();
+      const assistantContent = assistantDeliveryContent(event.assistantMessage?.content);
       if (assistantContent) {
         const delivery = {
           schema: DELIVERY_SCHEMA,

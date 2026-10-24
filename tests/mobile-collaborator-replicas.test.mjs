@@ -21,6 +21,7 @@ test("computer collaborator reads a phone replica without owning it and Host set
   let clock = 1_000;
   let triggered = null;
   let response = null;
+  const delivered = [];
   const collaborators = new Map([
     ["hostcol_reader", { collaboratorId: "hostcol_reader", displayName: "Computer Aru", driverId: "codex" }],
     ["hostcol_other", { collaboratorId: "hostcol_other", displayName: "Other", driverId: "codex" }],
@@ -35,6 +36,7 @@ test("computer collaborator reads a phone replica without owning it and Host set
       if (!collaborator) throw new HttpError(404, "unknown", "unknown collaborator");
       return collaborator;
     },
+    onDelivery: async event => delivered.push(event.mobileDelivery),
     maximumRequestBytes: 64 * 1024 * 1024,
     trigger(executor, replica, rule, deliveryId) {
       triggered = { executor, replica, rule, deliveryId };
@@ -125,7 +127,7 @@ test("computer collaborator reads a phone replica without owning it and Host set
       ruleVersion: "rule-version-1",
       deliveryId: triggered.deliveryId,
     },
-    assistantMessage: { content: "I am here." },
+    assistantMessage: { content: '<message_meta>{"sent_at":"2026-10-24T01:00:00.000Z","sent_at_unix_ms":1792803600000,"updated_at":"2026-10-24T01:00:00.000Z","updated_at_unix_ms":1792803600000}</message_meta>\nI am here.' },
   });
   await host.route(
     { method: "GET", url: "/aru/v1/mobile-collaborator-replicas/phone_aru/deliveries?epoch=1" },
@@ -135,6 +137,7 @@ test("computer collaborator reads a phone replica without owning it and Host set
   );
   assert.equal(response.value.deliveries.length, 1);
   assert.equal(response.value.deliveries[0].assistantContent, "I am here.");
+  assert.equal(delivered[0].assistantContent, "I am here.");
   assert.equal(response.value.deliveries[0].baseMessageId, "phone:message/part.1");
   assert.equal(response.value.deliveries[0].ruleVersion, "rule-version-1");
   assert.deepEqual(response.value.deliveries[0].basisMessages, replica.conversations[0].messages);
@@ -518,7 +521,7 @@ test(`saved delivery survives notification failure, restart and duplicate ${disp
   assert.match(triggered[0].deliveryId, /^mobiledelivery_/);
 
 
-  const event = { outcome: "completed", assistantMessage: { content: "durable reply" },
+  const event = { outcome: "completed", assistantMessage: { content: '<message_meta>{"sent_at":"2026-10-24T01:00:00.000Z","sent_at_unix_ms":1792803600000,"updated_at":"2026-10-24T01:00:00.000Z","updated_at_unix_ms":1792803600000}</message_meta>\ndurable reply' },
     turn: { source: "mobile-replica-proactive", sourceCollaboratorId: "phone_aru",
       executionEpoch: 1, ruleId: "rule_one", deliveryId: triggered[0].deliveryId,
       sourceConversationId: "phone_conversation", basisMessages: [] } };
