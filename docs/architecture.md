@@ -357,3 +357,13 @@ and execution evidence remain intact, and existing saved deliveries are not rewr
 Fenced/indented examples, malformed or unknown envelopes, and thought prose remain
 unchanged. This is not a general reasoning-channel parser. Delivery identity and
 restart reconciliation remain owned by the existing replica ledger.
+
+## Direct API tool reasoning continuity (2026-10-24)
+
+The OpenAI-compatible driver retains `reasoning_content` in the current turn's
+protocol messages: SSE fragments accumulate without entering agent-message deltas,
+and JSON responses preserve the same field when appending tool results. Absent and
+explicitly empty values remain distinct. Each startTurn owns a fresh message list;
+no reasoning state is shared between turns or profiles. This repairs same-turn tool
+continuation only, not durable historical reasoning restoration. Synthetic JSON/SSE
+fixtures cover two continuations, dialogue separation, and a second fresh turn.

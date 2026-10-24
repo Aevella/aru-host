@@ -297,6 +297,7 @@ async function modelResponse(response, protocol, onTextDelta) {
 async function streamOpenAI(response, onTextDelta) {
   const toolCalls = new Map();
   let content = "";
+  let reasoningContent;
   let truncated = false;
   await consumeSSE(response, async (data) => {
     if (data === "[DONE]") return;
@@ -304,6 +305,10 @@ async function streamOpenAI(response, onTextDelta) {
     if (payload.error) throw new Error(payload.error.message ?? "模型 API 流式请求失败");
     if (payload?.choices?.[0]?.finish_reason === "length") truncated = true;
     const delta = payload?.choices?.[0]?.delta ?? {};
+    // Protocol continuity belongs to the next model request, never dialogue.
+    if (typeof delta.reasoning_content === "string") {
+      reasoningContent = (reasoningContent ?? "") + delta.reasoning_content;
+    }
     if (typeof delta.content === "string" && delta.content) {
       content += delta.content;
       await onTextDelta(delta.content);
@@ -334,6 +339,7 @@ async function streamOpenAI(response, onTextDelta) {
     rawMessage: {
       role: "assistant",
       content: content || null,
+      ...(reasoningContent === undefined ? {} : { reasoning_content: reasoningContent }),
       tool_calls: normalizedCalls.map((call) => ({
         id: call.id,
         type: "function",
@@ -548,6 +554,8 @@ function appendOpenAIToolRound(messages, result, toolResults) {
     {
       role: "assistant",
       content: result.rawMessage.content ?? null,
+      ...(typeof result.rawMessage.reasoning_content === "string"
+        ? { reasoning_content: result.rawMessage.reasoning_content } : {}),
       tool_calls: result.rawMessage.tool_calls ?? [],
     },
     ...toolResults.map((item) => ({
