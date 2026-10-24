@@ -1,4 +1,5 @@
 const SAFE_PATHS = [
+  ["DELETE", /^\/aru\/v1\/hosted-collaborators\/hostcol_[A-Fa-f0-9-]+$/],
   ["GET", /^\/\.well-known\/aru\.json$/],
   ["GET", /^\/aru\/v1\/(diagnostics|node-settings|devices|backups|backups\/settings|plugins|plugin-workshop\/drafts|node-workspaces|jobs|jobs\/policy|artifacts|agent-drivers|hosted-collaborators|provider-profiles)$/],
   ["POST", /^\/aru\/v1\/(pair|devices\/revoke|agent-drivers\/refresh|hosted-collaborators|provider-profiles|plugin-workshop\/(validate|apply)|plugin-workshop\/drafts|node-workspaces)$/],

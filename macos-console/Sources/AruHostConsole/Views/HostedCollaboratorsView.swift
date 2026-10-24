@@ -6,6 +6,8 @@ struct HostedCollaboratorsView: View {
     @State private var presentsCreateCollaborator = false
     @State private var selectedCollaborator: HostedCollaborator?
     @State private var bindingCollaborator: HostedCollaborator?
+    @State private var deleteCandidate: HostedCollaborator?
+    @State private var mutationError: String?
 
     var body: some View {
         ScrollView {
@@ -14,7 +16,7 @@ struct HostedCollaboratorsView: View {
                     title: L10n.computerCollaborators,
                     subtitle: L10n.collaboratorsSubtitle
                 )
-                if let error = runtime.sectionErrors[.collaborators] {
+                if let error = mutationError ?? runtime.sectionErrors[.collaborators] {
                     SectionErrorBanner(message: error)
                 }
 
@@ -38,6 +40,25 @@ struct HostedCollaboratorsView: View {
                 collaborator: collaborator,
                 providerProfiles: providerRuntime.profiles
             )
+        }
+        .confirmationDialog(
+            L10n.deleteCollaborator,
+            isPresented: Binding(get: { deleteCandidate != nil },
+                                 set: { if !$0 { deleteCandidate = nil } }),
+            titleVisibility: .visible, presenting: deleteCandidate
+        ) { collaborator in
+            Button("\(L10n.deleteCollaborator) · \(collaborator.displayName)", role: .destructive) {
+                deleteCandidate = nil
+                Task {
+                    do {
+                        try await runtime.deleteCollaborator(collaborator)
+                        mutationError = nil
+                    } catch { mutationError = error.localizedDescription }
+                }
+            }
+            Button(L10n.cancel, role: .cancel) { deleteCandidate = nil }
+        } message: { _ in
+            Text(L10n.deleteCollaboratorMessage)
         }
         .task {
             while !Task.isCancelled {
@@ -130,6 +151,15 @@ struct HostedCollaboratorsView: View {
                                 }
                                 .buttonStyle(StudioIconButtonStyle())
                                 .help(L10n.editCollaboratorDriver)
+                                Button(role: .destructive) {
+                                    deleteCandidate = collaborator
+                                } label: {
+                                    Image(systemName: "trash").frame(width: 32, height: 32)
+                                }
+                                .buttonStyle(StudioIconButtonStyle())
+                                .help(L10n.deleteCollaborator)
+                                .accessibilityLabel(L10n.deleteCollaborator)
+                                .disabled(runtime.mutatingCollaboratorIds.contains(collaborator.id))
                             }
                             if collaborator.id != runtime.collaborators.last?.id {
                                 Divider().padding(.leading, 46).overlay(Color.white.opacity(0.40))

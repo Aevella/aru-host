@@ -507,3 +507,7 @@ extension HostedCollaboratorInventory {
         }
     }
 }
+
+struct DeleteHostedCollaboratorBody: Encodable {
+    let expectedRevision: Int
+}

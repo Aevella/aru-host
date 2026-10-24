@@ -1,6 +1,8 @@
 import Foundation
 
 enum L10n {
+    static let deleteCollaborator = value("collaborator.delete")
+    static let deleteCollaboratorMessage = value("collaborator.delete.message")
     static let connectionPrimary = value("node.connections.primary")
     static let containerChecking = value("container.checking")
     static let containerEngineUnavailable = value("container.engine.unavailable")

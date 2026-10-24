@@ -312,6 +312,19 @@ final class HostConsoleRuntime {
         lastUpdated = Date()
     }
 
+    func deleteCollaborator(_ collaborator: HostedCollaborator) async throws {
+        guard !mutatingCollaboratorIds.contains(collaborator.id) else { return }
+        mutatingCollaboratorIds.insert(collaborator.id)
+        defer { mutatingCollaboratorIds.remove(collaborator.id) }
+        let body = try JSONEncoder().encode(DeleteHostedCollaboratorBody(expectedRevision: collaborator.revision))
+        let _: HostedCollaborator = try await request(
+            "/aru/v1/hosted-collaborators/\(collaborator.id)",
+            method: "DELETE", body: body, authenticated: true)
+        collaborators.removeAll { $0.id == collaborator.id }
+        sectionErrors[.collaborators] = nil
+        lastUpdated = Date()
+    }
+
     func updateCollaboratorDriver(
         for collaborator: HostedCollaborator,
         driverId: String,

@@ -21,8 +21,9 @@ const devices = {
     { deviceId: "phone", label: "示例手机", issuedAt: "2026-07-24T07:25:00Z", isCurrent: false, revokedAt: null },
   ],
 };
+let collaboratorRemoved = false;
 const collaborator = {
-  collaboratorId: "root_example",
+  collaboratorId: "hostcol_01234567-89ab-cdef",
   displayName: "Example Collaborator",
   driverId: "codex",
   providerProfileId: null,
@@ -68,6 +69,11 @@ window.aruHost = Object.freeze({
     return { ok: true, baseUrl: address, serverId: 'example-host' };
   },
   request: async (method, path, body) => {
+    if (method === "DELETE" && path === `/aru/v1/hosted-collaborators/${collaborator.collaboratorId}`) {
+      if (body?.expectedRevision !== collaborator.revision) throw new Error("collaborator.revision_conflict");
+      collaboratorRemoved = true;
+      return { ...collaborator, archivedAt: Date.now(), revision: collaborator.revision + 1 };
+    }
     if (method === "GET" && path === "/.well-known/aru.json") return manifest;
     if (method === "PUT" && path === "/aru/v1/node-settings") { if (body.expectedRevision !== nodeSettings.revision) throw new Error('node settings changed since they were read');
       if (body.additionalTransports) nodeSettings.additionalTransports = body.additionalTransports;
@@ -78,7 +84,7 @@ window.aruHost = Object.freeze({
     if (method === "GET" && path === "/aru/v1/node-settings") return nodeSettings;
     if (method === "GET" && path === "/aru/v1/devices") return devices;
     if (method === "GET" && path === "/aru/v1/agent-drivers") return { drivers: new URLSearchParams(window.location.search).has("empty-drivers") ? [] : [{ id: "codex", displayName: "Codex", status: "ready" }, { id: "api", displayName: "模型 API", status: "ready" }] };
-    if (method === "GET" && path === "/aru/v1/hosted-collaborators") return { collaborators: [collaborator] };
+    if (method === "GET" && path === "/aru/v1/hosted-collaborators") return { collaborators: collaboratorRemoved ? [] : [collaborator] };
     if (method === "GET" && path === "/aru/v1/provider-profiles") return { secretStorage: { supported: true }, profiles: [provider] };
     if (method === "GET" && path.endsWith("/conversations")) return { conversations: [{ conversationId: "conversation_1", title: "Linux 入住检查", lastMessagePreview: "Host 还在这里。", updatedAt: "2026-07-24T07:50:00Z" }] };
     if (method === "GET" && path.endsWith("/surfaces")) return { surfaces: [{ surfaceId: "surface_1", title: "在场页", revision: 3, activeVersionOrdinal: 2, networkAccess: "none", delivery: "inline", archivedAt: null }] };

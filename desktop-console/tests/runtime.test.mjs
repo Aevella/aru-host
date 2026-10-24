@@ -189,3 +189,12 @@ test("desktop shell keeps renderer privileges narrow", async () => {
   assert.equal(metadata.build.nsis.perMachine, false, "Windows install stays per-user, no admin requirement");
   assert.equal(metadata.build.nsis.deleteAppDataOnUninstall, false, "uninstall preserves user data by default");
 });
+
+
+test("collaborator deletion is confined to a single exact hosted identity", () => {
+  const path = "/aru/v1/hosted-collaborators/hostcol_01234567-89ab-cdef";
+  assert.deepEqual(validateHostRequest("DELETE", path), { method: "DELETE", path });
+  for (const rejected of ["/aru/v1/hosted-collaborators", path + "/conversations", path + "/../hostcol_abcd", "/aru/v1/hosted-collaborators/mobile_123"]) {
+    assert.throws(() => validateHostRequest("DELETE", rejected));
+  }
+});

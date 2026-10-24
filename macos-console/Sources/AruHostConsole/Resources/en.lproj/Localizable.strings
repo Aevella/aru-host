@@ -537,3 +537,6 @@
 "backup.incremental" = "Incremental snapshot";
 
 "plugin.publisher" = "Author information (optional)";
+
+"collaborator.delete" = "Delete collaborator";
+"collaborator.delete.message" = "Remove this computer collaborator from the list. Existing data is retained. Return delegated phone tasks to the phone and stop running tasks first.";

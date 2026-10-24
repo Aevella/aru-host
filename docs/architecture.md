@@ -301,3 +301,21 @@ The plugin supervisor owns per-plugin mutation admission and async container con
 workspace jobs independently own cleanup/retry admission. No shared mutable lifecycle
 manager is introduced. See [the inventory](lifecycle-inventory-2026-10-22.md) for
 unchanged owners, focused proofs and outstanding platform acceptance.
+
+
+## Console collaborator removal
+
+Both native macOS and Electron collaborator lists submit the selected identity and
+expected revision to the existing `DELETE /aru/v1/hosted-collaborators/{id}` owner.
+The list removes a row only after a successful receipt. Deletion tombstones the
+collaborator while retaining data; active execution and delegated mobile work
+remain Core admission failures. Console does not silently stop work, change the
+revision, or retry a rejected mutation. Electron IPC permits only an exact hosted
+collaborator deletion route, not collection deletion or child routes.
+
+2026-10-24 verification: 15 focused Node tests passed across Console route admission
+and collaborator lifecycle, including busy rejection, failed-save rollback and
+idempotent deletion. macOS Console compiled and all 47 tests passed. The Electron
+renderer synthetic fixture was observed through cancel (row retained) and confirm
+(row removed, count zero, empty state). Native macOS visual acceptance and released
+installer acceptance remain unverified; these checks do not publish a release.

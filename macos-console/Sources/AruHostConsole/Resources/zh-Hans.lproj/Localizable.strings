@@ -537,3 +537,6 @@
 "backup.incremental" = "增量快照";
 
 "plugin.publisher" = "作者信息（选填）";
+
+"collaborator.delete" = "删除协作者";
+"collaborator.delete.message" = "从列表移除这位电脑协作者，已有数据仍保留。请先将代手机执行交还手机，并停止正在运行的任务。";
