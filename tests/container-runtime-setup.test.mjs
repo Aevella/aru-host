@@ -4,6 +4,38 @@ import { mkdtemp, readFile, writeFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { configureContainerRuntime, replaceRuntime, verifyContainerRuntime } from "../container-runtime-setup.mjs";
+import { createContainerReadiness } from "../src/server/container-readiness.mjs";
+
+test("a stuck Core probe releases readiness and a repaired engine can retry", async () => {
+  let stuck = true;
+  let probe;
+  const config = { containerRuntime: "podman", runtimeImages: {}, containerMemory: "1g", containerCPUs: "2" };
+  const owner = createContainerReadiness(config, (executable, options) => verifyContainerRuntime(executable, {
+    ...options, run: async (command, args, execution) => {
+      if (args[0] === "run") {
+        assert.equal(execution.timeout, 60_000);
+        assert.equal(execution.killSignal, "SIGKILL");
+        const mount = args[args.indexOf("--mount") + 1];
+        probe = mount.slice("type=bind,src=".length, mount.indexOf(",dst="));
+        if (stuck) throw Object.assign(new Error("killed"), { killed: true, signal: "SIGKILL" });
+      }
+      return successfulRun(command, args);
+    },
+  }));
+  assert.equal((await owner.check()).status, "failed");
+  assert.match(owner.diagnostics().failure.detail, /execution deadline/);
+  await assert.rejects(stat(probe), { code: "ENOENT" });
+  stuck = false;
+  assert.equal((await owner.check()).status, "ready");
+  assert.equal(owner.diagnostics().failure, undefined);
+});
+
+test("preparation leaves image downloads outside the Core probe deadline", async () => {
+  await verifyContainerRuntime("podman", { run: async (command, args, options) => {
+    if (args[0] === "run") assert.equal(options.timeout, 0);
+    return successfulRun(command, args);
+  } });
+});
 
 async function fixture(t) {
   const directory = await mkdtemp(join(tmpdir(), "aru-setup-test-"));

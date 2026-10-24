@@ -4,6 +4,7 @@ struct HostManifest: Decodable, Equatable, Sendable {
     struct Readiness: Decodable, Equatable, Sendable {
         let status: String
         let reason: String?
+        var message: String? = nil
     }
     struct Capability: Decodable, Equatable, Sendable {
         let enabled: Bool

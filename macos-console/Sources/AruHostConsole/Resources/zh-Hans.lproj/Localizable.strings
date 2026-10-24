@@ -540,3 +540,6 @@
 
 "collaborator.delete" = "删除协作者";
 "collaborator.delete.message" = "从列表移除这位电脑协作者，已有数据仍保留。请先将代手机执行交还手机，并停止正在运行的任务。";
+
+"container.readiness.pending" = "容器准备已完成，但 Host 后台验证尚未完成。请检查 Host 服务并刷新运行环境状态。";
+"container.readiness.unconfigured" = "当前运行的 Host 没有配置容器程序。请检查所选 Host 服务是否使用了刚才准备的配置。";

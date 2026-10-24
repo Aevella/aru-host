@@ -319,3 +319,30 @@ idempotent deletion. macOS Console compiled and all 47 tests passed. The Electro
 renderer synthetic fixture was observed through cancel (row retained) and confirm
 (row removed, count zero, empty state). Native macOS visual acceptance and released
 installer acceptance remain unverified; these checks do not publish a release.
+
+## Container readiness completion (2026-10-24)
+
+Container preparation may download images; it remains distinct from Core's
+service-side execution probes. Core probes use cached images and three tiny
+read/write jobs. Each job now has a 60-second execution deadline (engine info
+already has 30 seconds); a stuck CLI is killed, its synthetic probe is removed,
+and readiness settles as failed so an explicit retry can recover. Image preparation
+downloads keep their existing unrestricted duration. Console waits up to four
+minutes between readiness reads, covering the complete 210-second probe budget.
+
+Native macOS now reads Core's actual ready/failed state after preparation, rather
+than wrapping every failure or twenty-second wait expiration as an installer
+failure. Authenticated diagnostics add the failed stage, executable, image and
+engine detail. Public manifest data still excludes private diagnostic details.
+Cancellation propagates, a changed Host identity cannot satisfy the prior wait,
+and successful readiness does not request diagnostics. Existing request transport
+timeouts continue to govern each native HTTP operation.
+
+Validation: 28 Node tests passed, one Linux-specific private-TMPDIR test skipped
+on macOS; native Console compiled and all 51 tests passed. Fault injection covers
+probe timeout, cleanup, failed-to-ready retry, checking beyond the former forty
+polls, restart connection refusal, immediate failed-state diagnostics, cancellation
+and success without a diagnostic read. No real engine hang, installer release or
+reporter-machine recovery was exercised. An unconfigured service still requires
+its actual configuration mismatch to be identified; these changes do not claim
+to repair all such mismatches.

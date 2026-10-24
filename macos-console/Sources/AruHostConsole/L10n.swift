@@ -1,6 +1,8 @@
 import Foundation
 
 enum L10n {
+    static let containerReadinessPending = value("container.readiness.pending")
+    static let containerReadinessUnconfigured = value("container.readiness.unconfigured")
     static let deleteCollaborator = value("collaborator.delete")
     static let deleteCollaboratorMessage = value("collaborator.delete.message")
     static let connectionPrimary = value("node.connections.primary")

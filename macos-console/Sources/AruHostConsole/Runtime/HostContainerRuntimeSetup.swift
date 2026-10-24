@@ -26,17 +26,7 @@ actor HostContainerRuntimeSetup {
                 let detail = try? String(contentsOf: errorURL, encoding: .utf8)
                 throw HostCoreInstallationError.commandFailed(detail)
             }
-            let manifestURL = LocalHostLocator.baseURL().appending(path: ".well-known/aru.json")
-            for _ in 0..<40 {
-                if let (data, response) = try? await URLSession.shared.data(from: manifestURL),
-                   (response as? HTTPURLResponse)?.statusCode == 200,
-                   let manifest = try? JSONDecoder().decode(HostManifest.self, from: data),
-                   manifest.capabilities["workspace-runtime"]?.enabled == true {
-                    return
-                }
-                try await Task.sleep(for: .milliseconds(500))
-            }
-            throw HostCoreInstallationError.commandFailed(L10n.containerSetupRestartPending)
+
         }
         attempt = task
         defer { attempt = nil }

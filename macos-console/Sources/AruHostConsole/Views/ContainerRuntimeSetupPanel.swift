@@ -20,7 +20,7 @@ struct ContainerRuntimeSetupPanel: View {
                         Task {
                             defer { preparing = false }
                             do {
-                                try await HostContainerRuntimeSetup.shared.prepare()
+                                try await runtime.prepareContainerRuntime()
                                 await runtime.refresh(forceDriverProbe: false)
                                 message = L10n.containerSetupSuccess
                             } catch { message = error.localizedDescription }

@@ -9,7 +9,9 @@ import { pathToFileURL } from "node:url";
 const execute = promisify(execFile);
 
 function verificationError(error, stage, executable, image) {
-  const detail = String(error.stderr || error.message || error).trim();
+  const detail = error.killed && error.signal === "SIGKILL"
+    ? "Container check exceeded its execution deadline. Check the engine and retry verification."
+    : String(error.stderr || error.message || error).trim();
   return Object.assign(new Error(`Container verification failed (${stage}): ${detail}`, { cause: error }), {
     code: stage === "engine" ? "engine-unavailable" : "execution-failed",
     stage, executable, image, detail,
@@ -91,7 +93,10 @@ export async function verifyContainerRuntime(executable, { run = execute, settin
         "--pids-limit", "128", "--memory", setting("CONTAINER_MEMORY", "1g"),
         "--cpus", setting("CONTAINER_CPUS", "2"), "--tmpfs", "/tmp:rw,nosuid,nodev,size=64m", "--workdir", "/workspace",
         "--mount", `type=bind,src=${directory},dst=/workspace`, configured || fallback, ...command],
-        { windowsHide: true, maxBuffer: 4 * 1024 * 1024 });
+        { windowsHide: true, maxBuffer: 4 * 1024 * 1024,
+          // Core checks only already-prepared images and tiny file probes. A stuck
+          // engine must release readiness so an explicit retry can recover.
+          timeout: allowPull ? 0 : 60_000, killSignal: "SIGKILL" });
       }
       catch (error) { throw verificationError(error, key.toLowerCase(), executable, configured || fallback); }
     }

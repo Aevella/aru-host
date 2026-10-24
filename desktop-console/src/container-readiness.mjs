@@ -1,6 +1,6 @@
 // Core owns service-environment verification. Wait for its receipt after setup
 // or explicit retry, including response-body IO.
-export async function waitForContainerRuntime(readManifest, { timeoutMs = 90_000, intervalMs = 500, readDiagnostics } = {}) {
+export async function waitForContainerRuntime(readManifest, { timeoutMs = 240_000, intervalMs = 500, readDiagnostics } = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   let lastManifest;

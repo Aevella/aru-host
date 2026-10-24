@@ -540,3 +540,6 @@
 
 "collaborator.delete" = "Delete collaborator";
 "collaborator.delete.message" = "Remove this computer collaborator from the list. Existing data is retained. Return delegated phone tasks to the phone and stop running tasks first.";
+
+"container.readiness.pending" = "Container preparation completed, but Host verification has not finished. Check the Host service and refresh its runtime status.";
+"container.readiness.unconfigured" = "The running Host has no container executable configured. Check that the selected Host service uses the prepared configuration.";
