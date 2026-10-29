@@ -123,10 +123,8 @@ await host.deliverConversationTurnRelayUpdate({
   providerStatus: 200,
 });
 assert.equal(liveActivityDeliveries.at(-1).payload.event, "end");
-assert.deepEqual(liveActivityDeliveries.at(-1).payload.alert, {
-  title: "Example Collaborator",
-  body: "Reply ready",
-});
+assert.equal(liveActivityDeliveries.at(-1).payload.alert, null,
+  "the result push owns the alert; ending its Live Activity is silent");
 const relayedTurn = (overrides = {}) => ({
   turnId: "turn_result_1", deviceId: "phone_one", conversationId: "conversation-local",
   state: "succeeded", providerStatus: 200, acknowledgedAt: null, ...overrides,
@@ -269,3 +267,25 @@ relayState.devices[0].revokedAt = Date.now();
 await relayHost.deliverHostedCollaboratorTurn(completedEvent());
 assert.equal(relayCalls.length, deliveryCount);
 console.log("ARU_HOST_NOTIFICATION_RELAY_SMOKE_OK");
+
+// A registration on a different phone must not suppress the activity-only
+// phone's fallback alert. Failure and acknowledged results never alert it.
+state.devices.push({ deviceId: "activity_only", revokedAt: null });
+for (const outcome of [
+  { state: "succeeded", acknowledgedAt: null, expectsAlert: true },
+  { state: "succeeded", acknowledgedAt: 1, expectsAlert: false },
+  { state: "failed", acknowledgedAt: null, expectsAlert: false },
+  { state: "cancelled", acknowledgedAt: null, expectsAlert: false },
+]) {
+  await registerLiveActivity("activity_only", "dd".repeat(32), "sandbox");
+  await host.deliverConversationTurnRelayUpdate({
+    deviceId: "activity_only", conversationId: "conversation-local",
+    state: outcome.state, acknowledgedAt: outcome.acknowledgedAt,
+    notificationTitle: "Example", notificationPreview: "Finished",
+  });
+  const payload = liveActivityDeliveries.at(-1).payload;
+  assert.equal(payload.event, "end");
+  assert.deepEqual(payload.alert, outcome.expectsAlert
+    ? { title: "Example", body: "Finished" } : null);
+}
+console.log("ARU_HOST_SINGLE_COMPLETION_ALERT_OK");

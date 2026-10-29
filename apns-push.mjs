@@ -407,6 +407,11 @@ export function createAPNsPushHost({
     if (!credentials) return;
     const terminal = ["succeeded", "failed", "interrupted", "cancelled"].includes(turn.state);
     const phase = terminal ? "complete" : turn.providerStatus === null ? "thinking" : "responding";
+    // The result notification owns the visible completion alert when the phone
+    // has a push registration. Ending its Live Activity must not alert it again.
+    const hasResultNotification = activeRegistrations().some(
+      (item) => item.deviceId === turn.deviceId,
+    );
     await Promise.all(registrations.map(async (registration) => {
       if (!terminal && registration.lastPhase === phase) return;
       registration.lastAttemptAt = now();
@@ -419,7 +424,7 @@ export function createAPNsPushHost({
             phase,
             timestamp: Math.floor(now() / 1_000),
             dismissalDate: terminal ? Math.floor(now() / 1_000) + 8 : null,
-            alert: turn.state === "succeeded"
+            alert: turn.state === "succeeded" && !turn.acknowledgedAt && !hasResultNotification
               ? { title: turn.notificationTitle || registration.collaboratorName,
                   body: turn.notificationPreview || registration.completionBody }
               : null,
