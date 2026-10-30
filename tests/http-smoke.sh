@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+# Report only the failing line; shell tracing would expose synthetic credentials.
+trap 'printf "HTTP smoke failed at line %s\n" "$LINENO" >&2' ERR
 
 SELFHOST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$SELFHOST_DIR/tests/plugin-supervisor-smoke.sh"
