@@ -368,6 +368,22 @@ no reasoning state is shared between turns or profiles. This repairs same-turn t
 continuation only, not durable historical reasoning restoration. Synthetic JSON/SSE
 fixtures cover two continuations, dialogue separation, and a second fresh turn.
 
+## External MCP on phone-delegated turns
+
+The phone remains the authority for external MCP selection and per-tool approval.
+`mobile-collaborator-replicas` owns the sealed epoch-scoped execution snapshot;
+`mobile-mcp` resolves that snapshot into per-turn tools and invokes them through
+`mobile-mcp-transport`. The existing provider secret store holds only the wrapping
+key. No extra installed runtime filename is introduced: these modules are bundled
+into `mobile-collaborator-replicas.mjs` by the existing generator.
+
+`collaborator-conversations` awaits tool discovery and passes the admitted tool and
+cancellation signal to the existing execution outlet. External MCP approval remains
+phone-owned, while ordinary Host tools retain the computer's approval policy.
+Readiness is a live check, not a property of copied configuration. Check failure,
+loaded-empty and callable tools remain distinct; secrets never become tool arguments
+or prompt material. Unknown remote side effects are never automatically replayed.
+
 
 ### Claude Code resident sessions
 

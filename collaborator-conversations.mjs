@@ -1302,6 +1302,11 @@ function createCollaboratorConversationHost({
       executorCollaboratorId: executor.collaboratorId,
       mobileInstructions: replicaInstructions(replica),
       revision: replica.revision,
+      mobileSourceId: replica.sourceCollaboratorId,
+      mobileEpoch: replica.epoch,
+      mobileMCPFingerprint: replica.mcp?.fingerprint,
+      mobileMCPServerIds: rule.mcpServerIds ?? [],
+      mobileRuleId: rule.ruleId,
     };
     const source = replica.conversations.find(
       (candidate) => candidate.conversationId === rule.conversationId,
@@ -1363,7 +1368,8 @@ function createCollaboratorConversationHost({
       mkdirSync(workspace, { recursive: true, mode: 0o700 });
       const userMessage = message(conversation, turn.userMessageId);
       const projectedAttachments = attachments.projectForWorkspace(userMessage.attachments, workspace);
-      const tools = availableTools(collaborator);
+      const tools = await availableTools(collaborator, execution.signal);
+      if (!acceptsResult()) return;
       const configurationFingerprint = driverConfigurationFingerprint(
         collaborator,
         tools,
@@ -1487,7 +1493,7 @@ function createCollaboratorConversationHost({
     const grants = sessionToolGrants.get(
       conversationKey(conversation.collaboratorId, conversation.conversationId),
     ) ?? new Set();
-    if (!tool.annotations?.readOnlyHint && !grants.has(tool.name)
+    if (!tool.mobileMCP && !tool.annotations?.readOnlyHint && !grants.has(tool.name)
         && !approvalAllowsAlways(collaborator)) {
       await waitForToolApproval(conversation, tool, params.arguments ?? {});
     }
@@ -1520,7 +1526,7 @@ function createCollaboratorConversationHost({
       } else {
         value = await executeTool(tool.name, params.arguments ?? {}, {
           deviceId: `hosted-collaborator:${collaborator.collaboratorId}`,
-        }, collaborator, { conversationId: conversation.conversationId, turnId: expectedTurn.turnId, signal: execution.signal });
+        }, collaborator, { conversationId: conversation.conversationId, turnId: expectedTurn.turnId, signal: execution.signal, tool });
       }
       admitResult();
       appendEvent(conversation, "tool.completed", {
@@ -1680,8 +1686,8 @@ function createCollaboratorConversationHost({
     return stopped;
   }
 
-  function availableTools(collaborator) {
-    const all = toolCatalog(collaborator);
+  async function availableTools(collaborator, signal) {
+    const all = await toolCatalog(collaborator, signal);
     const replyAttachmentTool = {
       name: "aru_collaborator_reply_attach",
       title: "把工作区文件附到回复",
@@ -1700,7 +1706,7 @@ function createCollaboratorConversationHost({
     };
     if (collaborator.toolAccess?.mode !== "selected") return [...all, replyAttachmentTool];
     const selected = new Set(collaborator.toolAccess.toolNames ?? []);
-    return [...all.filter((tool) => selected.has(tool.name)), replyAttachmentTool];
+    return [...all.filter((tool) => tool.mobileMCP || tool.name === "aru_mobile_mcp_status" || selected.has(tool.name)), replyAttachmentTool];
   }
 
   function conversationHistoryContext(conversation, currentTurn) {

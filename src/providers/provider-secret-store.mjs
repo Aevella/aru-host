@@ -340,7 +340,9 @@ export function createProviderSecretStore({
 
 function account(profileId) {
   const value = String(profileId ?? "");
-  if (!/^provider_[A-Fa-f0-9-]+$/.test(value)) throw new Error("invalid provider profile id");
+  if (!/^provider_[A-Fa-f0-9-]+$/.test(value) && !/^mobile_mcp_[a-f0-9]{64}$/.test(value)) {
+    throw new Error("invalid credential owner id");
+  }
   return value;
 }
 

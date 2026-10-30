@@ -1,4 +1,5 @@
 export const replicaStorageVersion = 2;
+import { createMobileMCP } from "./mobile-mcp.mjs";
 import { createReplicaRecordStore } from "./replica-record-store.mjs";
 import { assistantDeliveryContent } from "./assistant-delivery-content.mjs";
 import { randomUUID } from "node:crypto";
@@ -37,12 +38,32 @@ export function createMobileCollaboratorReplicaHost({
   log = () => {},
   setTimer = setTimeout,
   clearTimer = clearTimeout,
+  mcpSecretStore,
+  mcpConnect,
 }) {
+  const mcp = createMobileMCP({ secretStore: mcpSecretStore, connect: mcpConnect });
+  const writes = new Map();
+  async function serialized(id, operation) {
+    const previous = writes.get(id) ?? Promise.resolve();
+    const next = previous.catch(() => {}).then(operation);
+    writes.set(id, next);
+    try { return await next; } finally { if (writes.get(id) === next) writes.delete(id); }
+  }
   const root = join(dataDir, "mobile-collaborator-replicas");
   mkdirSync(root, { recursive: true, mode: 0o700 });
   const records = createReplicaRecordStore(root);
   const ledger = records.ledger;
   ledger.revokedExecutions ??= [];
+  ledger.mcpCleanup ??= [];
+  async function cleanupMCP(sourceId) {
+    for (const item of [...(ledger.mcpCleanup ?? [])].filter(item => item.sourceCollaboratorId === sourceId)) {
+      try {
+        await mcp.remove(item.sourceCollaboratorId, item.epoch);
+        ledger.mcpCleanup = ledger.mcpCleanup.filter(entry => entry.sourceCollaboratorId !== item.sourceCollaboratorId || entry.epoch !== item.epoch);
+        saveLedger();
+      } catch { /* No active grant can reach this retired key. Retry on the next sync/revoke. */ }
+    }
+  }
   for (const replica of ledger.replicas) records.retireContinuation(replica.sourceCollaboratorId, replica.epoch, replica.revision);
   let timer = null;
   let started = false;
@@ -101,6 +122,9 @@ export function createMobileCollaboratorReplicaHost({
       sendJSON(res, 200, { schema: "aru.selfhost.mobile-execution-grants.v1", grants });
       return true;
     }
+    if (path === "/aru/v1/mobile-collaborator-mcp-capabilities" && req.method === "GET") {
+      requireDevice(); sendJSON(res, 200, { version: 1 }); return true;
+    }
     const match = path.match(/^\/aru\/v1\/mobile-collaborator-replicas\/([^/]+)(.*)$/);
     if (!match) return false;
     const sourceCollaboratorId = validatedId(match[1], "source collaborator");
@@ -109,25 +133,40 @@ export function createMobileCollaboratorReplicaHost({
     if (!suffix && req.method === "PUT") {
       const body = await readJSONBody(req, maximumRequestBytes);
       requireDevice();
-      sendJSON(res, 200, upsert(sourceCollaboratorId, body));
+      sendJSON(res, 200, await serialized(sourceCollaboratorId, () => upsert(sourceCollaboratorId, body)));
       return true;
     }
     if (suffix === "/revoke" && req.method === "POST") {
       const body = await readJSONBody(req, 64 * 1024);
       requireDevice();
       const epoch = positiveInteger(body?.epoch, "epoch");
-      const current = replicaForId(sourceCollaboratorId, false);
-      if (current && current.epoch > epoch) {
-        throw new HttpError(409, "mobile_replica.epoch_stale", "a newer execution grant is active");
-      }
-      const previous = ledger.revokedExecutions;
-      ledger.revokedExecutions = previous.filter((item) => item.sourceCollaboratorId !== sourceCollaboratorId);
-      ledger.revokedExecutions.push({ sourceCollaboratorId,
-        epoch: Math.max(epoch, previous.find((item) => item.sourceCollaboratorId === sourceCollaboratorId)?.epoch ?? 0) });
-      try { saveLedger(); }
-      catch (error) { ledger.revokedExecutions = previous; throw error; }
-      schedule();
+      await serialized(sourceCollaboratorId, async () => {
+        const current = replicaForId(sourceCollaboratorId, false);
+        if (current && current.epoch > epoch) throw new HttpError(409, "mobile_replica.epoch_stale", "a newer execution grant is active");
+        const previous = ledger.revokedExecutions;
+        const oldMCP = current?.mcp;
+        ledger.revokedExecutions = previous.filter(item => item.sourceCollaboratorId !== sourceCollaboratorId);
+        ledger.revokedExecutions.push({ sourceCollaboratorId,
+          epoch: Math.max(epoch, previous.find(item => item.sourceCollaboratorId === sourceCollaboratorId)?.epoch ?? 0) });
+        if (current) delete current.mcp;
+        try { saveLedger(); }
+        catch (error) { ledger.revokedExecutions = previous; if (current) current.mcp = oldMCP; throw error; }
+        mcp.invalidate(sourceCollaboratorId);
+        // Revocation is durable before secret cleanup. Retrying repeats cleanup, never execution.
+        if (mcpSecretStore) { await mcp.remove(sourceCollaboratorId, epoch); await cleanupMCP(sourceCollaboratorId); }
+        schedule();
+      });
       sendJSON(res, 200, { schema: "aru.selfhost.mobile-collaborator-revoke-receipt.v1", sourceCollaboratorId, epoch });
+      return true;
+    }
+    if (suffix === "/mcp-check" && req.method === "POST") {
+      const body = await readJSONBody(req, 64 * 1024);
+      const replica = replicaForId(sourceCollaboratorId, true);
+      const collaborator = { mobileSourceId: sourceCollaboratorId, mobileEpoch: positiveInteger(body.epoch, "epoch"),
+        executorCollaboratorId: replica.executorHostCollaboratorId, mobileMCPFingerprint: replica.mcp?.fingerprint };
+      admittedReplica(collaborator);
+      await mcp.catalog(replica, undefined, () => admittedReplica(collaborator));
+      sendJSON(res, 200, { sourceCollaboratorId, epoch: replica.epoch, connections: mcp.status(sourceCollaboratorId) });
       return true;
     }
     if (suffix === "/executions" && req.method === "GET") {
@@ -161,7 +200,7 @@ export function createMobileCollaboratorReplicaHost({
     return false;
   }
 
-  function upsert(sourceCollaboratorId, body) {
+  async function upsert(sourceCollaboratorId, body) {
     if (body?.schema !== REPLICA_SCHEMA || body.sourceCollaboratorId !== sourceCollaboratorId) {
       throw new HttpError(400, "mobile_replica.schema_invalid", "mobile collaborator replica identity is invalid");
     }
@@ -174,6 +213,11 @@ export function createMobileCollaboratorReplicaHost({
     const executorHostCollaboratorId = validatedId(body.executorHostCollaboratorId, "executor collaborator");
     if (!readerIds.includes(executorHostCollaboratorId)) readerIds.push(executorHostCollaboratorId);
     for (const collaboratorId of readerIds) collaboratorForId(collaboratorId);
+    const sealedMCP = body.mcpConnections === undefined ? undefined
+      : await mcp.seal(sourceCollaboratorId, epoch, body.mcpConnections);
+    // Credential IO yields. Read scheduling truth only after it completes, so a
+    // timer settling an occurrence cannot be overwritten by a pre-await snapshot.
+    if (executionRevoked(sourceCollaboratorId, epoch)) throw new HttpError(409, "mobile_replica.epoch_revoked", "execution grant was revoked");
     const current = replicaForId(sourceCollaboratorId, false);
     if (current && epoch < current.epoch) {
       throw new HttpError(409, "mobile_replica.epoch_stale", "mobile collaborator execution epoch is stale");
@@ -182,6 +226,13 @@ export function createMobileCollaboratorReplicaHost({
       throw new HttpError(409, "mobile_replica.revision_stale", "mobile collaborator replica revision is stale");
     }
     if (current && epoch === current.epoch && revision === current.revision) {
+      if (sealedMCP) {
+        if (current.mcp?.fingerprint !== sealedMCP.fingerprint) throw new HttpError(409, "mobile_replica.revision_conflict", "MCP configuration changed; synchronize a newer revision");
+        const previous = current.mcp;
+        current.mcp = sealedMCP; // Same content can repair a lost/corrupt derived encryption key.
+        try { saveLedger(); } catch (error) { current.mcp = previous; throw error; }
+      }
+      await cleanupMCP(sourceCollaboratorId);
       return publicReceipt(current);
     }
     const value = {
@@ -200,11 +251,27 @@ export function createMobileCollaboratorReplicaHost({
       generatedAt: positiveInteger(body.generatedAt, "generatedAt"),
       updatedAt: now(),
     };
+    value.mcp = body.mcpConnections === undefined
+      ? (current?.epoch === epoch ? current.mcp : undefined)
+      : sealedMCP;
     records.retireContinuation(sourceCollaboratorId, epoch, revision);
+    const previousCleanup = ledger.mcpCleanup ?? [];
+    if (current?.mcp?.count && current.epoch !== epoch) {
+      ledger.mcpCleanup = [...previousCleanup, { sourceCollaboratorId, epoch: current.epoch }];
+    }
     if (current) ledger.replicas.splice(ledger.replicas.indexOf(current), 1, value);
     else ledger.replicas.push(value);
-    saveLedger();
+    try { saveLedger(); }
+    catch (error) {
+      ledger.mcpCleanup = previousCleanup;
+      const index = ledger.replicas.indexOf(value);
+      if (current) ledger.replicas.splice(index, 1, current); else ledger.replicas.splice(index, 1);
+      throw error;
+    }
+    if (current?.epoch !== epoch || current?.mcp?.fingerprint !== value.mcp?.fingerprint
+        || JSON.stringify(current?.rules.map(rule => [rule.ruleId, rule.mcpServerIds])) !== JSON.stringify(value.rules.map(rule => [rule.ruleId, rule.mcpServerIds]))) mcp.invalidate(sourceCollaboratorId);
     schedule();
+    await cleanupMCP(sourceCollaboratorId);
     return publicReceipt(value);
   }
 
@@ -553,7 +620,33 @@ export function createMobileCollaboratorReplicaHost({
     return value;
   }
 
+  function admittedReplica(collaborator) {
+    recoverStorage();
+    const replica = replicaForId(collaborator.mobileSourceId, true);
+    if (collaborator.mobileRuleId) {
+      const rule = replica.rules.find(item => item.ruleId === collaborator.mobileRuleId);
+      if (!rule || JSON.stringify([...(rule.mcpServerIds ?? [])].sort()) !== JSON.stringify([...(collaborator.mobileMCPServerIds ?? [])].sort())) {
+        throw new Error("This conversation's MCP selection changed. Start a new task using the current selection.");
+      }
+    }
+    if (executionRevoked(replica.sourceCollaboratorId, collaborator.mobileEpoch)
+        || replica.epoch !== collaborator.mobileEpoch
+        || replica.executorHostCollaboratorId !== collaborator.executorCollaboratorId
+        || replica.mcp?.fingerprint !== collaborator.mobileMCPFingerprint) {
+      throw new Error("MCP delegation changed or was revoked. Start a new task with the current configuration.");
+    }
+    return replica;
+  }
   return { route, selfTools, callSelfTool, start, stop, settle, runDue,
+    mcpTools(collaborator, signal) {
+      const replica = admittedReplica(collaborator);
+      return mcp.catalog(replica, signal, () => admittedReplica(collaborator), collaborator.mobileMCPServerIds);
+    },
+    callMCP(name, args, collaborator, context) {
+      const replica = admittedReplica(collaborator);
+      if (context.tool?.mobileMCP && !collaborator.mobileMCPServerIds?.includes(context.tool.mobileMCP.serverId)) throw new Error("MCP connection is outside this conversation's scope");
+      return mcp.call(replica, name, args, context, () => admittedReplica(collaborator));
+    },
     hasExecutionGrant(collaboratorId) {
       recoverStorage();
       return ledger.replicas.some((replica) => replica.executorHostCollaboratorId === collaboratorId
@@ -568,6 +661,7 @@ function publicReceipt(replica) {
     sourceCollaboratorId: replica.sourceCollaboratorId,
     epoch: replica.epoch,
     revision: replica.revision,
+    mcpVersion: 1,
   };
 }
 
@@ -713,6 +807,7 @@ function validatedRules(value, current, epoch) {
     }
     return {
       ruleId,
+      mcpServerIds: Array.isArray(item.mcpServerIds) ? uniqueIds(item.mcpServerIds) : [],
       conversationMode,
       conversationId,
       title: String(item?.title ?? ""),

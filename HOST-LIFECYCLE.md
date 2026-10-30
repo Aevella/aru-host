@@ -462,6 +462,36 @@ stalled engine cannot block connection/diagnostics for unrelated work. A cancell
 while cleanup is awaiting the engine remains cancelled when cleanup later completes.
 The focused cleanup-isolation and late-cancellation tests pass locally.
 
+## Delegated external MCP (2026-10-30)
+
+Phone replicas may carry an explicitly authorized `mcpConnections` snapshot and
+per-rule server IDs. The replica owner seals the snapshot using an epoch-scoped
+key in the existing Host secret store. Ordinary readable replicas and model
+instructions never contain credentials. Omitted configuration from an older phone
+preserves the same epoch's sealed configuration; an explicit empty array removes it.
+The phone checks `/aru/v1/mobile-collaborator-mcp-capabilities` before sending secrets.
+
+`src/host/mobile-mcp.mjs` discovers/calls external tools through the existing
+conversation bridge for every driver. Each server can fail independently; failed
+catalog discovery retains configured tools and exposes a status/recovery tool.
+Catalog checks terminate after 30 seconds. Invocations honor configured deadlines;
+unbounded phone requests use a 30-minute unattended deadline. Fresh sessions avoid
+poisoned caches. No failed `tools/call` is automatically replayed. A dropped response
+can represent a completed side effect and is reported as uncertain to the model.
+
+Grant, executor, configuration fingerprint and rule selection are checked before
+network effects and after results. Revocation is durable before key cleanup; cleanup
+failure is retryable. Superseded epoch keys are cleaned on subsequent sync if the
+first cleanup fails. Re-synchronizing the same content can repair a missing derived
+encryption key. Credential IO precedes reading scheduler state, preserving occurrences
+settled while the keyring was busy. Access-token expiry requires phone reauthorization
+and sync; refresh-token ownership is not duplicated on Host.
+
+Source/local proof: 40 recovery/credential-store tests and the 27-case
+conversation/Claude integration selection pass (overlapping MCP cases). A further
+16-case MCP run includes stalled-request termination and fresh-session recovery. No published release or customer
+server/device acceptance is claimed.
+
 
 2026-10-30 Claude Code resident transport (source/local proof): the driver sends
 stream-json user messages into a per-session process without closing stdin after

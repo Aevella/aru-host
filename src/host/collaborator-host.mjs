@@ -218,6 +218,7 @@ export function createCollaboratorHost({
     HttpError,
     collaboratorForId,
     maximumRequestBytes: maximumReplicaBytes,
+    mcpSecretStore: providerSecretStore,
     trigger: (executor, replica, rule, deliveryId) =>
       conversations.runReplicaProactive(executor, replica, rule, deliveryId),
     recoverDelivery: (sourceId, deliveryId, epoch) =>
@@ -241,11 +242,11 @@ export function createCollaboratorHost({
     log,
   });
 
-  function conversationToolCatalog(collaborator) {
+  async function conversationToolCatalog(collaborator, signal) {
     const externalTools = toolCatalog().filter((tool) =>
       !tool.name.startsWith("aru_collaborator_surface_")
       && !tool.name.startsWith("aru_collaborator_project_"));
-    if (collaborator?.authority === "mobile-replica") return externalTools;
+    if (collaborator?.authority === "mobile-replica") return [...externalTools, ...await mobileReplicas.mcpTools(collaborator, signal)];
     return [
       ...externalTools,
       ...surfaces.selfTools(),
@@ -256,7 +257,10 @@ export function createCollaboratorHost({
     ];
   }
 
-  async function executeConversationTool(name, args, device, collaborator) {
+  async function executeConversationTool(name, args, device, collaborator, context) {
+    if (collaborator?.authority === "mobile-replica" && (name.startsWith("mobile_mcp_") || name === "aru_mobile_mcp_status")) {
+      return mobileReplicas.callMCP(name, args, collaborator, context);
+    }
     const surfaceCall = surfaces.callSelfTool(name, args, device, collaborator);
     if (surfaceCall.matched) return surfaceCall.value;
     const projectCall = projects.callSelfTool(name, args, device, collaborator);
