@@ -36,6 +36,7 @@ jobs:
           node tests/wake-send-smoke.mjs
           node tests/codex-app-server-driver-smoke.mjs
           node tests/claude-code-driver-smoke.mjs
+          node --test tests/claude-code-resident.test.mjs
           node --test tests/claude-code-command.test.mjs
           node tests/collaborator-host-smoke.mjs
           node tests/collaborator-cognition-smoke.mjs

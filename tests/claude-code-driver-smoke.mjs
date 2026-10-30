@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createClaudeCodeDriver } from "../claude-code-driver.mjs";
 
-const root = mkdtempSync(join(tmpdir(), "aru-claude-driver-"));
+const root = mkdtempSync(join(process.env.ARU_TEMPORARY_BUILDS_PATH ?? tmpdir(), "aru-claude-driver-"));
 const executable = join(root, "claude");
 const capturePath = join(root, "capture.jsonl");
 writeFileSync(executable, `#!/usr/bin/env node
@@ -18,11 +18,14 @@ if (process.argv.includes("--version")) {
   process.exit(0);
 }
 const args = process.argv.slice(2);
-let prompt = "";
-for await (const chunk of process.stdin) prompt += String(chunk);
+
 const option = (name) => args[args.indexOf(name) + 1];
 const resume = args.includes("--resume") ? option("--resume") : null;
-const sessionId = resume ?? "11111111-1111-4111-8111-111111111111";
+const sessionId = resume ?? option("--session-id");
+let turnCount = 0;
+for await (const input of createInterface({ input: process.stdin, crlfDelay: Infinity })) {
+const prompt = JSON.parse(input).message.content;
+turnCount += 1;
 process.stdout.write(JSON.stringify({ type: "system", subtype: "init", session_id: sessionId }) + "\\n");
 await new Promise((resolve) => setTimeout(resolve, 25));
 if (prompt.includes("WAIT_FOR_INTERRUPT")) {
@@ -66,6 +69,7 @@ bridge.stdin.end();
 
 appendFileSync(process.env.ARU_CLAUDE_TEST_CAPTURE, JSON.stringify({
   args,
+  pid: process.pid,
   prompt,
   tools: inventory.tools.map((tool) => tool.name),
   toolResult,
@@ -74,20 +78,21 @@ appendFileSync(process.env.ARU_CLAUDE_TEST_CAPTURE, JSON.stringify({
 process.stdout.write(JSON.stringify({
   type: "stream_event",
   session_id: sessionId,
-  event: { type: "content_block_delta", delta: { type: "text_delta", text: resume ? "续聊成功" : "首轮成功" } },
+  event: { type: "content_block_delta", delta: { type: "text_delta", text: (resume || turnCount > 1) ? "续聊成功" : "首轮成功" } },
 }) + "\\n");
 process.stdout.write(JSON.stringify({
   type: "assistant",
   session_id: sessionId,
-  message: { content: [{ type: "text", text: resume ? "续聊成功" : "首轮成功" }] },
+  message: { content: [{ type: "text", text: (resume || turnCount > 1) ? "续聊成功" : "首轮成功" }] },
 }) + "\\n");
 process.stdout.write(JSON.stringify({
   type: "result",
   subtype: "success",
   is_error: false,
   session_id: sessionId,
-  result: resume ? "续聊成功" : "首轮成功",
+  result: (resume || turnCount > 1) ? "续聊成功" : "首轮成功",
 }) + "\\n");
+}
 `);
 chmodSync(executable, 0o755);
 
@@ -162,7 +167,7 @@ function runTurn({ threadId = null, text, historyContext }) {
 
 const first = runTurn({ text: "查看附件", historyContext: "User: 从旧会话继续" });
 const firstStarted = await first.started;
-assert.equal(firstStarted.threadId, "11111111-1111-4111-8111-111111111111");
+assert.match(firstStarted.threadId, /^[a-f0-9-]{36}$/);
 assert.equal(driver.status(), "running");
 assert.equal(await first.completed, "completed");
 assert.deepEqual(first.deltas, ["首轮成功"]);
@@ -187,7 +192,8 @@ assert.equal(captures[0].tools.includes("aru_test_tool"), true);
 assert.equal(captures[0].tools.includes("permission_prompt"), true);
 assert.match(captures[0].prompt, /从旧会话继续/);
 assert.match(captures[0].prompt, /notes\.txt/);
-assert.equal(captures[1].args.includes("--resume"), true);
+assert.equal(captures[1].pid, captures[0].pid, "successive turns reuse the same Claude process");
+assert.equal(captures[0].args.includes("--input-format"), true);
 assert.equal(captures[1].prompt.includes("这段不应重复注入"), false);
 assert.equal(JSON.parse(captures[0].approvalResult.content[0].text).behavior, "allow");
 assert.equal(JSON.parse(captures[1].approvalResult.content[0].text).behavior, "allow");
@@ -217,6 +223,14 @@ assert.throws(
   () => driver.validateAttachments([{ kind: "unknown", filename: "mystery.bin" }]),
   /Claude Code 不支持这种附件/,
 );
+
+const recovered = runTurn({ threadId: firstStarted.threadId, text: "after cancellation" });
+await recovered.started;
+assert.equal(await recovered.completed, "completed");
+const finalCaptures = readFileSync(capturePath, "utf8").trim().split("\n").map(JSON.parse);
+assert.notEqual(finalCaptures.at(-1).pid, captures[0].pid);
+assert.ok(finalCaptures.at(-1).args.includes("--resume"));
+await driver.dispose();
 
 if (originalCapture === undefined) delete process.env.ARU_CLAUDE_TEST_CAPTURE;
 else process.env.ARU_CLAUDE_TEST_CAPTURE = originalCapture;

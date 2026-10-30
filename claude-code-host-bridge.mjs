@@ -6,7 +6,7 @@ export const CLAUDE_CODE_PERMISSION_TOOL = "permission_prompt";
 export const CLAUDE_CODE_MCP_SERVER_NAME = "aru_host";
 const MAX_BRIDGE_REQUEST_BYTES = 4 * 1024 * 1024;
 
-export async function createClaudeCodeHostBridge(context, sessionToolGrants) {
+export async function createClaudeCodeHostBridge(currentTurn, sessionToolGrants) {
   const token = randomUUID();
   const server = createServer(async (request, response) => {
     try {
@@ -14,7 +14,14 @@ export async function createClaudeCodeHostBridge(context, sessionToolGrants) {
         sendBridgeJSON(response, 404, { error: "not found" });
         return;
       }
+      // Capture the originating turn before awaiting input. A late request or
+      // approval must never acquire the next turn's handler or grants.
+      const context = currentTurn();
       const body = await readBridgeBody(request);
+      if (!context || context.closed || context.interrupted) {
+        sendBridgeJSON(response, 409, { error: "Claude Code has no active turn" });
+        return;
+      }
       if (body.action === "listTools") {
         sendBridgeJSON(response, 200, { tools: bridgeTools(context.tools) });
         return;
@@ -86,6 +93,7 @@ async function requestHostTool(context, name, argumentsValue) {
   }
   try {
     const value = await context.handler.onToolCall({ tool: name, arguments: argumentsValue });
+    if (context.closed || context.interrupted) return mcpError("Originating turn has ended");
     return normalizeMCPResult(value);
   } catch (error) {
     return mcpError(error?.message ?? "Tool call failed");
@@ -101,13 +109,30 @@ async function requestPermission(context, value, sessionToolGrants) {
   const grants = sessionToolGrants.get(sessionId) ?? new Set();
   const grantKey = permissionGrantKey(toolName, input);
   if (grants.has(grantKey)) return mcpText({ behavior: "allow", updatedInput: input });
-  const response = await new Promise((resolve) => {
-    context.handler.onApproval({
-      method: approvalMethod(toolName),
-      params: approvalParams(toolName, input),
-      respond: resolve,
-    });
+  const response = await new Promise((resolve, reject) => {
+    const signal = context.lifetimeSignal;
+    const finish = (value) => {
+      signal?.removeEventListener("abort", cancel);
+      resolve(value);
+    };
+    const cancel = () => finish({ decision: "cancel" });
+    if (signal?.aborted) return cancel();
+    signal?.addEventListener("abort", cancel, { once: true });
+    try {
+      Promise.resolve(context.handler.onApproval({
+        method: approvalMethod(toolName),
+        params: approvalParams(toolName, input),
+        respond: finish,
+      })).catch((error) => {
+        signal?.removeEventListener("abort", cancel);
+        reject(error);
+      });
+    } catch (error) {
+      signal?.removeEventListener("abort", cancel);
+      reject(error);
+    }
   });
+  if (context.closed || context.interrupted) return mcpText({ behavior: "deny", message: "Originating turn has ended" });
   if (response?.decision === "accept" || response?.decision === "acceptForSession") {
     if (response.decision === "acceptForSession") {
       grants.add(grantKey);

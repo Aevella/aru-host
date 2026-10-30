@@ -367,3 +367,16 @@ explicitly empty values remain distinct. Each startTurn owns a fresh message lis
 no reasoning state is shared between turns or profiles. This repairs same-turn tool
 continuation only, not durable historical reasoning restoration. Synthetic JSON/SSE
 fixtures cover two continuations, dialogue separation, and a second fresh turn.
+
+
+### Claude Code resident sessions
+
+`src/drivers/claude-code-driver.mjs` owns transient per-session subprocesses and
+separate admitted turns. It consumes the existing conversation ledger's thread id,
+configuration, tools and handlers. Stream-json input keeps a compatible session
+alive across turns; configuration changes, cancellation or idle reclamation retire
+the process, while the ledger remains the durable authority for later resume.
+`claude-code-host-bridge.mjs` resolves and captures the active turn for each request;
+no active turn means no tool execution. Completion, cancellation and late approvals
+cannot redirect an old request into another turn. Source and synthetic transport
+proof do not imply successful real-account or installed-phone acceptance.

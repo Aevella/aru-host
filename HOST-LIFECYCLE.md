@@ -461,3 +461,25 @@ Workspace startup reconciliation runs after the HTTP listener is available, so a
 stalled engine cannot block connection/diagnostics for unrelated work. A cancellation
 while cleanup is awaiting the engine remains cancelled when cleanup later completes.
 The focused cleanup-isolation and late-cancellation tests pass locally.
+
+
+2026-10-30 Claude Code resident transport (source/local proof): the driver sends
+stream-json user messages into a per-session process without closing stdin after
+each turn. The conversation ledger still owns durable thread/turn identity and
+terminal results. Per-turn handlers, tool admission and approvals are detached at
+completion; idle bridge calls are rejected. Late tool results and approvals retain
+the originating turn and cannot grant or complete a later turn.
+
+Changed instructions/tools/executable/workspace retire the old process before
+restarting; cancellation waits for process close, escalates termination after five
+seconds, and never automatically replays work. Unexpected exit fails the current
+turn; the next explicit message resumes the saved Claude id. Initialization has a
+120-second deadline; model generation has no new time limit. An idle session is
+released after thirty minutes to reclaim process memory and local bridge resources;
+its durable Claude id remains resumable. Explicit disposal closes all sessions.
+
+Fourteen focused lifecycle/command checks passed (one Windows-only execution check
+skipped on macOS), plus the real-subprocess synthetic MCP/approval smoke. Generated
+runtime consistency passed. A real installed CLI reached initialization and returned
+an upstream account-access failure; successful real-model multi-turn output and
+phone/installed-release acceptance remain unverified. No installer was released.

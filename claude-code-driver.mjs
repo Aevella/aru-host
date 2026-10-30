@@ -12,8 +12,6 @@ import {
   createClaudeCodeHostBridge,
 } from "./claude-code-host-bridge.mjs";
 
-const MAX_ERROR_BYTES = 32 * 1024;
-
 // `command` is a bare executable path or the launch spec from
 // collaborator-host's driverLaunchSpec (an npm shim on Windows resolves to
 // `node <entry.js>`). Claude arguments carry session ids and file paths, so a
@@ -34,187 +32,212 @@ export function createClaudeCodeDriver({
   nodeExecutable = process.execPath,
   bridgeScript = join(dirname(fileURLToPath(import.meta.url)), "claude-code-mcp-bridge.mjs"),
   spawnProcess = spawn,
+  // Idle processes hold memory and a local bridge. Releasing them does not
+  // delete their Claude session; the next message resumes its durable id.
+  idleTimeoutMs = 30 * 60 * 1_000,
+  startupTimeoutMs = 120_000,
   log = () => {},
 } = {}) {
   let knownExecutable = executable ?? null;
+  let disposed = false;
   const activeTurns = new Map();
+  const sessions = new Map();
+  const reservations = new Set();
   const sessionToolGrants = new Map();
 
   function status() {
     if (activeTurns.size > 0) return "running";
-    return knownExecutable ? "ready" : "unavailable";
+    return knownExecutable && !disposed ? "ready" : "unavailable";
   }
-
   function refreshExecutable() {
-    if (typeof resolveExecutable === "function") {
-      knownExecutable = resolveExecutable() ?? null;
-    }
+    if (typeof resolveExecutable === "function") knownExecutable = resolveExecutable() ?? null;
     return knownExecutable;
   }
-
   async function ensureConnected() {
-    const command = refreshExecutable();
-    if (!command) throw new Error("claude executable is unavailable");
+    if (disposed) throw new Error("Claude Code driver is closed");
+    if (!refreshExecutable()) throw new Error("claude executable is unavailable");
   }
-
-  async function startTurn({
-    threadId,
-    cwd,
-    instructions,
-    historyContext,
-    tools,
-    text,
-    attachments = [],
-    handler,
-  }) {
-    await ensureConnected();
-    validateAttachments(attachments);
-    const turnId = `claudeturn_${randomUUID()}`;
-    const context = {
-      turnId,
-      requestedThreadId: threadId ?? null,
-      sessionId: threadId ?? null,
-      cwd,
-      tools,
-      handler,
-      child: null,
-      bridge: null,
-      temporaryDirectory: null,
-      stderr: "",
-      textEmitted: false,
-      currentAssistantText: "",
-      terminalEventSent: false,
-      interrupted: false,
-      startedSettled: false,
-    };
-    activeTurns.set(turnId, context);
+  function releaseTurn(session, turn) {
+    activeTurns.delete(turn.turnId);
+    turn.signal?.removeEventListener("abort", turn.onAbort);
+    if (session.transport?.turn === turn) session.transport.turn = null;
+    turn.closed = true;
+    turn.lifetime.abort();
+    if (!session.retired && !session.transport?.closed) {
+      session.idleTimer = setTimeout(() => { void retire(session); }, idleTimeoutMs);
+      session.idleTimer.unref?.();
+    }
+  }
+  async function retire(session) {
+    session.retired = true;
+    clearTimeout(session.idleTimer);
+    if (session.transport) await session.transport.stop();
+    if (sessions.get(session.id) === session) sessions.delete(session.id);
+    session.bridge?.server.close();
+    if (session.directory) {
+      rmSync(session.directory, { recursive: true, force: true });
+      session.directory = null;
+    }
+  }
+  async function startTurn({ threadId, cwd, instructions, historyContext, tools, text,
+    attachments = [], handler, signal }) {
+    const id = threadId || randomUUID();
+    if (reservations.has(id) || sessions.get(id)?.transport?.turn) {
+      throw new Error("Claude Code session already has an active turn");
+    }
+    reservations.add(id);
+    let session;
+    let turn;
     try {
-      context.bridge = await createClaudeCodeHostBridge(context, sessionToolGrants);
-      context.temporaryDirectory = createTurnFiles({
-        nodeExecutable,
-        bridgeScript,
-        bridgeURL: context.bridge.url,
-        bridgeToken: context.bridge.token,
-        instructions,
-      });
-      return await launchClaudeTurn(context, {
-        command: knownExecutable,
-        threadId,
-        prompt: claudeUserPrompt(text, attachments, threadId ? "" : historyContext),
-        spawnProcess,
-        log,
-        activeTurns,
-      });
-    } catch (error) {
-      cleanupTurn(context, activeTurns);
-      throw error;
-    }
-  }
-
-  async function interrupt(_threadId, turnId) {
-    const context = activeTurns.get(turnId);
-    if (!context) return;
-    context.interrupted = true;
-    context.child?.kill("SIGTERM");
-  }
-
-  return {
-    status,
-    refreshExecutable,
-    ensureConnected,
-    startTurn,
-    interrupt,
-    validateAttachments,
-  };
-}
-
-function launchClaudeTurn(context, { command, threadId, prompt, spawnProcess, log, activeTurns }) {
-  const args = [
-    "-p",
-    "--output-format", "stream-json",
-    "--verbose",
-    "--include-partial-messages",
-    "--permission-mode", "default",
-    "--setting-sources", "",
-    "--strict-mcp-config",
-    "--mcp-config", join(context.temporaryDirectory, "mcp.json"),
-    "--permission-prompt-tool", `mcp__${CLAUDE_CODE_MCP_SERVER_NAME}__${CLAUDE_CODE_PERMISSION_TOOL}`,
-    "--allowedTools", claudeCodeAllowedMCPTools(context.tools).join(","),
-    "--disallowedTools", "AskUserQuestion",
-    "--append-system-prompt-file", join(context.temporaryDirectory, "instructions.txt"),
-  ];
-  if (threadId) args.push("--resume", threadId);
-  const invocation = claudeCodeLaunch(command, args);
-  const child = spawnProcess(invocation.command, invocation.args, {
-    cwd: context.cwd,
-    env: {
-      ...process.env,
-      NO_COLOR: "1",
-      CLAUDE_CODE_AUTO_CONNECT_IDE: "false",
-      CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1",
-    },
-    stdio: ["pipe", "pipe", "pipe"],
-    windowsHide: true,
-  });
-  context.child = child;
-  let stdoutBuffer = "";
-  let eventQueue = Promise.resolve();
-  let resolveStarted;
-  let rejectStarted;
-  const started = new Promise((resolve, reject) => {
-    resolveStarted = resolve;
-    rejectStarted = reject;
-  });
-
-  const settleStarted = (error = null) => {
-    if (context.startedSettled) return;
-    context.startedSettled = true;
-    if (error) rejectStarted(error);
-    else resolveStarted({ threadId: context.sessionId, turnId: context.turnId });
-  };
-
-  child.stdout.on("data", (chunk) => {
-    stdoutBuffer += String(chunk);
-    while (stdoutBuffer.includes("\n")) {
-      const index = stdoutBuffer.indexOf("\n");
-      const line = stdoutBuffer.slice(0, index);
-      stdoutBuffer = stdoutBuffer.slice(index + 1);
-      eventQueue = eventQueue.then(() => handleClaudeLine(context, line, settleStarted));
-    }
-  });
-  child.stderr.on("data", (chunk) => {
-    context.stderr = `${context.stderr}${String(chunk)}`.slice(-MAX_ERROR_BYTES);
-  });
-  child.on("error", (error) => {
-    settleStarted(error);
-    context.terminalEventSent = true;
-    context.handler.onDisconnect?.(error);
-  });
-  child.on("close", (code, signal) => {
-    eventQueue = eventQueue.then(async () => {
-      if (stdoutBuffer.trim()) await handleClaudeLine(context, stdoutBuffer, settleStarted);
-      if (!context.startedSettled) {
-        settleStarted(new Error(claudeExitMessage(context, code, signal)));
-      } else if (!context.terminalEventSent && !context.interrupted) {
-        context.handler.onNotification?.("turn/completed", {
-          threadId: context.sessionId,
-          turnId: context.turnId,
-          turn: { status: "failed", error: { message: claudeExitMessage(context, code, signal) } },
+      await ensureConnected();
+      signal?.throwIfAborted();
+      validateAttachments(attachments);
+      const fingerprint = JSON.stringify([knownExecutable, cwd, instructions ?? "", tools]);
+      session = sessions.get(id);
+      if (session && (session.fingerprint !== fingerprint || session.transport.closed)) {
+        await retire(session);
+        sessionToolGrants.delete(id);
+        session = null;
+      }
+      signal?.throwIfAborted();
+      if (!session) {
+        session = { id, fingerprint, tools, retired: false, transport: null, bridge: null, directory: null };
+        sessions.set(id, session);
+      }
+      clearTimeout(session.idleTimer);
+      let resolveStarted;
+      let rejectStarted;
+      const started = new Promise((resolve, reject) => { resolveStarted = resolve; rejectStarted = reject; });
+      // A setup failure can precede returning this promise to the caller.
+      started.catch(() => {});
+      const lifetime = new AbortController();
+      turn = {
+        lifetime, lifetimeSignal: lifetime.signal,
+        turnId: `claudeturn_${randomUUID()}`, requestedThreadId: threadId ?? null,
+        sessionId: id, tools, handler, signal, textEmitted: false,
+        currentAssistantText: "", terminalEventSent: false, interrupted: false,
+        startedSettled: false, closed: false,
+        settleStarted(error = null) {
+          if (turn.startedSettled) return;
+          turn.startedSettled = true;
+          clearTimeout(turn.startupTimer);
+          if (error) rejectStarted(error);
+          else resolveStarted({ threadId: id, turnId: turn.turnId });
+        },
+        fail(error) {
+          if (turn.closed || turn.terminalEventSent) return;
+          turn.settleStarted(error);
+          turn.terminalEventSent = true;
+          releaseTurn(session, turn);
+          handler.onDisconnect?.(error);
+        },
+      };
+      turn.startupTimer = setTimeout(() => {
+        turn.fail(new Error("Claude Code session initialization timed out"));
+        void retire(session);
+      }, startupTimeoutMs);
+      turn.startupTimer.unref?.();
+      activeTurns.set(turn.turnId, { session, turn });
+      turn.onAbort = () => { void interrupt(id, turn.turnId); };
+      signal?.addEventListener("abort", turn.onAbort, { once: true });
+      if (!session.transport) {
+        session.bridge = await createClaudeCodeHostBridge(() => session.transport?.turn ?? null, sessionToolGrants);
+        signal?.throwIfAborted();
+        if (session.retired || turn.interrupted) throw new Error("Claude Code turn cancelled");
+        session.directory = createTurnFiles({ nodeExecutable, bridgeScript,
+          bridgeURL: session.bridge.url, bridgeToken: session.bridge.token, instructions });
+        const args = [
+          "-p", "--input-format", "stream-json", "--output-format", "stream-json",
+          "--verbose", "--include-partial-messages", "--permission-mode", "default",
+          "--setting-sources", "", "--strict-mcp-config",
+          "--mcp-config", join(session.directory, "mcp.json"),
+          "--permission-prompt-tool", `mcp__${CLAUDE_CODE_MCP_SERVER_NAME}__${CLAUDE_CODE_PERMISSION_TOOL}`,
+          "--allowedTools", claudeCodeAllowedMCPTools(tools).join(","),
+          "--disallowedTools", "AskUserQuestion",
+          "--append-system-prompt-file", join(session.directory, "instructions.txt"),
+          ...(threadId ? ["--resume", threadId] : ["--session-id", id]),
+        ];
+        session.transport = createClaudeCodeSession({
+          invocation: claudeCodeLaunch(knownExecutable, args), cwd, spawnProcess,
+          async onLine(captured, line) {
+            if (!captured || captured.closed || captured.interrupted || session.retired) return;
+            await handleClaudeLine(captured, line, captured.settleStarted, () => releaseTurn(session, captured));
+          },
+          async onClose(captured, code, stopSignal, stderr) {
+            session.retired = true;
+            clearTimeout(session.idleTimer);
+            if (sessions.get(id) === session) sessions.delete(id);
+            if (captured && !captured.closed) {
+              captured.settleStarted(new Error(claudeExitMessage({ stderr }, code, stopSignal)));
+              releaseTurn(session, captured);
+              if (!captured.terminalEventSent && !captured.interrupted) {
+                captured.terminalEventSent = true;
+                await captured.handler.onNotification?.("turn/completed", {
+                  threadId: id, turnId: captured.turnId,
+                  turn: { status: "failed", error: { message: claudeExitMessage({ stderr }, code, stopSignal) } },
+                });
+              }
+            }
+            session.bridge?.server.close();
+            if (session.directory) rmSync(session.directory, { recursive: true, force: true });
+            session.directory = null;
+          },
         });
       }
-      cleanupTurn(context, activeTurns);
-    }).catch((error) => {
-      if (!context.startedSettled) settleStarted(error);
-      else context.handler.onDisconnect?.(error);
-      cleanupTurn(context, activeTurns);
-    });
-  });
-  child.stdin.end(prompt);
-  log("computer collaborator Claude Code turn started");
-  return started;
+      signal?.throwIfAborted();
+      if (session.retired || turn.interrupted) throw new Error("Claude Code turn cancelled");
+      session.transport.turn = turn;
+      session.transport.send(claudeUserPrompt(text, attachments, threadId ? "" : historyContext), id);
+      // A resident process emits init only once. Its session identity is already
+      // confirmed; this turn is admitted after writing its message to stdin.
+      if (session.initialized) turn.settleStarted();
+      log("computer collaborator Claude Code turn started");
+      const result = await started;
+      session.initialized = true;
+      return result;
+    } catch (error) {
+      if (turn) {
+        turn.settleStarted(error);
+        releaseTurn(session, turn);
+      }
+      if (session) await retire(session);
+      throw error;
+    } finally {
+      reservations.delete(id);
+    }
+  }
+  async function interrupt(threadId, turnId) {
+    const active = activeTurns.get(turnId);
+    if (!active || active.session.id !== threadId) return;
+    active.turn.interrupted = true;
+    active.turn.settleStarted(new Error("Claude Code turn cancelled"));
+    await retire(active.session);
+    releaseTurn(active.session, active.turn);
+  }
+  async function dispose() {
+    disposed = true;
+    process.removeListener("exit", onExit);
+    await Promise.all([...sessions.values()].map(async (session) => {
+      const turn = session.transport?.turn;
+      if (turn) {
+        turn.interrupted = true;
+        turn.settleStarted(new Error("Claude Code driver closed"));
+      }
+      await retire(session);
+    }));
+    sessionToolGrants.clear();
+  }
+  function onExit() {
+    for (const session of sessions.values()) {
+      session.transport?.child.kill("SIGTERM");
+      if (session.directory) rmSync(session.directory, { recursive: true, force: true });
+    }
+  }
+  process.once("exit", onExit);
+  return { status, refreshExecutable, ensureConnected, startTurn, interrupt, validateAttachments, dispose };
 }
 
-async function handleClaudeLine(context, line, settleStarted) {
+async function handleClaudeLine(context, line, settleStarted, complete) {
   if (!line.trim()) return;
   let message;
   try {
@@ -223,8 +246,7 @@ async function handleClaudeLine(context, line, settleStarted) {
     return;
   }
   if (message.type === "system" && message.subtype === "init") {
-    context.sessionId = String(message.session_id ?? context.sessionId ?? "").trim() || null;
-    if (!context.sessionId) throw new Error("Claude Code did not return a session id");
+    if (message.session_id !== context.sessionId) throw new Error("Claude Code returned a different session id");
     settleStarted();
     return;
   }
@@ -259,7 +281,7 @@ async function handleClaudeLine(context, line, settleStarted) {
     return;
   }
   if (message.type !== "result") return;
-  context.sessionId = String(message.session_id ?? context.sessionId ?? "").trim() || context.sessionId;
+  if (message.session_id && message.session_id !== context.sessionId) throw new Error("Claude Code returned a different session id");
   if (!context.startedSettled && context.sessionId) settleStarted();
   if (!context.textEmitted && typeof message.result === "string" && message.result) {
     context.textEmitted = true;
@@ -271,6 +293,7 @@ async function handleClaudeLine(context, line, settleStarted) {
   }
   const succeeded = message.subtype === "success" && message.is_error !== true;
   context.terminalEventSent = true;
+  complete();
   await context.handler.onNotification?.("turn/completed", {
     threadId: context.sessionId,
     turnId: context.turnId,
@@ -354,11 +377,79 @@ function claudeExitMessage(context, code, signal) {
   return `Claude Code exited with code ${code ?? "unknown"}`;
 }
 
-function cleanupTurn(context, activeTurns) {
-  context.bridge?.server.close();
-  if (context.temporaryDirectory) {
-    rmSync(context.temporaryDirectory, { recursive: true, force: true });
-    context.temporaryDirectory = null;
+
+
+// One subprocess owns one Claude transport session. The driver owns turn
+// admission; callbacks always retain the turn captured when a frame arrived.
+function createClaudeCodeSession({ invocation, cwd, spawnProcess = spawn, onLine, onClose }) {
+  const child = spawnProcess(invocation.command, invocation.args, {
+    cwd,
+    env: { ...process.env, NO_COLOR: "1", CLAUDE_CODE_AUTO_CONNECT_IDE: "false", CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" },
+    stdio: ["pipe", "pipe", "pipe"],
+    windowsHide: true,
+  });
+  let buffer = "";
+  let queue = Promise.resolve();
+  let stderr = "";
+  let closed = false;
+  let stopping = false;
+  let killTimer;
+  let resolveClosed;
+  const finished = new Promise((resolve) => { resolveClosed = resolve; });
+  const session = {
+    child,
+    turn: null,
+    get closed() { return closed || stopping; },
+    get stderr() { return stderr; },
+    send(text, sessionId) {
+      if (closed || stopping) throw new Error("Claude Code session is closed");
+      stderr = "";
+      child.stdin.write(`${JSON.stringify({ type: "user", session_id: sessionId,
+        message: { role: "user", content: text }, parent_tool_use_id: null })}\n`);
+    },
+    stop() {
+      if (!closed && !stopping) {
+        stopping = true;
+        child.kill("SIGTERM");
+        // Cancellation is confirmed by close, not by kill's return value.
+        killTimer = setTimeout(() => child.kill("SIGKILL"), 5_000);
+        killTimer.unref?.();
+      }
+      return finished;
+    },
+  };
+  function enqueue(line) {
+    const turn = session.turn;
+    queue = queue.then(() => onLine(turn, line)).catch((error) => {
+      turn?.fail(error);
+      void session.stop();
+    });
   }
-  activeTurns?.delete(context.turnId);
+  child.stdout.setEncoding?.("utf8");
+  child.stderr.setEncoding?.("utf8");
+  child.stdout.on("data", (chunk) => {
+    buffer += String(chunk);
+    while (buffer.includes("\n")) {
+      const index = buffer.indexOf("\n");
+      enqueue(buffer.slice(0, index));
+      buffer = buffer.slice(index + 1);
+    }
+  });
+  child.stderr.on("data", (chunk) => { stderr = `${stderr}${String(chunk)}`.slice(-32 * 1024); });
+  const fail = (error) => {
+    session.turn?.fail(error);
+    void session.stop();
+  };
+  child.on("error", fail);
+  child.stdin.on("error", fail);
+  child.on("close", (code, signal) => {
+    closed = true;
+    clearTimeout(killTimer);
+    if (buffer.trim()) enqueue(buffer);
+    queue.finally(async () => {
+      try { await onClose(session.turn, code, signal, stderr); }
+      finally { resolveClosed(); }
+    }).catch(() => {});
+  });
+  return session;
 }
