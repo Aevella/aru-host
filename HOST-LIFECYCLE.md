@@ -524,3 +524,13 @@ A real subprocess test invokes both the direct and linked installed entry and
 asserts missing configuration fails instead of silently returning success. Existing
 setup tests retain configuration after failure and verify successful file receipts
 before activation. Customer Podman/Desktop acceptance remains separate.
+
+
+2026-10-30 phone-reading repair: a newly paired device may take over the same
+source collaborator's read-only projection only with a newer revision and no
+generation regression. The snapshot owner durably retires the previous device,
+rejecting its late writes even if they claim a higher revision or generation.
+A different source cannot use this renewal path. Disabling remains durable across
+restart; neither device metadata nor retired writers enter model-visible reads.
+Four focused tests cover renewal, rejection, restart, re-enable and unrelated
+collaborator isolation. No computer cognition rows are rewritten.

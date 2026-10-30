@@ -12,8 +12,8 @@ function fixture(t) {
  t.after(() => rmSync(dir, { recursive: true, force: true }));
  const make = () => createCollaboratorCognitionHost({dataDir:dir,HttpError,readJSONBody:async req=>req.body,sendJSON:(res,status,body)=>Object.assign(res,{status,body})});
  let host=make();host.initialize(id,'isolated');host.initialize(other,'isolated');
- const request=async(body,suffix='phone-reading',method='PUT')=>{
-  const res={}; await host.route({method,body},res,`/aru/v1/hosted-collaborators/${id}/cognition/${suffix}`,()=>({deviceId:'phone'}),()=>({collaboratorId:id}));return res.body;
+ const request=async(body,suffix='phone-reading',method='PUT',deviceId='phone')=>{
+  const res={}; await host.route({method,body},res,`/aru/v1/hosted-collaborators/${id}/cognition/${suffix}`,()=>({deviceId}),()=>({collaboratorId:id}));return res.body;
  };
  const read=(collaboratorId=id)=>host.callSelfTool('aru_phone_memory_read',{}, {deviceId:'host'},{collaboratorId}).value;
  const body={schema:'aru.residence-reading.v1',sourceCollaboratorId:'phone-astra',displayName:'Astra',generation:1,revision:1,generatedAt:100,enabled:true,records:[{id:'phone-memory',title:'Preference',content:'Original phone material',kind:'memory'}]};
@@ -47,4 +47,17 @@ test('old two-way synchronization is retired before it can write',async t=>{
  const f=fixture(t), before=f.host.read(id);
  await assert.rejects(f.request({schema:'aru.residence-memory-sync.v1',changes:[{sharedId:'a',base:null,content:'must not import'}]},'memory-sync','POST'),e=>e.status===410);
  assert.deepEqual(f.host.read(id),before);
+});
+
+test('re-paired same source transfers a newer snapshot; retired and unrelated writers stay rejected after restart',async t=>{
+ const f=fixture(t);await f.request(f.body);const before=f.host.read(id);
+ await assert.rejects(f.request(f.body,'phone-reading','PUT','paired-again'),e=>e.status===409);
+ await assert.rejects(f.request({...f.body,sourceCollaboratorId:'unrelated',generation:2,revision:2},'phone-reading','PUT','other-phone'),e=>e.status===409);
+ await f.request({...f.body,revision:2,enabled:false},'phone-reading','PUT','paired-again');
+ f.restart();assert.throws(()=>f.read(),e=>e.status===403);
+ await assert.rejects(f.request({...f.body,generation:50,revision:100},'phone-reading','PUT','phone'),e=>e.status===409);
+ await f.request({...f.body,revision:3},'phone-reading','PUT','paired-again');
+ assert.equal(f.read().records[0].content,'Original phone material');
+ assert.equal(f.read().retiredDeviceIds,undefined);assert.equal(f.read().deviceId,undefined);
+ assert.deepEqual(f.host.read(id),before);assert.throws(()=>f.read(other),e=>e.status===403);
 });

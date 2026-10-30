@@ -2,6 +2,8 @@
 
 ## 0.39.0
 
+- Recover same-source phone reading after re-pairing, retiring old writers so late snapshots cannot restore outdated access.
+
 - Run container setup correctly through installed release symlinks and Windows junctions; verification failures no longer silently succeed without saving configuration.
 - Report Core container verification failures and allow stalled probes to recover.
 - Send one visible completion notification for relayed replies.

@@ -26,11 +26,19 @@ function createResidenceReading({ root, HttpError }) {
       throw new HttpError(400, "reading.invalid", "Invalid reading projection");
     }
     const old = load(id);
-    if (old && (old.deviceId !== device.deviceId || body.generation < old.generation
-        || (body.generation === old.generation && (body.sourceCollaboratorId !== old.sourceCollaboratorId || body.revision < old.revision)))) {
-      throw new HttpError(409, "reading.stale", "Reading relationship or revision changed");
+    const retiredDeviceIds = old?.retiredDeviceIds ?? [];
+    const changedDevice = old && old.deviceId !== device.deviceId;
+    // A paired phone may renew its credential/device identity. The same source's
+    // newer projection transfers this read-only slot, not computer memory or a
+    // different phone's relationship. Retired writers can never take it back.
+    if (old && (retiredDeviceIds.includes(device.deviceId)
+        || body.generation < old.generation
+        || (body.generation === old.generation && (body.sourceCollaboratorId !== old.sourceCollaboratorId || body.revision < old.revision))
+        || (changedDevice && (body.sourceCollaboratorId !== old.sourceCollaboratorId || body.revision <= old.revision)))) {
+      throw new HttpError(409, "reading.stale", "Reading relationship or revision changed; publish a newer snapshot from the linked phone collaborator");
     }
-    const value = { ...body, records: body.enabled ? body.records : [], deviceId: device.deviceId };
+    const value = { ...body, records: body.enabled ? body.records : [], deviceId: device.deviceId,
+      retiredDeviceIds: changedDevice ? [...retiredDeviceIds, old.deviceId] : retiredDeviceIds };
     if (old && body.generation === old.generation && body.revision === old.revision
         && (value.enabled !== old.enabled || JSON.stringify(value.records) !== JSON.stringify(old.records))) {
       throw new HttpError(409, "reading.revision_reused", "A reading revision cannot change its content or permission");
@@ -43,7 +51,7 @@ function createResidenceReading({ root, HttpError }) {
   function read(id) {
     const value = load(id);
     if (!value || !value.enabled) throw new HttpError(403, "reading.unavailable", "Phone reading is not enabled or has not been provided");
-    const { deviceId: _, ...result } = value;
+    const { deviceId: _, retiredDeviceIds: __, ...result } = value;
     return { sourceCollaboratorId: result.sourceCollaboratorId, displayName: result.displayName,
       generatedAt: result.generatedAt, records: result.records, source: "phone", readOnly: true, freshness: "last_phone_provided_snapshot",
       instruction: "Read-only material from your phone side at generatedAt. This is not a live phone connection and not your computer memory. Reading does not authorize copying, editing, or deleting either side's memories." };
