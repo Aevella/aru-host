@@ -515,3 +515,12 @@ skipped on macOS), plus the real-subprocess synthetic MCP/approval smoke. Genera
 runtime consistency passed. A real installed CLI reached initialization and returned
 an upstream account-access failure; successful real-model multi-turn output and
 phone/installed-release acceptance remain unverified. No installer was released.
+
+
+2026-10-30 installed container setup entry (source/local proof): Node resolves an
+installed symlink/junction main module to its real path, while argv retains the
+link. The setup entry now compares canonical paths before running verification.
+A real subprocess test invokes both the direct and linked installed entry and
+asserts missing configuration fails instead of silently returning success. Existing
+setup tests retain configuration after failure and verify successful file receipts
+before activation. Customer Podman/Desktop acceptance remains separate.

@@ -1,6 +1,8 @@
 import test from "node:test";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, writeFile, rm, stat } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile, rm, stat, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { configureContainerRuntime, replaceRuntime, verifyContainerRuntime } from "../container-runtime-setup.mjs";
@@ -180,5 +182,21 @@ test("Linux probe avoids private service TMPDIR and cleans up on sandbox failure
     await assert.rejects(stat(probe), { code: "ENOENT" });
   } finally {
     if (oldTmp === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = oldTmp;
+  }
+});
+
+// Installed Unix releases use symlinks; Windows uses directory junctions.
+// Node resolves the entrypoint, while argv retains the installed link spelling.
+test("installed linked CLI executes setup and reports failure instead of silently succeeding", async t => {
+  const directory = await mkdtemp(join(tmpdir(), "aru-setup-entry-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const root = fileURLToPath(new URL("../", import.meta.url));
+  const current = join(directory, "current");
+  await symlink(root, current, process.platform === "win32" ? "junction" : "dir");
+  for (const entry of [join(root, "container-runtime-setup.mjs"), join(current, "container-runtime-setup.mjs")]) {
+    const result = spawnSync(process.execPath, [entry, join(directory, "missing-node.env")], { encoding: "utf8" });
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /ENOENT/);
+    assert.equal(result.stdout, "");
   }
 });

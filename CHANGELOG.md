@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.39.0
+
+- Run container setup correctly through installed release symlinks and Windows junctions; verification failures no longer silently succeed without saving configuration.
+- Report Core container verification failures and allow stalled probes to recover.
+- Send one visible completion notification for relayed replies.
+- Preserve reasoning across API tool continuations and remove echoed timestamp metadata from mobile deliveries.
+- Keep Claude Code sessions resident across turns, with isolated approvals and cancellation.
+- Execute explicitly delegated phone MCP tools with encrypted credentials, recoverable connections and durable revocation.
+- Expose lifecycle-safe computer collaborator removal in the Console.
+- See [upgrade instructions and verification boundaries](docs/releases/0.39.0.md).
+
 ## 0.38.0
 
 - Unify desktop installation admission and activation recovery.

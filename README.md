@@ -19,7 +19,7 @@ Aru Host 是 Aru 的用户自有能力节点。它把电脑或 VPS 变成一台�
 
 当前版本是 **0.32.0**，Host 协议版本为 `stub-0.30`。它与当前 Aru TestFlight 版本配套使用，并提供面向普通 Mac 用户的 Apple 签名、公证安装包，面向 Debian/Ubuntu 桌面用户的 `x64` / `arm64` 安装包，以及 **Windows x64 预览版（未签名）**。
 
-安装包、更新范围与升级说明见 [0.38.0 发布说明](docs/releases/0.38.0.md)。
+安装包、更新范围与升级说明见 [0.39.0 发布说明](docs/releases/0.39.0.md)。
 
 ## 第一次来？
 
@@ -37,7 +37,7 @@ Aru 是 iPhone 上的 AI 协作者应用，本仓库不包含它。Aru Host 是 
 
 ## Windows：预览版安装
 
-在 [最新版本页面](https://github.com/Aevella/aru-host/releases/latest) 下载 `aru-host-windows-0.38.0-x64.exe` 和同名 `.sha256` 校验文件，运行安装包。它按当前用户安装 Host；第一次启动会准备 Host Core，保存的凭据由 Windows DPAPI 保护。手机连接若被防火墙阻挡，Console 会提供配置入口。
+在 [最新版本页面](https://github.com/Aevella/aru-host/releases/latest) 下载 `aru-host-windows-0.39.0-x64.exe` 和同名 `.sha256` 校验文件，运行安装包。它按当前用户安装 Host；第一次启动会准备 Host Core，保存的凭据由 Windows DPAPI 保护。手机连接若被防火墙阻挡，Console 会提供配置入口。
 
 此版本尚未代码签名，系统可能显示信誉提示。Windows 预览版不等同于 Mac 的签名公证状态；当前不提供 Windows arm64 包。升级直接运行新版安装包，不必先卸载。
 
