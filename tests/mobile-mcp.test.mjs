@@ -84,9 +84,12 @@ test("revocation blocks stale tools even when credential cleanup fails, and retr
   const f = setup(t); await f.put(body()); await f.host.runDue();
   const who = f.identity(), remote = (await f.host.mcpTools(who)).find(x => x.mobileMCP);
   f.lockRemoval(true);
-  await assert.rejects(f.route("POST", "/aru/v1/mobile-collaborator-replicas/phone/revoke", { epoch: 1 }));
+  const receipt = await f.route("POST", "/aru/v1/mobile-collaborator-replicas/phone/revoke", { epoch: 1 });
+  assert.equal(receipt.epoch, 1); // Phone ownership can return despite a locked cleanup backend.
   assert.throws(() => f.host.callMCP(remote.name, {}, who, { tool: remote }), /revoked/);
-  f.lockRemoval(false); await f.route("POST", "/aru/v1/mobile-collaborator-replicas/phone/revoke", { epoch: 1 });
+  f.lockRemoval(false); f.restart(); await f.host.start();
+  await new Promise(resolve => setImmediate(resolve));
+  await f.route("POST", "/aru/v1/mobile-collaborator-replicas/phone/revoke", { epoch: 1 });
   assert.equal(f.secrets.size, 0);
   await f.put(body([connection()], 2, 2)); await f.host.runDue();
   assert.ok((await f.host.mcpTools(f.identity())).some(x => x.mobileMCP));

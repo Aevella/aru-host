@@ -481,15 +481,17 @@ can represent a completed side effect and is reported as uncertain to the model.
 
 Grant, executor, configuration fingerprint and rule selection are checked before
 network effects and after results. Revocation is durable before key cleanup; cleanup
-failure is retryable. Superseded epoch keys are cleaned on subsequent sync if the
-first cleanup fails. Re-synchronizing the same content can repair a missing derived
+failure does not withhold the revocation receipt or phone ownership. Retired
+keys retry cleanup on startup, subsequent sync or repeated revocation. Re-synchronizing the same content can repair a missing derived
 encryption key. Credential IO precedes reading scheduler state, preserving occurrences
 settled while the keyring was busy. Access-token expiry requires phone reauthorization
 and sync; refresh-token ownership is not duplicated on Host.
 
 Source/local proof: 40 recovery/credential-store tests and the 27-case
 conversation/Claude integration selection pass (overlapping MCP cases). A further
-16-case MCP run includes stalled-request termination and fresh-session recovery. No published release or customer
+16-case MCP run includes stalled-request termination and fresh-session recovery.
+The final 33-case replica/recovery selection confirms that failed credential cleanup
+does not block returning execution to the phone. No published release or customer
 server/device acceptance is claimed.
 
 

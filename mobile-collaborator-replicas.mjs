@@ -645,16 +645,21 @@ function createMobileCollaboratorReplicaHost({
         const current = replicaForId(sourceCollaboratorId, false);
         if (current && current.epoch > epoch) throw new HttpError(409, "mobile_replica.epoch_stale", "a newer execution grant is active");
         const previous = ledger.revokedExecutions;
+        const previousCleanup = ledger.mcpCleanup ?? [];
         const oldMCP = current?.mcp;
         ledger.revokedExecutions = previous.filter(item => item.sourceCollaboratorId !== sourceCollaboratorId);
         ledger.revokedExecutions.push({ sourceCollaboratorId,
           epoch: Math.max(epoch, previous.find(item => item.sourceCollaboratorId === sourceCollaboratorId)?.epoch ?? 0) });
         if (current) delete current.mcp;
+        if (mcpSecretStore && !previousCleanup.some(item => item.sourceCollaboratorId === sourceCollaboratorId && item.epoch === epoch)) {
+          ledger.mcpCleanup = [...previousCleanup, { sourceCollaboratorId, epoch }];
+        }
         try { saveLedger(); }
-        catch (error) { ledger.revokedExecutions = previous; if (current) current.mcp = oldMCP; throw error; }
+        catch (error) { ledger.revokedExecutions = previous; ledger.mcpCleanup = previousCleanup; if (current) current.mcp = oldMCP; throw error; }
         mcp.invalidate(sourceCollaboratorId);
-        // Revocation is durable before secret cleanup. Retrying repeats cleanup, never execution.
-        if (mcpSecretStore) { await mcp.remove(sourceCollaboratorId, epoch); await cleanupMCP(sourceCollaboratorId); }
+        // Durable revocation is sufficient to return phone ownership. An inaccessible
+        // retired key must not hold that handoff hostage; cleanup has its own retry.
+        if (mcpSecretStore) await cleanupMCP(sourceCollaboratorId);
         schedule();
       });
       sendJSON(res, 200, { schema: "aru.selfhost.mobile-collaborator-revoke-receipt.v1", sourceCollaboratorId, epoch });
@@ -898,6 +903,9 @@ function createMobileCollaboratorReplicaHost({
     try { recoverStorage(); await drainRecovery(); }
     catch (error) { log(`mobile collaborator recovery pending: ${error?.message ?? error}`); }
     schedule();
+    for (const id of new Set((ledger.mcpCleanup ?? []).map(item => item.sourceCollaboratorId))) {
+      void serialized(id, () => cleanupMCP(id)).catch(() => {});
+    }
   }
 
   function stop() {
