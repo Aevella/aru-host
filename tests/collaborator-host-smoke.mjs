@@ -213,7 +213,7 @@ assert.equal(collaborators.every((item) => item.activationStatus === "driver-unh
 
 const owner = state.hostedCollaborators[0];
 const otherOwner = state.hostedCollaborators[1];
-const conversationTools = conversationOptions.toolCatalog(owner);
+const conversationTools = await conversationOptions.toolCatalog(owner);
 assert.equal(conversationTools.some((tool) => tool.name === "test_other_tool"), true);
 const publishTool = conversationTools.find((tool) => tool.name === "aru_collaborator_surface_publish");
 assert.ok(publishTool);
@@ -339,7 +339,7 @@ await assert.rejects(
   (error) => error.code === "surface.project_symlink",
 );
 unlinkSync(linkedAsset);
-assert.equal(conversationOptions.toolCatalog(otherOwner).length, conversationTools.length);
+assert.equal((await conversationOptions.toolCatalog(otherOwner)).length, conversationTools.length);
 await assert.rejects(
   conversationOptions.executeTool(
     "aru_collaborator_surface_publish",
