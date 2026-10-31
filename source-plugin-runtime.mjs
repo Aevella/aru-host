@@ -15,6 +15,7 @@ import {
 import { dirname, join, resolve } from "node:path";
 
 const RESULT_PREFIX = "ARU_SOURCE_PLUGIN_RESULT_JSON=";
+export const SOURCE_RUNTIME_UNAVAILABLE_MESSAGE = "Source plugins require a running container runtime (Podman or Docker), configured through Host Console > Runtime > Verify and enable, or a Node.js permission runtime that enforces network denial and supports explicit network grants (Node.js 25+).";
 const NETWORK_PERMISSION_PROBE = [
   "const net = require('node:net');",
   "const server = net.createServer();",
@@ -318,7 +319,7 @@ export function createSourcePluginRuntime({
   function requireAvailable() {
     if (!available) {
       throw new HttpError(503, "plugin.source_runtime_unavailable",
-        "Source plugins require a container runtime or a Node.js permission runtime that enforces network denial and supports explicit network grants (Node.js 25+)");
+        SOURCE_RUNTIME_UNAVAILABLE_MESSAGE);
     }
   }
 
