@@ -567,7 +567,7 @@ export function createCollaboratorConversationHost({
   async function handleToolCall(conversation, collaborator, tools, params, execution, expectedTurn) {
     const admitResult = () => {
       execution.signal.throwIfAborted();
-      if (conversation.activeTurn !== expectedTurn) throw new Error("Turn is no longer active");
+      if (conversation.activeTurn !== expectedTurn || !ACTIVE_STATES.has(expectedTurn.state)) throw new Error("Turn is no longer active");
     };
     admitResult();
     const tool = tools.find((candidate) => candidate.name === params.tool);
@@ -819,16 +819,10 @@ export function createCollaboratorConversationHost({
     for (const collaboratorId of readdirSync(root)) {
       if (!ID.test(collaboratorId)) continue;
       for (const conversation of loadConversations(collaboratorId)) {
-        if (!conversation.activeTurn || !ACTIVE_STATES.has(conversation.activeTurn.state)) continue;
-        for (const approval of conversation.approvals.filter((item) => item.state === "pending")) {
-          approval.state = "expired";
-          approval.resolvedAt = now();
-          approval.decision = "interrupted";
-          appendEvent(conversation, "approval.resolved", {
-            turnId: approval.turnId,
-            approvalId: approval.approvalId,
-            decision: "interrupted",
-          });
+        const expired = expireApprovals(conversation);
+        if (!conversation.activeTurn || !ACTIVE_STATES.has(conversation.activeTurn.state)) {
+          if (expired) saveConversation(conversation);
+          continue;
         }
         interruptConversation(conversation, "Aru Host 重启后保留了历史，但没有重复执行未完成的动作");
       }
@@ -853,11 +847,30 @@ export function createCollaboratorConversationHost({
     return approval;
   }
 
+  function expireApprovals(conversation, turnId) {
+    let changed = false;
+    for (const approval of conversation.approvals) {
+      if (approval.state !== "pending" || (turnId && approval.turnId !== turnId)) continue;
+      changed = true;
+      const pending = pendingApprovals.get(approval.approvalId);
+      pendingApprovals.delete(approval.approvalId);
+      approval.state = "expired";
+      approval.decision = "interrupted";
+      approval.resolvedAt = now();
+      appendEvent(conversation, "approval.resolved", {
+        turnId: approval.turnId, approvalId: approval.approvalId, decision: "interrupted",
+      });
+      pending?.continuation("cancel");
+    }
+    return changed;
+  }
+
   function completeConversation(conversation) {
     const turn = conversation.activeTurn;
     if (!turn) return;
     turn.state = "completed";
     turn.completedAt = now();
+    expireApprovals(conversation, turn.turnId);
     message(conversation, turn.assistantMessageId).status = "completed";
     appendEvent(conversation, "turn.completed", { turnId: turn.turnId });
     touch(conversation, null);
@@ -871,6 +884,7 @@ export function createCollaboratorConversationHost({
     if (!turn || !ACTIVE_STATES.has(turn.state)) return;
     turn.state = "failed";
     turn.completedAt = now();
+    expireApprovals(conversation, turn.turnId);
     turn.failure = failure;
     message(conversation, turn.assistantMessageId).status = "failed";
     appendEvent(conversation, "turn.failed", { turnId: turn.turnId, message: failure });
@@ -885,6 +899,7 @@ export function createCollaboratorConversationHost({
     if (!turn || !ACTIVE_STATES.has(turn.state)) return;
     turn.state = "interrupted";
     turn.completedAt = now();
+    expireApprovals(conversation, turn.turnId);
     turn.failure = failure;
     message(conversation, turn.assistantMessageId).status = "interrupted";
     appendEvent(conversation, "turn.interrupted", { turnId: turn.turnId, message: failure });

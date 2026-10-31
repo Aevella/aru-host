@@ -570,3 +570,11 @@ A truncated-part/restart/retry test demonstrates the previously blocked recovery
 Attachment, reading and Claude bridge checks passed (15 tests); the refined
 truncated-part test and all 7 attachment checks passed again. Source and generated
 runtime are verified, not release/customer-device acceptance.
+
+2026-10-31 terminal approval audit: completion, failure and interruption expire
+only their turn's pending approvals and release waiting continuations. Startup
+also expires orphaned approvals on already-terminal conversations. Tool admission
+checks the turn's active state, not merely its object identity, so late callbacks
+cannot execute against a failed turn. The focused approval/Claude transport suites
+pass 18 checks, including failure while waiting, zero remaining approvals, late
+callback rejection, reopen and next-turn admission. Not a packaged release claim.
