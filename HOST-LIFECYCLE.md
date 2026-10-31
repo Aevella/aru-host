@@ -578,3 +578,13 @@ checks the turn's active state, not merely its object identity, so late callback
 cannot execute against a failed turn. The focused approval/Claude transport suites
 pass 18 checks, including failure while waiting, zero remaining approvals, late
 callback rejection, reopen and next-turn admission. Not a packaged release claim.
+
+2026-10-31 admission audit: attachment binding moved into the admitted turn's
+preparation/error boundary. A binding failure after the conversation ledger commit
+now terminates that turn rather than leaving it queued without a runner. Preparation
+state persistence is also inside that boundary. The conversation ledger prevents
+an already-referenced attachment from being rebound even if its metadata write
+failed. Fault injection proves retained message/attachment, zero driver starts on
+failure, and the next send starting without restart (13 focused checks passed).
+The ordinary attachment conversation smoke passed; generated consistency passed.
+This is source/local proof, not a released or customer-installed fix.

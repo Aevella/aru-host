@@ -595,7 +595,8 @@ function createCollaboratorConversationAttachmentHost({
       if (!existsSync(contentPath(record)) || !["ready", "bound"].includes(record.state)) {
         throw new HttpError(409, "attachment.not_ready", `${record.filename} has not finished uploading`);
       }
-      if (record.messageId) {
+      if (record.messageId || conversation.messages.some(message =>
+        (message.attachments ?? []).some(attachment => attachment.attachmentId === record.attachmentId))) {
         throw new HttpError(409, "attachment.already_bound", `${record.filename} already belongs to another message`);
       }
     }
@@ -1275,7 +1276,6 @@ function createCollaboratorConversationHost({
       assistantMessageId: assistantMessage.messageId,
     });
     saveConversation(conversation);
-    attachments.commitMessageBindings(conversation, userMessage);
     defer(() => runTurn(conversation.collaboratorId, conversation.conversationId, collaborator, turn.turnId));
     return publicConversation(conversation, true);
   }
@@ -1403,10 +1403,13 @@ function createCollaboratorConversationHost({
     const execution = createTurnExecution();
     executions.set(conversationKey(collaboratorId, conversationId), execution);
     const acceptsResult = () => conversation.activeTurn === turn && ACTIVE_STATES.has(turn.state) && !execution.signal.aborted;
-    setTurnState(conversation, "starting");
-    turn.startedAt = now();
-    saveConversation(conversation);
     try {
+      setTurnState(conversation, "starting");
+      turn.startedAt = now();
+      saveConversation(conversation);
+      // The accepted message is durable before preparation. Binding failures
+      // must finish its turn, never strand a queued message without a runner.
+      attachments.commitMessageBindings(conversation, message(conversation, turn.userMessageId));
       const driver = driverForCollaborator(collaborator);
       activeDrivers.set(conversationKey(collaboratorId, conversationId), driver);
       const workspace = join(workspaceRoot, collaborator.collaboratorId);

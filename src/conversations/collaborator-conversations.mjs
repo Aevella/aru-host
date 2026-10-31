@@ -306,7 +306,6 @@ export function createCollaboratorConversationHost({
       assistantMessageId: assistantMessage.messageId,
     });
     saveConversation(conversation);
-    attachments.commitMessageBindings(conversation, userMessage);
     defer(() => runTurn(conversation.collaboratorId, conversation.conversationId, collaborator, turn.turnId));
     return publicConversation(conversation, true);
   }
@@ -434,10 +433,13 @@ export function createCollaboratorConversationHost({
     const execution = createTurnExecution();
     executions.set(conversationKey(collaboratorId, conversationId), execution);
     const acceptsResult = () => conversation.activeTurn === turn && ACTIVE_STATES.has(turn.state) && !execution.signal.aborted;
-    setTurnState(conversation, "starting");
-    turn.startedAt = now();
-    saveConversation(conversation);
     try {
+      setTurnState(conversation, "starting");
+      turn.startedAt = now();
+      saveConversation(conversation);
+      // The accepted message is durable before preparation. Binding failures
+      // must finish its turn, never strand a queued message without a runner.
+      attachments.commitMessageBindings(conversation, message(conversation, turn.userMessageId));
       const driver = driverForCollaborator(collaborator);
       activeDrivers.set(conversationKey(collaboratorId, conversationId), driver);
       const workspace = join(workspaceRoot, collaborator.collaboratorId);
