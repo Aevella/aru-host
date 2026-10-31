@@ -559,3 +559,14 @@ Focused attachment recovery/integrity, assistant projection and residence-readin
 checks: 14 passed; generated payload consistency passed. Existing same-source
 re-pair recovery remains in place. Customer Host version and device reproduction
 are unknown; no packaged release or customer acceptance is claimed.
+
+2026-10-31 recovery audit: a newly paired device publishing a newer snapshot for
+exactly the same phone collaborator may restart its local relationship generation.
+Generation ordering remains enforced within one device identity; retired identities
+and unrelated sources cannot reclaim the slot. Recovery tests persist/reopen the
+state and cover revocation after transfer. Upload retries may atomically replace
+corrupt staging parts; completion still checks the original size/hash and ownership.
+A truncated-part/restart/retry test demonstrates the previously blocked recovery.
+Attachment, reading and Claude bridge checks passed (15 tests); the refined
+truncated-part test and all 7 attachment checks passed again. Source and generated
+runtime are verified, not release/customer-device acceptance.

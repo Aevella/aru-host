@@ -61,3 +61,13 @@ test('re-paired same source transfers a newer snapshot; retired and unrelated wr
  assert.equal(f.read().retiredDeviceIds,undefined);assert.equal(f.read().deviceId,undefined);
  assert.deepEqual(f.host.read(id),before);assert.throws(()=>f.read(other),e=>e.status===403);
 });
+
+test('renewed device can restart its relationship counter without admitting old writers', async t => {
+ const f=fixture(t);await f.request({...f.body,generation:8,revision:100});
+ await f.request({...f.body,generation:1,revision:101},'phone-reading','PUT','new-phone');
+ f.restart();
+ await f.request({...f.body,generation:1,revision:102,enabled:false},'phone-reading','PUT','new-phone');
+ assert.throws(()=>f.read(),e=>e.status===403);
+ await assert.rejects(f.request({...f.body,generation:99,revision:103}),e=>e.status===409);
+ await assert.rejects(f.request({...f.body,generation:1,revision:104,sourceCollaboratorId:'someone-else'},'phone-reading','PUT','third-phone'),e=>e.status===409);
+});
