@@ -40,6 +40,15 @@ test('persistent collaborator permission applies to new conversations and revoke
   await handler.onApproval({method: 'item/commandExecution/requestApproval', params: {}, respond: value => {response = value;}});
   assert.equal(response, undefined);
   assert.equal((await call('GET', revoked)).pendingApprovalCount, 1);
+  const bridge = new AbortController();
+  await handler.onApproval({method: 'item/commandExecution/requestApproval', params: {}, signal: bridge.signal,
+    respond: value => { response = value; }});
+  assert.equal((await call('GET', revoked)).pendingApprovalCount, 2);
+  bridge.abort();
+  assert.equal((await call('GET', revoked)).pendingApprovalCount, 1);
+  assert.equal((await call('GET', unrelated)).pendingApprovalCount, 1);
+  assert.deepEqual(response, {decision: 'cancel'});
+
 });
 
 test('mobile replica turns follow the executing computer face approval setting', async t => {

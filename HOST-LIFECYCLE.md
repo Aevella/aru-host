@@ -534,3 +534,17 @@ A different source cannot use this renewal path. Disabling remains durable acros
 restart; neither device metadata nor retired writers enter model-visible reads.
 Four focused tests cover renewal, rejection, restart, re-enable and unrelated
 collaborator isolation. No computer cognition rows are rewritten.
+
+2026-10-31: Claude Code's authenticated loopback MCP transport now uses a native
+HTTP request whose lifetime follows MCP cancellation and stdio closure rather
+than fetch's implicit response-header deadline. Requests are dispatched without
+blocking cancellation/ping behind pending human approval. A disconnected approval
+request cancels only its originating conversation approval; late decisions cannot
+create session grants. Resolving one approval preserves other pending approvals
+and does not revive a terminal turn. Tool calls are never automatically replayed.
+Focused proof: claude-code-mcp-bridge.test.mjs (real loopback HTTP delayed approval,
+MCP cancellation, late grant rejection, next request, stdio closure), plus
+claude-code-resident.test.mjs and collaborator-approval-policy.test.mjs: 17 passed.
+Generated runtime consistency and diff checks passed. This is local transport and
+owner proof; the customer's reported fetch failure is not reproduced, and this
+change has not yet been packaged, released or verified on their installation.

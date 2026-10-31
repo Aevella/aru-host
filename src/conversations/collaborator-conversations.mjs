@@ -537,7 +537,7 @@ export function createCollaboratorConversationHost({
 
   async function requestDriverApproval(conversation, collaborator, request) {
     const turn = conversation.activeTurn;
-    if (!turn) return;
+    if (!turn || request.signal?.aborted) return;
     if (approvalAllowsAlways(collaborator)) {
       request.respond(driverApprovalResponse(request.method, request.params, "allowOnce"));
       return;
@@ -547,14 +547,21 @@ export function createCollaboratorConversationHost({
       title: driverApprovalTitle(request.method),
       detail: publicApprovalDetail(request.method, request.params),
     });
+    const cancelled = () => {
+      if (approval.state !== "pending") return;
+      resolveApproval(conversation, approval.approvalId, { decision: "cancel" }, { deviceId: "claude-code-bridge" });
+    };
     pendingApprovals.set(approval.approvalId, {
       conversation,
       continuation(decision) {
+        request.signal?.removeEventListener("abort", cancelled);
         request.respond(driverApprovalResponse(request.method, request.params, decision));
       },
     });
     setTurnState(conversation, "waitingApproval");
     saveConversation(conversation);
+    request.signal?.addEventListener("abort", cancelled, { once: true });
+    if (request.signal?.aborted) cancelled();
   }
 
   async function handleToolCall(conversation, collaborator, tools, params, execution, expectedTurn) {
@@ -669,7 +676,10 @@ export function createCollaboratorConversationHost({
     approval.resolvedAt = now();
     approval.resolvedByDeviceId = device.deviceId;
     pendingApprovals.delete(approvalId);
-    setTurnState(conversation, "streaming");
+    if (conversation.activeTurn?.turnId === approval.turnId && ACTIVE_STATES.has(conversation.activeTurn.state)) {
+      setTurnState(conversation, conversation.approvals.some(item => item.turnId === approval.turnId && item.state === "pending")
+        ? "waitingApproval" : "streaming");
+    }
     appendEvent(conversation, "approval.resolved", {
       turnId: approval.turnId,
       approvalId,
