@@ -466,9 +466,9 @@ return { createReplicaRecordStore };
 const module4 = (() => {
 // Request timestamps are not authored dialogue. Only remove the exact standalone
 // JSON envelope emitted by Host; examples, malformed tags and other prose survive.
-function assistantDeliveryContent(content) {
+function assistantDeliveryContent(content, { trim = true, partial = false } = {}) {
   let fence;
-  return String(content ?? "").split(/(?<=\n)/).filter(line => {
+  const result = String(content ?? "").split(/(?<=\n)/).filter(line => {
     const body = line.replace(/\r?\n$/, "");
     if (/^(?: {4}|\t)/.test(body)) return true;
     const visible = body.replace(/^ {0,3}/, "");
@@ -479,6 +479,9 @@ function assistantDeliveryContent(content) {
     }
     const opening = visible.match(/^(`{3,}|~{3,})/);
     if (opening) { fence = { marker: opening[1][0], length: opening[1].length }; return true; }
+    if (partial && !line.endsWith("\n") && visible &&
+        ("<message_meta>".startsWith(visible.toLowerCase()) ||
+         (visible.toLowerCase().startsWith("<message_meta>") && !visible.toLowerCase().includes("</message_meta>")))) return false;
     const match = visible.match(/^<message_meta>(.*)<\/message_meta>[ \t]*$/i);
     if (!match) return true;
     try {
@@ -492,7 +495,8 @@ function assistantDeliveryContent(content) {
       }
       return false;
     } catch { return true; }
-  }).join("").trim();
+  }).join("");
+  return trim ? result.trim() : result;
 }
 return { assistantDeliveryContent };
 })();

@@ -4,14 +4,56 @@ import * as node1 from 'node:path';
 import * as node2 from 'node:fs';
 import * as node3 from 'node:events';
 
+// src/host/assistant-delivery-content.mjs
+const module2 = (() => {
+// Request timestamps are not authored dialogue. Only remove the exact standalone
+// JSON envelope emitted by Host; examples, malformed tags and other prose survive.
+function assistantDeliveryContent(content, { trim = true, partial = false } = {}) {
+  let fence;
+  const result = String(content ?? "").split(/(?<=\n)/).filter(line => {
+    const body = line.replace(/\r?\n$/, "");
+    if (/^(?: {4}|\t)/.test(body)) return true;
+    const visible = body.replace(/^ {0,3}/, "");
+    if (fence) {
+      const closing = visible.match(/^(`{3,}|~{3,})[ \t]*$/);
+      if (closing && closing[1][0] === fence.marker && closing[1].length >= fence.length) fence = undefined;
+      return true;
+    }
+    const opening = visible.match(/^(`{3,}|~{3,})/);
+    if (opening) { fence = { marker: opening[1][0], length: opening[1].length }; return true; }
+    if (partial && !line.endsWith("\n") && visible &&
+        ("<message_meta>".startsWith(visible.toLowerCase()) ||
+         (visible.toLowerCase().startsWith("<message_meta>") && !visible.toLowerCase().includes("</message_meta>")))) return false;
+    const match = visible.match(/^<message_meta>(.*)<\/message_meta>[ \t]*$/i);
+    if (!match) return true;
+    try {
+      const value = JSON.parse(match[1]);
+      const keys = ["sent_at", "sent_at_unix_ms", "updated_at", "updated_at_unix_ms"];
+      if (!value || Array.isArray(value) || Object.keys(value).length !== keys.length || !keys.every(key => Object.hasOwn(value, key))) return true;
+      for (const key of ["sent_at", "updated_at"]) {
+        const milliseconds = value[key + "_unix_ms"];
+        if (typeof milliseconds !== "number" || !Number.isFinite(milliseconds)) return true;
+        if (milliseconds <= 0 ? value[key] !== null : value[key] !== new Date(milliseconds).toISOString()) return true;
+      }
+      return false;
+    } catch { return true; }
+  }).join("");
+  return trim ? result.trim() : result;
+}
+return { assistantDeliveryContent };
+})();
+
 // src/conversations/conversation-sync.mjs
 const module1 = (() => {
+const { assistantDeliveryContent } = module2;
 // Read-only wire projections. The conversation ledger remains the sole durable owner.
 const SYNC_SCHEMA = "aru.selfhost.collaborator-conversation-sync.v1";
 const PAGE_SCHEMA = "aru.selfhost.collaborator-conversation-message-page.v1";
 const pageSize = 64;
 const eventPageSize = 128;
-const publicMessage = ({ clientRequestId: _, driverText: __, ...value }, position) => ({ ...value, position });
+function publicMessage({ clientRequestId: _, driverText: __, ...value }, position) {
+  return { ...value, content: value.role === "assistant" ? assistantDeliveryContent(value.content, { trim: false, partial: value.status === "streaming" }) : value.content, position };
+}
 
 function messagePage(conversation, before, HttpError) {
   const source = conversation.messages;
@@ -93,11 +135,11 @@ function syncProjection(conversation, metadata, version, after) {
     events: page.filter(event => event.kind !== "assistant.delta"), cursor, hasMore: cursor < tail,
     history: history ? { before: history.before, hasMore: history.hasMore } : null };
 }
-return { SYNC_SCHEMA, PAGE_SCHEMA, messagePage, syncProjection };
+return { SYNC_SCHEMA, PAGE_SCHEMA, publicMessage, messagePage, syncProjection };
 })();
 
 // src/conversations/driver-projection.mjs
-const module2 = (() => {
+const module3 = (() => {
 const { createHash } = node0;
 const { isAbsolute, relative, resolve } = node1;
 function replicaInstructions(replica) {
@@ -271,7 +313,7 @@ return { replicaInstructions, proactiveReplicaSeed, messageContentWithTime, hist
 })();
 
 // src/conversations/attachment-chunks.mjs
-const module4 = (() => {
+const module5 = (() => {
 const { randomUUID } = node0;
 const { existsSync, readFileSync, writeFileSync, renameSync, rmSync, statSync, openSync, fsyncSync, closeSync } = node2;
 const { join } = node1;
@@ -335,9 +377,11 @@ function createAttachmentChunkTransfer({ HttpError, recordDirectory, loadAttachm
         } else {
           const temporary = `${destination}.${randomUUID()}.tmp`;
           try {
-            writeFileSync(temporary, bytes, { mode: 0o600 });
-            const descriptor = openSync(temporary, "r");
-            try { fsyncSync(descriptor); } finally { closeSync(descriptor); }
+            const descriptor = openSync(temporary, "wx", 0o600);
+            try {
+              writeFileSync(descriptor, bytes);
+              fsyncSync(descriptor);
+            } finally { closeSync(descriptor); }
             renameSync(temporary, destination);
           }
           finally { rmSync(temporary, { force: true }); }
@@ -372,7 +416,7 @@ return { createAttachmentChunkTransfer };
 })();
 
 // src/conversations/attachments.mjs
-const module3 = (() => {
+const module4 = (() => {
 const { createHash, randomUUID } = node0;
 const {
   chmodSync,
@@ -391,7 +435,7 @@ const {
 } = node2;
 const { basename, dirname, extname, isAbsolute, join, relative, resolve } = node1;
 const { once } = node3;
-const { createAttachmentChunkTransfer } = module4;
+const { createAttachmentChunkTransfer } = module5;
 
 
 const ID = /^[A-Za-z0-9_-]+$/;
@@ -828,7 +872,7 @@ return { createCollaboratorConversationAttachmentHost };
 })();
 
 // src/conversations/replica-delivery-recovery.mjs
-const module5 = (() => {
+const module6 = (() => {
 function createReplicaDeliveryRecovery({ loadConversations, publicConversation, publicTurn, message }) {
   // Startup-only reconciliation of the delivery owner's outstanding attempts.
   // Conversation storage owns completion evidence; callers never read its files.
@@ -853,7 +897,7 @@ return { createReplicaDeliveryRecovery };
 })();
 
 // src/conversations/turn-execution.mjs
-const module6 = (() => {
+const module7 = (() => {
 // Runtime of one admitted turn. Durable state and projection stay in the
 // conversation owner; this object only holds cancellable work and its receipts.
 function createTurnExecution() {
@@ -897,7 +941,7 @@ return { createTurnExecution, waitForTurnStop };
 })();
 
 // src/conversations/collaborator-conversation-lifecycle.mjs
-const module7 = (() => {
+const module8 = (() => {
 // Metadata lifecycle, independent of message execution. A running turn must be
 // stopped through its owner before its conversation can leave the live list.
 function mutateConversationLifecycle({ conversation, body, deleting, deviceId, now, save, HttpError }) {
@@ -922,12 +966,12 @@ return { mutateConversationLifecycle };
 
 // src/conversations/collaborator-conversations.mjs
 const module0 = (() => {
-const { SYNC_SCHEMA, messagePage, syncProjection } = module1;
-const { replicaInstructions, proactiveReplicaSeed, messageContentWithTime, historyRoleLabel, isoTimestamp, validatedReplicaRole, dynamicTool, driverConfigurationFingerprint, collaboratorInstructions, driverApprovalKind, driverApprovalTitle, publicApprovalDetail, driverApprovalResponse, publicDriverItem, publicWorkspacePath } = module2;
-const { createCollaboratorConversationAttachmentHost } = module3;
-const { createReplicaDeliveryRecovery } = module5;
-const { createTurnExecution, waitForTurnStop } = module6;
-const { mutateConversationLifecycle } = module7;
+const { SYNC_SCHEMA, messagePage, syncProjection, publicMessage } = module1;
+const { replicaInstructions, proactiveReplicaSeed, messageContentWithTime, historyRoleLabel, isoTimestamp, validatedReplicaRole, dynamicTool, driverConfigurationFingerprint, collaboratorInstructions, driverApprovalKind, driverApprovalTitle, publicApprovalDetail, driverApprovalResponse, publicDriverItem, publicWorkspacePath } = module3;
+const { createCollaboratorConversationAttachmentHost } = module4;
+const { createReplicaDeliveryRecovery } = module6;
+const { createTurnExecution, waitForTurnStop } = module7;
+const { mutateConversationLifecycle } = module8;
 const { createHash, randomUUID } = node0;
 const {
   chmodSync,
@@ -1870,11 +1914,11 @@ function createCollaboratorConversationHost({
       activeTurn: turn,
       messageCount: conversation.messages.length,
       pendingApprovalCount: conversation.approvals.filter((approval) => approval.state === "pending").length,
-      lastMessagePreview: conversation.messages.at(-1)?.content.slice(0, 180) ?? "",
+      lastMessagePreview: conversation.messages.length ? publicMessage(conversation.messages.at(-1)).content.slice(0, 180) : "",
     };
     if (includeBody) {
       value.messages = conversation.messages
-        .map(({ clientRequestId: _, driverText: __, ...item }, position) => ({ ...item, position }))
+        .map(publicMessage)
         .filter((item) => item.role !== "system");
       value.approvals = conversation.approvals.map(publicApproval);
     }

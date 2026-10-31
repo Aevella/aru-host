@@ -1,4 +1,4 @@
-import { SYNC_SCHEMA, messagePage, syncProjection } from "./conversation-sync.mjs";
+import { SYNC_SCHEMA, messagePage, syncProjection, publicMessage } from "./conversation-sync.mjs";
 import { replicaInstructions, proactiveReplicaSeed, messageContentWithTime, historyRoleLabel, isoTimestamp, validatedReplicaRole, dynamicTool, driverConfigurationFingerprint, collaboratorInstructions, driverApprovalKind, driverApprovalTitle, publicApprovalDetail, driverApprovalResponse, publicDriverItem, publicWorkspacePath } from "./driver-projection.mjs";
 import { createCollaboratorConversationAttachmentHost } from "./attachments.mjs";
 import { createReplicaDeliveryRecovery } from "./replica-delivery-recovery.mjs";
@@ -946,11 +946,11 @@ export function createCollaboratorConversationHost({
       activeTurn: turn,
       messageCount: conversation.messages.length,
       pendingApprovalCount: conversation.approvals.filter((approval) => approval.state === "pending").length,
-      lastMessagePreview: conversation.messages.at(-1)?.content.slice(0, 180) ?? "",
+      lastMessagePreview: conversation.messages.length ? publicMessage(conversation.messages.at(-1)).content.slice(0, 180) : "",
     };
     if (includeBody) {
       value.messages = conversation.messages
-        .map(({ clientRequestId: _, driverText: __, ...item }, position) => ({ ...item, position }))
+        .map(publicMessage)
         .filter((item) => item.role !== "system");
       value.approvals = conversation.approvals.map(publicApproval);
     }

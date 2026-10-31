@@ -548,3 +548,14 @@ claude-code-resident.test.mjs and collaborator-approval-policy.test.mjs: 17 pass
 Generated runtime consistency and diff checks passed. This is local transport and
 owner proof; the customer's reported fetch failure is not reproduced, and this
 change has not yet been packaged, released or verified on their installation.
+
+2026-10-31 follow-up: attachment chunks now write and fsync through the same
+writable exclusive-create descriptor before atomic rename. No fsync errors are
+suppressed. Ordinary conversation body, preview, page and incremental-sync
+projections now share the exact standalone timestamp-envelope filter used by
+mobile delivery; the durable ledger and user/code examples remain unchanged.
+Streaming snapshots withhold an unfinished envelope until it can be classified.
+Focused attachment recovery/integrity, assistant projection and residence-reading
+checks: 14 passed; generated payload consistency passed. Existing same-source
+re-pair recovery remains in place. Customer Host version and device reproduction
+are unknown; no packaged release or customer acceptance is claimed.

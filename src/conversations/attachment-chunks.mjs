@@ -61,9 +61,11 @@ export function createAttachmentChunkTransfer({ HttpError, recordDirectory, load
         } else {
           const temporary = `${destination}.${randomUUID()}.tmp`;
           try {
-            writeFileSync(temporary, bytes, { mode: 0o600 });
-            const descriptor = openSync(temporary, "r");
-            try { fsyncSync(descriptor); } finally { closeSync(descriptor); }
+            const descriptor = openSync(temporary, "wx", 0o600);
+            try {
+              writeFileSync(descriptor, bytes);
+              fsyncSync(descriptor);
+            } finally { closeSync(descriptor); }
             renameSync(temporary, destination);
           }
           finally { rmSync(temporary, { force: true }); }
