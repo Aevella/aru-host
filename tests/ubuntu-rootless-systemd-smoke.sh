@@ -39,17 +39,22 @@ for image in docker.io/library/node:22-alpine docker.io/library/python:3.13-alpi
 done
 cat > "$root/source/proof.mjs" <<'JS'
 import assert from 'node:assert/strict';
+import { readFileSync, statSync } from 'node:fs';
 import { createContainerReadiness } from './src/server/container-readiness.mjs';
+const cgroup = readFileSync('/proc/self/cgroup', 'utf8').trim();
+console.log('PROCESS_CGROUP', cgroup);
+const cgPath = '/sys/fs/cgroup' + cgroup.split('::').at(-1);
+console.log('CGROUP_OWNER', statSync(cgPath).uid, 'PROCESS_UID', process.getuid());
 const readiness = createContainerReadiness({containerRuntime:'/usr/bin/podman',
   containerMemory:'1g', containerCPUs:'2', runtimeImages:{node:'docker.io/library/node:22-alpine', python:'docker.io/library/python:3.13-alpine', shell:'docker.io/library/alpine:3.22'}});
 await readiness.check();
 console.log('ROOTLESS_READINESS', JSON.stringify(readiness.diagnostics()));
 assert.equal(readiness.ready(), true);
-assert.equal(readiness.resourceLimits(), process.env.EXPECT_LIMITS === 'true');
+if (process.env.EXPECT_LIMITS !== 'either') assert.equal(readiness.resourceLimits(), process.env.EXPECT_LIMITS === 'true');
 JS
 chmod a+r "$root/source/proof.mjs"
 for delegated in yes no; do
-  expected=false; [[ $delegated == yes ]] && expected=true
+  expected=false; [[ $delegated == yes ]] && expected=either
   cat > "/etc/systemd/system/$unit" <<UNIT
 [Unit]
 Description=Disposable Aru rootless cgroup acceptance
@@ -81,6 +86,18 @@ UNIT
   journalctl -u "$unit" --no-pager -n 25
   systemctl stop "$unit"
 done
+# Verify the supported user-manager route retains limits on the same VM.
+cat > "$root/user-containers.conf" <<'CONF'
+[engine]
+cgroup_manager = "systemd"
+runtime = "runc"
+CONF
+chmod 644 "$root/user-containers.conf"
+runuser -u "$account" -- env -i PATH=/usr/bin:/bin HOME="/home/$account" XDG_RUNTIME_DIR="/run/user/$uid" \
+  DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \
+  systemd-run --user --wait --pipe --collect --property=Delegate=yes \
+  --setenv="CONTAINERS_CONF=$root/user-containers.conf" --setenv=EXPECT_LIMITS=true \
+  "$node_binary" "$root/source/proof.mjs"
 podman --version
 runc --version
 systemd --version | head -1

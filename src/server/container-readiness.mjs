@@ -24,13 +24,13 @@ export function createContainerReadiness(config, verify = verifyContainerRuntime
         // Only retry the synthetic probe for the specific rootless cgroup denial.
         // Never retry an actual workspace job which might already have run.
         const detail = String(error.detail ?? error.message ?? "");
-        if (!/rootless needs no limits \+ no cgroup path when no permission is granted for cgroups/i.test(detail)) throw error;
+        if (!/rootless needs no limits \+ no cgroup\s*path when no permission is granted for cgroups/i.test(detail)) throw error;
         let cgroupsDisabled = false;
         try {
           await verify(config.containerRuntime, { ...options, resourceLimits: false });
         } catch (unlimitedError) {
           const unlimitedDetail = String(unlimitedError.detail ?? unlimitedError.message ?? "");
-          if (!/rootless needs no limits \+ no cgroup path when no permission is granted for cgroups/i.test(unlimitedDetail)) throw unlimitedError;
+          if (!/rootless needs no limits \+ no cgroup\s*path when no permission is granted for cgroups/i.test(unlimitedDetail)) throw unlimitedError;
           await verify(config.containerRuntime, { ...options, resourceLimits: false, cgroupsDisabled: true });
           cgroupsDisabled = true;
         }

@@ -203,11 +203,12 @@ test("installed linked CLI executes setup and reports failure instead of silentl
 });
 
 
-test("rootless cgroup denial retries only the probe without limits and reports degradation", async () => {
+for (const pathSpelling of ["cgroup path", "cgrouppath"]) {
+test(`rootless ${pathSpelling} denial retries only the probe without limits and reports degradation`, async () => {
   const modes = [];
   const owner = createContainerReadiness({ containerRuntime: "podman", runtimeImages: {}, containerMemory: "1g", containerCPUs: "2" }, async (_, options) => {
     modes.push(options.resourceLimits);
-    if (options.resourceLimits !== false) throw Object.assign(new Error("failed"), { detail: "rootless needs no limits + no cgroup path when no permission is granted for cgroups: permission denied" });
+    if (options.resourceLimits !== false) throw Object.assign(new Error("failed"), { detail: `rootless needs no limits + no ${pathSpelling} when no permission is granted for cgroups: permission denied` });
   });
   assert.equal((await owner.check()).status, "ready");
   assert.deepEqual(modes, [undefined, false]);
@@ -215,6 +216,8 @@ test("rootless cgroup denial retries only the probe without limits and reports d
   assert.equal(owner.diagnostics().failure.stage, "resource-limits");
   assert.equal(owner.snapshot().failure, undefined);
 });
+
+}
 
 test("unrelated container failures do not turn off resource limits", async () => {
   let count = 0;
@@ -261,7 +264,7 @@ test("failed unlimited probe remains failed and a later repair can retry", async
 
 test("a second specific cgroup denial probes disabled cgroups as a final fallback", async () => {
   const modes = [];
-  const denied = () => Object.assign(new Error("denied"), { detail: "rootless needs no limits + no cgroup path when no permission is granted for cgroups" });
+  const denied = () => Object.assign(new Error("denied"), { detail: "rootless needs no limits + no cgrouppath when no permission is granted for cgroups" });
   const owner = createContainerReadiness({ containerRuntime: "podman", runtimeImages: {} }, async (_, options) => {
     modes.push([options.resourceLimits, options.cgroupsDisabled]);
     if (!options.cgroupsDisabled) throw denied();
