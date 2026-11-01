@@ -1,4 +1,4 @@
-import { pollConversation, patchMessageRows, conversationRunning } from "./conversation-sync.mjs";
+import { pollConversation, patchMessageRows, conversationRunning, submitConversationApproval } from "./conversation-sync.mjs";
 import { hostReleaseLabel, turnActions, driverGuidance } from "./host-presentation.mjs";
 import { containerSetupPanel, bindContainerSetup } from "./container-setup.mjs";
 import { connectionSettingsPanel, bindConnectionSettings } from "./connection-settings.mjs";
@@ -631,7 +631,7 @@ function renderConversationView(collaborator, conversationId, view, path, conver
     buttons.forEach(item => { item.disabled = true; });
     decidedApprovals.add(approvalId);
     void mutate(async () => {
-      try { await api.request("POST", `${path}/approvals/${encodeURIComponent(approvalId)}?window=1`, { decision: button.dataset.decision }); }
+      try { await submitConversationApproval(api.request, path, approvalId, button.dataset.decision); }
       catch (error) { decidedApprovals.delete(approvalId); buttons.forEach(item => { item.disabled = false; }); throw error; }
       card.remove();
     }, null, () => undefined);

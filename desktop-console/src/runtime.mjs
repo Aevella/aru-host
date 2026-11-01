@@ -15,6 +15,8 @@ const SAFE_PATHS = [
   ["PUT", /^\/aru\/v1\/hosted-collaborators\/[A-Za-z0-9_-]+(?:\/(?:cognition|surfaces\/[A-Za-z0-9_-]+(?:\/runtime)?))?$/],
   // Conversation writes: Host Core accepts messages and approval decisions only as POST.
   ["POST", /^\/aru\/v1\/hosted-collaborators\/[A-Za-z0-9_-]+\/conversations\/[A-Za-z0-9_-]+\/(?:messages|approvals\/[A-Za-z0-9_-]+)$/],
+  ["POST", /^\/aru\/v1\/hosted-collaborators\/[A-Za-z0-9_-]+\/conversations\/[A-Za-z0-9_-]+\/approvals\/[A-Za-z0-9_-]+\?window=1$/],
+  ["GET", /^\/aru\/v1\/hosted-collaborators\/[A-Za-z0-9_-]+\/conversations\/[A-Za-z0-9_-]+\/sync\?after=[0-9]+(?:&version=[A-Za-z0-9*_.%+~-]+)?$/],
   ["POST", /^\/aru\/v1\/hosted-collaborators\/[A-Za-z0-9_-]+\/conversations\/[A-Za-z0-9_-]+\/turns\/[A-Za-z0-9_-]+\/cancel$/],
   ["POST", /^\/aru\/v1\/hosted-collaborators\/[A-Za-z0-9_-]+\/surfaces\/[A-Za-z0-9_-]+\/(?:rollback|archive|restore)$/],
   ["POST", /^\/aru\/v1\/hosted-collaborators\/[A-Za-z0-9_-]+\/projects\/[A-Za-z0-9_-]+\/(?:checkpoint|publish|archive|restore)$/],
@@ -39,7 +41,8 @@ const SAFE_PATHS = [
 export function validateHostRequest(method, path) {
   const normalizedMethod = String(method ?? "GET").toUpperCase();
   const value = String(path ?? "");
-  if (!value.startsWith("/") || value.includes("..") || /%2f|%5c/i.test(value)) {
+  const pathname = value.split("?", 1)[0];
+  if (!pathname.startsWith("/") || pathname.includes("..") || /%2f|%5c/i.test(pathname)) {
     throw new Error("Invalid Host request path");
   }
   if (!SAFE_PATHS.some(([allowedMethod, pattern]) => allowedMethod === normalizedMethod && pattern.test(value))) {
