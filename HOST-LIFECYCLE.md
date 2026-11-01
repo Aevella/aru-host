@@ -600,3 +600,15 @@ systemd delegation and diagnosis. Pairing returns distinct mismatch, consumed an
 expired codes. Windows managed Node can use an extracted version directly if the
 junction fails. These changes are source/local-test candidates; Ubuntu systemd and
 Windows installation acceptance remain outstanding.
+
+2026-11-02 candidate closure: real HTTP pairing/restart coverage confirms a used
+link is distinguished from a previous-process token, and a new link succeeds
+without deleting durable state. The container/setup/status/address/pairing
+selection passes 26 checks; one Linux-only check is skipped on macOS. Generated
+runtime consistency passes. The Windows managed-Node fixture now executes the
+installer's extraction/activation function with a junction-only failure, checks
+retry discovery, and checks incomplete extraction preserves the prior runtime;
+it is wired into Windows CI but has not been executed on this macOS host.
+Operator guidance now distinguishes effective delegation ownership from lingering
+and provides service reload/restart checks. No Ubuntu VM or Windows device
+acceptance, packaged installer, deployment, or release is claimed.

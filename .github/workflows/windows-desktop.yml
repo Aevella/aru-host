@@ -44,6 +44,10 @@ jobs:
         shell: powershell
         run: powershell -NoProfile -ExecutionPolicy Bypass -File tests/windows-native-stop-smoke.ps1
 
+      - name: Managed Node junction failure recovery
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tests/windows-managed-node-fallback.test.ps1
+
       - name: Installer lifecycle smoke (real Scheduled Task + DPAPI)
         shell: powershell
         run: powershell -NoProfile -ExecutionPolicy Bypass -File tests/windows-installer-smoke.ps1

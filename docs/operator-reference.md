@@ -466,6 +466,42 @@ repaired, the authenticated runtime diagnostics expose the unlimited fallback.
 CPU, memory and process-count limits are then absent, so operators should use
 an appropriately bounded VPS or restore delegation.
 
+For the reported Ubuntu shape (service directory owned by `root:root` with mode
+0755), the immediate failure is that the service UID cannot create a child cgroup.
+With effective delegation on cgroup v2, systemd should hand ownership of the
+service subtree to `User=` before launching its processes. This observation does
+not establish whether the running unit predates the setting, a drop-in overrides
+it, or the VPS restricts delegation above the guest. Lingering only keeps the user
+manager alive; it does not repair ownership in `system.slice`.
+
+For an existing system installation, keep its data directory and service identity.
+After verifying the installed unit has `User=aru-selfhost` and `Delegate=yes`, use
+`sudo systemctl daemon-reload` and `sudo systemctl restart aru-selfhost` in a
+maintenance window (a restart invalidates the previous pairing link). Then inspect:
+
+```sh
+systemctl show aru-selfhost -p User -p Delegate -p ControlGroup -p MainPID -p NRestarts
+cg=$(systemctl show aru-selfhost -p ControlGroup --value)
+stat -c '%U:%G %a %n' "/sys/fs/cgroup$cg"
+cat "/sys/fs/cgroup$cg/cgroup.controllers"
+cat "/sys/fs/cgroup$cg/cgroup.subtree_control"
+```
+
+If the parent VPS does not permit delegation, use the verified no-limits fallback
+and confirm authenticated runtime diagnostics report `ready` and
+`resourceLimits: false`. A fresh user-owned installation may instead use
+`install-linux-desktop.sh` from the release payload, run as the intended user with
+a working `systemctl --user` manager and administrator-enabled lingering. Verify
+its own runtime diagnostics; do not point both installations at the same data
+directory. This is not an automatic migration of the system service's identity,
+credential backend or data. `systemd-run --user --scope` is useful for a probe but
+is not a replacement for the installer's durable service and restart lifecycle.
+
+References: [systemd delegation](https://systemd.io/CGROUP_DELEGATION/) and
+[service subtree ownership](https://systemd.io/CONTROL_GROUP_INTERFACE/).
+Ubuntu guest reproduction remains outstanding; this runbook separates the known
+permission failure from its unconfirmed installation-specific cause.
+
 ## MCP gateway
 
 The manifest advertises `mcp-gateway` with Streamable HTTP transport and
