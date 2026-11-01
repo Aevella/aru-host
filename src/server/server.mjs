@@ -1,3 +1,4 @@
+import { pairingTokenFailure } from "./pairing-token.mjs";
 import { createContainerReadiness } from "./container-readiness.mjs";
 import { resolveHostAddress } from "./network-address.mjs";
 import { createMCPGateway } from "./mcp-gateway.mjs";
@@ -669,9 +670,14 @@ async function handlePair(req, res) {
   if (!token) throw new HttpError(400, "pairing.missing_token", "pairingToken required");
 
   const pairing = state.pairing;
-  const expired = Date.now() - pairing.issuedAt > PAIRING_TOKEN_TTL_MS;
-  if (pairing.consumedAt || expired || !safeEqual(token, pairing.token)) {
-    throw new HttpError(401, "pairing.rejected", "pairing token rejected or expired");
+  const failure = pairingTokenFailure(pairing, token, Date.now(), PAIRING_TOKEN_TTL_MS, safeEqual);
+  if (failure) {
+    const messages = {
+      "pairing.token_mismatch": "Pairing token does not match this Host instance. The service may have restarted; run pairing again and verify the address.",
+      "pairing.token_used": "Pairing token has already been used. Run pairing again.",
+      "pairing.token_expired": "Pairing token has expired. Run pairing again.",
+    };
+    throw new HttpError(401, failure, messages[failure]);
   }
 
   pairing.consumedAt = Date.now();

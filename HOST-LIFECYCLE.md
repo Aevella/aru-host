@@ -534,3 +534,102 @@ A different source cannot use this renewal path. Disabling remains durable acros
 restart; neither device metadata nor retired writers enter model-visible reads.
 Four focused tests cover renewal, rejection, restart, re-enable and unrelated
 collaborator isolation. No computer cognition rows are rewritten.
+
+2026-10-31: Claude Code's authenticated loopback MCP transport now uses a native
+HTTP request whose lifetime follows MCP cancellation and stdio closure rather
+than fetch's implicit response-header deadline. Requests are dispatched without
+blocking cancellation/ping behind pending human approval. A disconnected approval
+request cancels only its originating conversation approval; late decisions cannot
+create session grants. Resolving one approval preserves other pending approvals
+and does not revive a terminal turn. Tool calls are never automatically replayed.
+Focused proof: claude-code-mcp-bridge.test.mjs (real loopback HTTP delayed approval,
+MCP cancellation, late grant rejection, next request, stdio closure), plus
+claude-code-resident.test.mjs and collaborator-approval-policy.test.mjs: 17 passed.
+Generated runtime consistency and diff checks passed. This is local transport and
+owner proof; the customer's reported fetch failure is not reproduced, and this
+change has not yet been packaged, released or verified on their installation.
+
+2026-10-31 follow-up: attachment chunks now write and fsync through the same
+writable exclusive-create descriptor before atomic rename. No fsync errors are
+suppressed. Ordinary conversation body, preview, page and incremental-sync
+projections now share the exact standalone timestamp-envelope filter used by
+mobile delivery; the durable ledger and user/code examples remain unchanged.
+Streaming snapshots withhold an unfinished envelope until it can be classified.
+Focused attachment recovery/integrity, assistant projection and residence-reading
+checks: 14 passed; generated payload consistency passed. Existing same-source
+re-pair recovery remains in place. Customer Host version and device reproduction
+are unknown; no packaged release or customer acceptance is claimed.
+
+2026-10-31 recovery audit: a newly paired device publishing a newer snapshot for
+exactly the same phone collaborator may restart its local relationship generation.
+Generation ordering remains enforced within one device identity; retired identities
+and unrelated sources cannot reclaim the slot. Recovery tests persist/reopen the
+state and cover revocation after transfer. Upload retries may atomically replace
+corrupt staging parts; completion still checks the original size/hash and ownership.
+A truncated-part/restart/retry test demonstrates the previously blocked recovery.
+Attachment, reading and Claude bridge checks passed (15 tests); the refined
+truncated-part test and all 7 attachment checks passed again. Source and generated
+runtime are verified, not release/customer-device acceptance.
+
+2026-10-31 terminal approval audit: completion, failure and interruption expire
+only their turn's pending approvals and release waiting continuations. Startup
+also expires orphaned approvals on already-terminal conversations. Tool admission
+checks the turn's active state, not merely its object identity, so late callbacks
+cannot execute against a failed turn. The focused approval/Claude transport suites
+pass 18 checks, including failure while waiting, zero remaining approvals, late
+callback rejection, reopen and next-turn admission. Not a packaged release claim.
+
+2026-10-31 admission audit: attachment binding moved into the admitted turn's
+preparation/error boundary. A binding failure after the conversation ledger commit
+now terminates that turn rather than leaving it queued without a runner. Preparation
+state persistence is also inside that boundary. The conversation ledger prevents
+an already-referenced attachment from being rebound even if its metadata write
+failed. Fault injection proves retained message/attachment, zero driver starts on
+failure, and the next send starting without restart (13 focused checks passed).
+The ordinary attachment conversation smoke passed; generated consistency passed.
+This is source/local proof, not a released or customer-installed fix.
+
+## Host feedback repair candidate (2026-11-01)
+
+Rootless container readiness retries the synthetic Node/Python/Shell probes without
+resource limits only when Podman reports the specific rootless cgroup permission
+failure; the same denial without limits admits one final cgroups-disabled probe. Successful fallback is ready, with missing process/CPU/memory limits in
+authenticated diagnostics; workspace execution follows the verified mode without
+replaying jobs. Other probe errors remain failures. Operator guidance describes
+systemd delegation and diagnosis. Pairing returns distinct mismatch, consumed and
+expired codes. Windows managed Node can use an extracted version directly if the
+junction fails. These changes are source/local-test candidates; Ubuntu systemd and
+Windows installation acceptance remain outstanding.
+
+2026-11-02 candidate closure: real HTTP pairing/restart coverage confirms a used
+link is distinguished from a previous-process token, and a new link succeeds
+without deleting durable state. The container/setup/status/address/pairing
+selection passes 26 checks; one Linux-only check is skipped on macOS. Generated
+runtime consistency passes. The Windows managed-Node fixture now executes the
+installer's extraction/activation function with a junction-only failure, checks
+retry discovery, and checks incomplete extraction preserves the prior runtime;
+it is wired into Windows CI but has not been executed on this macOS host.
+Operator guidance now distinguishes effective delegation ownership from lingering
+and provides service reload/restart checks. No Ubuntu VM or Windows device
+acceptance, packaged installer, deployment, or release is claimed.
+
+2026-11-02 release acceptance found an incomplete conversation fixture entering
+orphan-approval recovery without an event ledger. Startup recovery now isolates
+that ledger, reports its identity to the existing process log and preserves its
+bytes; other conversations still recover. The real HTTP status test verifies
+unchanged broken bytes, an unrelated orphan approval expiring, and no history
+scans on subsequent manifest/diagnostics/driver requests. Seven focused recovery
+checks pass locally. The first Ubuntu VM attempt stopped at image preparation
+because the runner's container environment leaked into the test account; the
+fixture now uses a clean account environment before testing the service.
+
+2026-11-02 Ubuntu acceptance: CI run 41353565075 passes all three real Ubuntu
+24.04 rootless Podman/runc scenarios. A delegated system service has the correct
+UID-owned subtree but cgroupfs still attempts a sibling under system.slice;
+limited readiness fails with the actual `no cgrouppath` spelling. Both system
+service scenarios recover without limits and without disabling cgroups. The
+user-manager/systemd-cgroup scenario retains resource limits. Each scenario
+executes Node, Python and Shell file receipts. The matcher covers both
+`cgroup path` and `cgrouppath`. Core, Linux desktop and both macOS CI jobs pass
+on the same source commit 4b82c67. Customer VPS ownership remains site-specific;
+this is VM acceptance, not a customer-machine claim.

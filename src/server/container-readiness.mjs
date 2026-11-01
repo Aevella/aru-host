@@ -11,11 +11,33 @@ export function createContainerReadiness(config, verify = verifyContainerRuntime
     if (!config.containerRuntime) return Promise.resolve(snapshot);
     snapshot = { status: "checking", checkedAt: null, message: null };
     failure = undefined;
-    attempt = Promise.resolve().then(() => verify(config.containerRuntime, {
+    const options = {
       allowPull: false,
       setting: (key, fallback) => ({ NODE_IMAGE: config.runtimeImages.node, PYTHON_IMAGE: config.runtimeImages.python,
         SHELL_IMAGE: config.runtimeImages.shell, CONTAINER_MEMORY: config.containerMemory, CONTAINER_CPUS: config.containerCPUs }[key] ?? fallback),
-    })).then(() => snapshot = { status: "ready", checkedAt: Date.now(), message: null },
+    };
+    attempt = Promise.resolve().then(async () => {
+      try {
+        await verify(config.containerRuntime, options);
+        return { resourceLimits: true };
+      } catch (error) {
+        // Only retry the synthetic probe for the specific rootless cgroup denial.
+        // Never retry an actual workspace job which might already have run.
+        const detail = String(error.detail ?? error.message ?? "");
+        if (!/rootless needs no limits \+ no cgroup\s*path when no permission is granted for cgroups/i.test(detail)) throw error;
+        let cgroupsDisabled = false;
+        try {
+          await verify(config.containerRuntime, { ...options, resourceLimits: false });
+        } catch (unlimitedError) {
+          const unlimitedDetail = String(unlimitedError.detail ?? unlimitedError.message ?? "");
+          if (!/rootless needs no limits \+ no cgroup\s*path when no permission is granted for cgroups/i.test(unlimitedDetail)) throw unlimitedError;
+          await verify(config.containerRuntime, { ...options, resourceLimits: false, cgroupsDisabled: true });
+          cgroupsDisabled = true;
+        }
+        failure = { stage: "resource-limits", executable: config.containerRuntime, detail };
+        return { resourceLimits: false, cgroupsDisabled };
+      }
+    }).then(result => snapshot = { status: "ready", checkedAt: Date.now(), message: null, ...result },
       error => {
         failure = { stage: error.stage ?? "workspace", executable: config.containerRuntime,
           image: error.image ?? null, detail: error.detail ?? error.message };
@@ -28,5 +50,7 @@ export function createContainerReadiness(config, verify = verifyContainerRuntime
   }
   return { check, snapshot: () => ({ ...snapshot }),
     diagnostics: () => ({ ...snapshot, executable: config.containerRuntime, ...(failure ? { failure: { ...failure } } : {}) }),
-    ready: () => snapshot.status === "ready" };
+    ready: () => snapshot.status === "ready",
+    resourceLimits: () => snapshot.resourceLimits !== false,
+    cgroupsDisabled: () => snapshot.cgroupsDisabled === true };
 }

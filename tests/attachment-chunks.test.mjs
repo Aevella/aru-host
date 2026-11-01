@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, readFileSync, readdirSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
@@ -47,7 +47,8 @@ test("bad chunks, wrong device, and deletion do not become ready", async t => {
   await assert.rejects(f.call("GET", `${root}/upload`, undefined, "other"), e => e.status === 403);
   assert.deepEqual((await f.admit()).upload.received, []);
   await f.call("PUT", `${root}/chunks/0`, f.bytes.subarray(0, 262144));
-  await assert.rejects(f.call("PUT", `${root}/chunks/0`, Buffer.alloc(262144, 1)), e => e.code === "attachment.chunk_conflict");
+  await f.call("PUT", `${root}/chunks/0`, Buffer.alloc(262144, 1));
+  await f.call("PUT", `${root}/chunks/0`, f.bytes.subarray(0, 262144));
   await f.call("DELETE", root);
   await assert.rejects(f.call("PUT", `${root}/chunks/1`, f.bytes.subarray(262144, 524288)), e => e.status === 404);
   assert.notEqual((await f.admit()).attachmentId, a.attachmentId);
@@ -95,4 +96,17 @@ test("a stalled connection does not block retry or rewind completed state", asyn
   release();
   assert.equal((await stale).state, "ready");
   assert.equal((await f.call("GET", `${root}/upload`)).state, "ready");
+});
+
+ test("retransmission repairs corrupt staged bytes under the same admission", async t => {
+  const f = fixture(t); const a = await f.admit(); const root = `/attachments/${a.attachmentId}`;
+  await f.call("PUT", `${root}/chunks/0`, f.bytes.subarray(0, 262144));
+  writeFileSync(join(f.dataDir, "collaborator-conversation-attachments", "col", "conv", a.attachmentId, "part-0"), Buffer.from("truncated"));
+  f.restart();
+  assert.deepEqual((await f.call("GET", `${root}/upload`)).upload.received, []);
+  await f.call("PUT", `${root}/chunks/0`, f.bytes.subarray(0, 262144));
+  await f.call("PUT", `${root}/chunks/1`, f.bytes.subarray(262144, 524288));
+  await f.call("PUT", `${root}/chunks/2`, f.bytes.subarray(524288));
+  assert.equal((await f.call("POST", `${root}/complete`)).state, "ready");
+  assert.deepEqual(readFileSync(join(f.dataDir, "collaborator-conversation-attachments", "col", "conv", a.attachmentId, "content.bin")), f.bytes);
 });

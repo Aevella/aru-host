@@ -40,6 +40,15 @@ test('persistent collaborator permission applies to new conversations and revoke
   await handler.onApproval({method: 'item/commandExecution/requestApproval', params: {}, respond: value => {response = value;}});
   assert.equal(response, undefined);
   assert.equal((await call('GET', revoked)).pendingApprovalCount, 1);
+  const bridge = new AbortController();
+  await handler.onApproval({method: 'item/commandExecution/requestApproval', params: {}, signal: bridge.signal,
+    respond: value => { response = value; }});
+  assert.equal((await call('GET', revoked)).pendingApprovalCount, 2);
+  bridge.abort();
+  assert.equal((await call('GET', revoked)).pendingApprovalCount, 1);
+  assert.equal((await call('GET', unrelated)).pendingApprovalCount, 1);
+  assert.deepEqual(response, {decision: 'cancel'});
+
 });
 
 test('mobile replica turns follow the executing computer face approval setting', async t => {
@@ -121,4 +130,34 @@ test('stopping a computer face also stops the phone proactive turn it is running
   assert.deepEqual(interrupted, [['thread', 'driver-turn']]);
   assert.equal(host.hasActiveTurns('hostcol_1'), false);
   assert.equal(host.hasActiveTurns('hostcol_other'), false);
+});
+
+test('terminal turn closes pending tool approval and a late callback cannot execute', async t => {
+  const root = mkdtempSync(join(tmpdir(), 'aru-terminal-approval-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const deferred=[]; let handler; let executions=0;
+  const options={dataDir:root,
+    driverForCollaborator:()=>({status:()=> 'ready',startTurn:async o=>{handler=o.handler;return {threadId:'t',turnId:'driver-turn'};}}),
+    collaboratorForId:()=>({collaboratorId:'a',displayName:'A',driverId:'codex'}),
+    readJSONBody:async req=>req.body,sendJSON:(res,status,body)=>Object.assign(res,{status,body}),
+    HttpError:class extends Error {},toolCatalog:()=>[{name:'write',annotations:{readOnlyHint:false}}],
+    executeTool:async()=>{executions++;return {};},defer:fn=>deferred.push(fn)};
+  let host=createCollaboratorConversationHost(options);
+  const call=async(method,path,body)=>{const res={};await host.route({method,body},res,path,()=>({deviceId:'d'}));return res.body;};
+  const base='/aru/v1/hosted-collaborators/a/conversations';
+  const c=await call('POST',base,{title:'Test'});const path=`${base}/${c.conversationId}`;
+  await call('POST',`${path}/messages`,{text:'test',clientRequestId:'1'});await deferred.shift()();
+  const pending=handler.onToolCall({tool:'write',arguments:{}});
+  const rejected=assert.rejects(pending);
+  await new Promise(r=>setImmediate(r));
+  assert.equal((await call('GET',path)).pendingApprovalCount,1);
+  await handler.onNotification('turn/completed',{turnId:'driver-turn',turn:{status:'failed',error:{message:'driver failed'}}});
+  await rejected;
+  assert.equal((await call('GET',path)).pendingApprovalCount,0);
+  await assert.rejects(handler.onToolCall({tool:'write',arguments:{}}));
+  assert.equal(executions,0);
+  host=createCollaboratorConversationHost(options);
+  assert.equal((await call('GET',path)).pendingApprovalCount,0);
+  await call('POST',`${path}/messages`,{text:'retry',clientRequestId:'2'});await deferred.shift()();
+  assert.equal((await call('GET',path)).activeTurn.state,'streaming');
 });

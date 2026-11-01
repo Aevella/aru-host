@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { configureContainerRuntime, replaceRuntime, verifyContainerRuntime } from "../container-runtime-setup.mjs";
 import { createContainerReadiness } from "../src/server/container-readiness.mjs";
+import { workspaceContainerResourceArgs } from "../src/server/workspace-jobs.mjs";
 
 test("a stuck Core probe releases readiness and a repaired engine can retry", async () => {
   let stuck = true;
@@ -198,5 +199,90 @@ test("installed linked CLI executes setup and reports failure instead of silentl
     assert.equal(result.status, 1, result.stderr);
     assert.match(result.stderr, /ENOENT/);
     assert.equal(result.stdout, "");
+  }
+});
+
+
+for (const pathSpelling of ["cgroup path", "cgrouppath"]) {
+test(`rootless ${pathSpelling} denial retries only the probe without limits and reports degradation`, async () => {
+  const modes = [];
+  const owner = createContainerReadiness({ containerRuntime: "podman", runtimeImages: {}, containerMemory: "1g", containerCPUs: "2" }, async (_, options) => {
+    modes.push(options.resourceLimits);
+    if (options.resourceLimits !== false) throw Object.assign(new Error("failed"), { detail: `rootless needs no limits + no ${pathSpelling} when no permission is granted for cgroups: permission denied` });
+  });
+  assert.equal((await owner.check()).status, "ready");
+  assert.deepEqual(modes, [undefined, false]);
+  assert.equal(owner.resourceLimits(), false);
+  assert.equal(owner.diagnostics().failure.stage, "resource-limits");
+  assert.equal(owner.snapshot().failure, undefined);
+});
+
+}
+
+test("unrelated container failures do not turn off resource limits", async () => {
+  let count = 0;
+  const owner = createContainerReadiness({ containerRuntime: "podman", runtimeImages: {} }, async () => { count++; throw new Error("image missing"); });
+  assert.equal((await owner.check()).status, "failed");
+  assert.equal(count, 1);
+});
+
+test("unlimited probe removes resource flags without changing cgroup mode", async () => {
+  const calls = [];
+  await verifyContainerRuntime("podman", { resourceLimits: false, run: async (command, args) => {
+    if (args[0] === "run") calls.push(args);
+    return successfulRun(command, args);
+  } });
+  assert.equal(calls.length, 3);
+  for (const args of calls) {
+    assert.ok(!args.includes("--cgroups=disabled"));
+    assert.ok(!args.includes("--memory"));
+    assert.ok(!args.includes("--cpus"));
+    assert.ok(!args.includes("--pids-limit"));
+  }
+});
+
+test("workspace execution uses the mode proved by readiness", () => {
+  const config = { containerMemory: "1g", containerCPUs: "2", containerReadiness: { resourceLimits: () => false } };
+  assert.deepEqual(workspaceContainerResourceArgs(config), []);
+  config.containerReadiness.resourceLimits = () => true;
+  assert.deepEqual(workspaceContainerResourceArgs(config), ["--pids-limit", "128", "--memory", "1g", "--cpus", "2"]);
+});
+
+test("failed unlimited probe remains failed and a later repair can retry", async () => {
+  let repaired = false;
+  const owner = createContainerReadiness({ containerRuntime: "podman", runtimeImages: {} }, async (_, options) => {
+    if (repaired) return;
+    if (options.resourceLimits === false) throw new Error("container mount failed");
+    throw Object.assign(new Error("failed"), { detail: "rootless needs no limits + no cgroup path when no permission is granted for cgroups" });
+  });
+  assert.equal((await owner.check()).status, "failed");
+  assert.match(owner.diagnostics().failure.detail, /container mount failed/);
+  repaired = true;
+  assert.equal((await owner.check()).status, "ready");
+  assert.equal(owner.resourceLimits(), true);
+});
+
+test("a second specific cgroup denial probes disabled cgroups as a final fallback", async () => {
+  const modes = [];
+  const denied = () => Object.assign(new Error("denied"), { detail: "rootless needs no limits + no cgrouppath when no permission is granted for cgroups" });
+  const owner = createContainerReadiness({ containerRuntime: "podman", runtimeImages: {} }, async (_, options) => {
+    modes.push([options.resourceLimits, options.cgroupsDisabled]);
+    if (!options.cgroupsDisabled) throw denied();
+  });
+  assert.equal((await owner.check()).status, "ready");
+  assert.deepEqual(modes, [[undefined, undefined], [false, undefined], [false, true]]);
+  assert.deepEqual(workspaceContainerResourceArgs({ containerReadiness: owner }), ["--cgroups=disabled"]);
+});
+
+test("last-resort probe actually disables cgroups without limit flags", async () => {
+  const runs = [];
+  await verifyContainerRuntime("podman", { resourceLimits: false, cgroupsDisabled: true, run: async (command, args) => {
+    if (args[0] === "run") runs.push(args);
+    return successfulRun(command, args);
+  } });
+  assert.equal(runs.length, 3);
+  for (const args of runs) {
+    assert.ok(args.includes("--cgroups=disabled"));
+    assert.ok(!args.includes("--memory") && !args.includes("--cpus") && !args.includes("--pids-limit"));
   }
 });

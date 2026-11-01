@@ -175,7 +175,8 @@ export function createCollaboratorConversationAttachmentHost({
       if (!existsSync(contentPath(record)) || !["ready", "bound"].includes(record.state)) {
         throw new HttpError(409, "attachment.not_ready", `${record.filename} has not finished uploading`);
       }
-      if (record.messageId) {
+      if (record.messageId || conversation.messages.some(message =>
+        (message.attachments ?? []).some(attachment => attachment.attachmentId === record.attachmentId))) {
         throw new HttpError(409, "attachment.already_bound", `${record.filename} already belongs to another message`);
       }
     }

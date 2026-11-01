@@ -45,10 +45,18 @@ for (const [status, deviceRole] of [["unconfigured", "host-console"], ["ready", 
     assert.equal((await fetch(`${base}/aru/v1/container-runtime`)).status, 401);
     const pairingURL = output.split(/\r?\n/).find(line => line.startsWith("aru://pair?"));
     assert.ok(pairingURL);
-    const grant = await (await fetch(`${base}/aru/v1/pair`, { method: "POST",
+    const token = new URL(pairingURL).searchParams.get("pairingToken");
+    const pair = pairingToken => fetch(`${base}/aru/v1/pair`, { method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ pairingToken: new URL(pairingURL).searchParams.get("pairingToken"), deviceLabel: "scope-test", deviceRole }),
-    })).json();
+      body: JSON.stringify({ pairingToken, deviceLabel: "scope-test", deviceRole }),
+    });
+    const wrong = await pair("incorrect-token");
+    assert.equal(wrong.status, 401);
+    assert.equal((await wrong.json()).error, "pairing.token_mismatch");
+    const grant = await (await pair(token)).json();
+    const reused = await pair(token);
+    assert.equal(reused.status, 401);
+    assert.equal((await reused.json()).error, "pairing.token_used");
     const headers = { "content-type": "application/json", authorization: `Bearer ${grant.credentialSecret}` };
     const diagnosticsResponse = await fetch(`${base}/aru/v1/container-runtime`, { headers });
     assert.equal(diagnosticsResponse.status, deviceRole === "host-console" ? 200 : 403);

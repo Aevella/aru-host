@@ -22,3 +22,25 @@ test("examples, thought prose, malformed and unknown envelopes remain authored",
     `<message_meta>${JSON.stringify({ ...fields, sent_at_unix_ms: true })}</message_meta>`,
   ]) assert.equal(assistantDeliveryContent(source), source.trim());
 });
+
+test('ordinary conversation pages and sync clean assistant envelopes without rewriting ledger or user examples', async () => {
+  const { messagePage, syncProjection, publicMessage } = await import('../src/conversations/conversation-sync.mjs');
+  const ms = 1793280949131;
+  const tag = `<message_meta>${JSON.stringify({sent_at:new Date(ms).toISOString(),sent_at_unix_ms:ms,updated_at:new Date(ms).toISOString(),updated_at_unix_ms:ms})}</message_meta>`;
+  const conversation = { messages: [
+    {messageId:'u',role:'user',content:tag},
+    {messageId:'a',role:'assistant',content:tag+'\nHello'}
+  ], events:[], approvals:[] };
+  assert.equal(publicMessage(conversation.messages[1]).content, 'Hello');
+  assert.equal(messagePage(conversation).messages[0].content, tag);
+  assert.equal(messagePage(conversation).messages[1].content, 'Hello');
+  assert.equal(syncProjection(conversation, {}, 1, null).conversation.messages[1].content, 'Hello');
+  assert.equal(conversation.messages[1].content, tag+'\nHello');
+});
+
+ test('streaming projection holds split envelope but preserves completed examples and whitespace', async () => {
+  const { publicMessage } = await import('../src/conversations/conversation-sync.mjs');
+  assert.equal(publicMessage({role:'assistant',status:'streaming',content:'Hello\n<message_me'}).content, 'Hello\n');
+  assert.equal(publicMessage({role:'assistant',status:'completed',content:'Hello\n<message_me'}).content, 'Hello\n<message_me');
+  assert.equal(publicMessage({role:'assistant',content:'  prose\n\n'}).content, '  prose\n\n');
+});

@@ -64,7 +64,7 @@ export async function configureContainerRuntime(configPath, {
   return executable;
 }
 
-export async function verifyContainerRuntime(executable, { run = execute, setting = (_, fallback) => fallback, checkEngine = true, allowPull = true } = {}) {
+export async function verifyContainerRuntime(executable, { run = execute, setting = (_, fallback) => fallback, checkEngine = true, allowPull = true, resourceLimits = true, cgroupsDisabled = false } = {}) {
   if (checkEngine) {
     try { await run(executable, ["info"], { timeout: 30_000, windowsHide: true, maxBuffer: 1024 * 1024 }); }
     catch (error) { throw verificationError(error, "engine", executable); }
@@ -90,8 +90,8 @@ export async function verifyContainerRuntime(executable, { run = execute, settin
       try {
         await run(executable, ["run", ...(allowPull ? [] : ["--pull", "never"]), "--rm", "--init", "--network", "none", "--read-only", "--cap-drop", "ALL",
         "--security-opt", "no-new-privileges", "--user", "65532:65532",
-        "--pids-limit", "128", "--memory", setting("CONTAINER_MEMORY", "1g"),
-        "--cpus", setting("CONTAINER_CPUS", "2"), "--tmpfs", "/tmp:rw,nosuid,nodev,size=64m", "--workdir", "/workspace",
+        ...(resourceLimits ? ["--pids-limit", "128", "--memory", setting("CONTAINER_MEMORY", "1g"),
+        "--cpus", setting("CONTAINER_CPUS", "2")] : cgroupsDisabled ? ["--cgroups=disabled"] : []), "--tmpfs", "/tmp:rw,nosuid,nodev,size=64m", "--workdir", "/workspace",
         "--mount", `type=bind,src=${directory},dst=/workspace`, configured || fallback, ...command],
         { windowsHide: true, maxBuffer: 4 * 1024 * 1024,
           // Core checks only already-prepared images and tiny file probes. A stuck

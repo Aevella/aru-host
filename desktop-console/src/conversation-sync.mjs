@@ -13,6 +13,10 @@ export async function pollConversation(state, path, request, isCurrent, apply) {
   state.version = state.hasMore ? null : sync.version;
 }
 
+export function submitConversationApproval(request, path, approvalId, decision) {
+  return request('POST', `${path}/approvals/${encodeURIComponent(approvalId)}?window=1`, { decision });
+}
+
 export function patchMessageRows(container, rows, messages, reset = false) {
   const pinned = container.scrollHeight - container.scrollTop - container.clientHeight < 24;
   const scrollTop = container.scrollTop;

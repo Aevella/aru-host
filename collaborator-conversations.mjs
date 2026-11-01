@@ -4,14 +4,56 @@ import * as node1 from 'node:path';
 import * as node2 from 'node:fs';
 import * as node3 from 'node:events';
 
+// src/host/assistant-delivery-content.mjs
+const module2 = (() => {
+// Request timestamps are not authored dialogue. Only remove the exact standalone
+// JSON envelope emitted by Host; examples, malformed tags and other prose survive.
+function assistantDeliveryContent(content, { trim = true, partial = false } = {}) {
+  let fence;
+  const result = String(content ?? "").split(/(?<=\n)/).filter(line => {
+    const body = line.replace(/\r?\n$/, "");
+    if (/^(?: {4}|\t)/.test(body)) return true;
+    const visible = body.replace(/^ {0,3}/, "");
+    if (fence) {
+      const closing = visible.match(/^(`{3,}|~{3,})[ \t]*$/);
+      if (closing && closing[1][0] === fence.marker && closing[1].length >= fence.length) fence = undefined;
+      return true;
+    }
+    const opening = visible.match(/^(`{3,}|~{3,})/);
+    if (opening) { fence = { marker: opening[1][0], length: opening[1].length }; return true; }
+    if (partial && !line.endsWith("\n") && visible &&
+        ("<message_meta>".startsWith(visible.toLowerCase()) ||
+         (visible.toLowerCase().startsWith("<message_meta>") && !visible.toLowerCase().includes("</message_meta>")))) return false;
+    const match = visible.match(/^<message_meta>(.*)<\/message_meta>[ \t]*$/i);
+    if (!match) return true;
+    try {
+      const value = JSON.parse(match[1]);
+      const keys = ["sent_at", "sent_at_unix_ms", "updated_at", "updated_at_unix_ms"];
+      if (!value || Array.isArray(value) || Object.keys(value).length !== keys.length || !keys.every(key => Object.hasOwn(value, key))) return true;
+      for (const key of ["sent_at", "updated_at"]) {
+        const milliseconds = value[key + "_unix_ms"];
+        if (typeof milliseconds !== "number" || !Number.isFinite(milliseconds)) return true;
+        if (milliseconds <= 0 ? value[key] !== null : value[key] !== new Date(milliseconds).toISOString()) return true;
+      }
+      return false;
+    } catch { return true; }
+  }).join("");
+  return trim ? result.trim() : result;
+}
+return { assistantDeliveryContent };
+})();
+
 // src/conversations/conversation-sync.mjs
 const module1 = (() => {
+const { assistantDeliveryContent } = module2;
 // Read-only wire projections. The conversation ledger remains the sole durable owner.
 const SYNC_SCHEMA = "aru.selfhost.collaborator-conversation-sync.v1";
 const PAGE_SCHEMA = "aru.selfhost.collaborator-conversation-message-page.v1";
 const pageSize = 64;
 const eventPageSize = 128;
-const publicMessage = ({ clientRequestId: _, driverText: __, ...value }, position) => ({ ...value, position });
+function publicMessage({ clientRequestId: _, driverText: __, ...value }, position) {
+  return { ...value, content: value.role === "assistant" ? assistantDeliveryContent(value.content, { trim: false, partial: value.status === "streaming" }) : value.content, position };
+}
 
 function messagePage(conversation, before, HttpError) {
   const source = conversation.messages;
@@ -93,11 +135,11 @@ function syncProjection(conversation, metadata, version, after) {
     events: page.filter(event => event.kind !== "assistant.delta"), cursor, hasMore: cursor < tail,
     history: history ? { before: history.before, hasMore: history.hasMore } : null };
 }
-return { SYNC_SCHEMA, PAGE_SCHEMA, messagePage, syncProjection };
+return { SYNC_SCHEMA, PAGE_SCHEMA, publicMessage, messagePage, syncProjection };
 })();
 
 // src/conversations/driver-projection.mjs
-const module2 = (() => {
+const module3 = (() => {
 const { createHash } = node0;
 const { isAbsolute, relative, resolve } = node1;
 function replicaInstructions(replica) {
@@ -271,7 +313,7 @@ return { replicaInstructions, proactiveReplicaSeed, messageContentWithTime, hist
 })();
 
 // src/conversations/attachment-chunks.mjs
-const module4 = (() => {
+const module5 = (() => {
 const { randomUUID } = node0;
 const { existsSync, readFileSync, writeFileSync, renameSync, rmSync, statSync, openSync, fsyncSync, closeSync } = node2;
 const { join } = node1;
@@ -330,14 +372,17 @@ function createAttachmentChunkTransfer({ HttpError, recordDirectory, loadAttachm
         if (record.state === "ready") { sendJSON(res, 200, projection(record)); return true; }
         if (record.state !== "uploading") throw new HttpError(409, "attachment.state_invalid", "attachment is not accepting content");
         const destination = path(record, index);
-        if (existsSync(destination)) {
-          if (!readFileSync(destination).equals(bytes)) throw new HttpError(409, "attachment.chunk_conflict", "chunk retry contains different bytes");
-        } else {
+        // An uploading part is recoverable staging, not the final asset. A
+        // retransmission can repair corrupt bytes; completion still verifies the
+        // immutable admission hash before making anything available to messages.
+        if (!existsSync(destination) || !readFileSync(destination).equals(bytes)) {
           const temporary = `${destination}.${randomUUID()}.tmp`;
           try {
-            writeFileSync(temporary, bytes, { mode: 0o600 });
-            const descriptor = openSync(temporary, "r");
-            try { fsyncSync(descriptor); } finally { closeSync(descriptor); }
+            const descriptor = openSync(temporary, "wx", 0o600);
+            try {
+              writeFileSync(descriptor, bytes);
+              fsyncSync(descriptor);
+            } finally { closeSync(descriptor); }
             renameSync(temporary, destination);
           }
           finally { rmSync(temporary, { force: true }); }
@@ -372,7 +417,7 @@ return { createAttachmentChunkTransfer };
 })();
 
 // src/conversations/attachments.mjs
-const module3 = (() => {
+const module4 = (() => {
 const { createHash, randomUUID } = node0;
 const {
   chmodSync,
@@ -391,7 +436,7 @@ const {
 } = node2;
 const { basename, dirname, extname, isAbsolute, join, relative, resolve } = node1;
 const { once } = node3;
-const { createAttachmentChunkTransfer } = module4;
+const { createAttachmentChunkTransfer } = module5;
 
 
 const ID = /^[A-Za-z0-9_-]+$/;
@@ -550,7 +595,8 @@ function createCollaboratorConversationAttachmentHost({
       if (!existsSync(contentPath(record)) || !["ready", "bound"].includes(record.state)) {
         throw new HttpError(409, "attachment.not_ready", `${record.filename} has not finished uploading`);
       }
-      if (record.messageId) {
+      if (record.messageId || conversation.messages.some(message =>
+        (message.attachments ?? []).some(attachment => attachment.attachmentId === record.attachmentId))) {
         throw new HttpError(409, "attachment.already_bound", `${record.filename} already belongs to another message`);
       }
     }
@@ -828,7 +874,7 @@ return { createCollaboratorConversationAttachmentHost };
 })();
 
 // src/conversations/replica-delivery-recovery.mjs
-const module5 = (() => {
+const module6 = (() => {
 function createReplicaDeliveryRecovery({ loadConversations, publicConversation, publicTurn, message }) {
   // Startup-only reconciliation of the delivery owner's outstanding attempts.
   // Conversation storage owns completion evidence; callers never read its files.
@@ -853,7 +899,7 @@ return { createReplicaDeliveryRecovery };
 })();
 
 // src/conversations/turn-execution.mjs
-const module6 = (() => {
+const module7 = (() => {
 // Runtime of one admitted turn. Durable state and projection stay in the
 // conversation owner; this object only holds cancellable work and its receipts.
 function createTurnExecution() {
@@ -897,7 +943,7 @@ return { createTurnExecution, waitForTurnStop };
 })();
 
 // src/conversations/collaborator-conversation-lifecycle.mjs
-const module7 = (() => {
+const module8 = (() => {
 // Metadata lifecycle, independent of message execution. A running turn must be
 // stopped through its owner before its conversation can leave the live list.
 function mutateConversationLifecycle({ conversation, body, deleting, deviceId, now, save, HttpError }) {
@@ -922,12 +968,12 @@ return { mutateConversationLifecycle };
 
 // src/conversations/collaborator-conversations.mjs
 const module0 = (() => {
-const { SYNC_SCHEMA, messagePage, syncProjection } = module1;
-const { replicaInstructions, proactiveReplicaSeed, messageContentWithTime, historyRoleLabel, isoTimestamp, validatedReplicaRole, dynamicTool, driverConfigurationFingerprint, collaboratorInstructions, driverApprovalKind, driverApprovalTitle, publicApprovalDetail, driverApprovalResponse, publicDriverItem, publicWorkspacePath } = module2;
-const { createCollaboratorConversationAttachmentHost } = module3;
-const { createReplicaDeliveryRecovery } = module5;
-const { createTurnExecution, waitForTurnStop } = module6;
-const { mutateConversationLifecycle } = module7;
+const { SYNC_SCHEMA, messagePage, syncProjection, publicMessage } = module1;
+const { replicaInstructions, proactiveReplicaSeed, messageContentWithTime, historyRoleLabel, isoTimestamp, validatedReplicaRole, dynamicTool, driverConfigurationFingerprint, collaboratorInstructions, driverApprovalKind, driverApprovalTitle, publicApprovalDetail, driverApprovalResponse, publicDriverItem, publicWorkspacePath } = module3;
+const { createCollaboratorConversationAttachmentHost } = module4;
+const { createReplicaDeliveryRecovery } = module6;
+const { createTurnExecution, waitForTurnStop } = module7;
+const { mutateConversationLifecycle } = module8;
 const { createHash, randomUUID } = node0;
 const {
   chmodSync,
@@ -1230,7 +1276,6 @@ function createCollaboratorConversationHost({
       assistantMessageId: assistantMessage.messageId,
     });
     saveConversation(conversation);
-    attachments.commitMessageBindings(conversation, userMessage);
     defer(() => runTurn(conversation.collaboratorId, conversation.conversationId, collaborator, turn.turnId));
     return publicConversation(conversation, true);
   }
@@ -1358,10 +1403,13 @@ function createCollaboratorConversationHost({
     const execution = createTurnExecution();
     executions.set(conversationKey(collaboratorId, conversationId), execution);
     const acceptsResult = () => conversation.activeTurn === turn && ACTIVE_STATES.has(turn.state) && !execution.signal.aborted;
-    setTurnState(conversation, "starting");
-    turn.startedAt = now();
-    saveConversation(conversation);
     try {
+      setTurnState(conversation, "starting");
+      turn.startedAt = now();
+      saveConversation(conversation);
+      // The accepted message is durable before preparation. Binding failures
+      // must finish its turn, never strand a queued message without a runner.
+      attachments.commitMessageBindings(conversation, message(conversation, turn.userMessageId));
       const driver = driverForCollaborator(collaborator);
       activeDrivers.set(conversationKey(collaboratorId, conversationId), driver);
       const workspace = join(workspaceRoot, collaborator.collaboratorId);
@@ -1461,7 +1509,7 @@ function createCollaboratorConversationHost({
 
   async function requestDriverApproval(conversation, collaborator, request) {
     const turn = conversation.activeTurn;
-    if (!turn) return;
+    if (!turn || request.signal?.aborted) return;
     if (approvalAllowsAlways(collaborator)) {
       request.respond(driverApprovalResponse(request.method, request.params, "allowOnce"));
       return;
@@ -1471,20 +1519,27 @@ function createCollaboratorConversationHost({
       title: driverApprovalTitle(request.method),
       detail: publicApprovalDetail(request.method, request.params),
     });
+    const cancelled = () => {
+      if (approval.state !== "pending") return;
+      resolveApproval(conversation, approval.approvalId, { decision: "cancel" }, { deviceId: "claude-code-bridge" });
+    };
     pendingApprovals.set(approval.approvalId, {
       conversation,
       continuation(decision) {
+        request.signal?.removeEventListener("abort", cancelled);
         request.respond(driverApprovalResponse(request.method, request.params, decision));
       },
     });
     setTurnState(conversation, "waitingApproval");
     saveConversation(conversation);
+    request.signal?.addEventListener("abort", cancelled, { once: true });
+    if (request.signal?.aborted) cancelled();
   }
 
   async function handleToolCall(conversation, collaborator, tools, params, execution, expectedTurn) {
     const admitResult = () => {
       execution.signal.throwIfAborted();
-      if (conversation.activeTurn !== expectedTurn) throw new Error("Turn is no longer active");
+      if (conversation.activeTurn !== expectedTurn || !ACTIVE_STATES.has(expectedTurn.state)) throw new Error("Turn is no longer active");
     };
     admitResult();
     const tool = tools.find((candidate) => candidate.name === params.tool);
@@ -1593,7 +1648,10 @@ function createCollaboratorConversationHost({
     approval.resolvedAt = now();
     approval.resolvedByDeviceId = device.deviceId;
     pendingApprovals.delete(approvalId);
-    setTurnState(conversation, "streaming");
+    if (conversation.activeTurn?.turnId === approval.turnId && ACTIVE_STATES.has(conversation.activeTurn.state)) {
+      setTurnState(conversation, conversation.approvals.some(item => item.turnId === approval.turnId && item.state === "pending")
+        ? "waitingApproval" : "streaming");
+    }
     appendEvent(conversation, "approval.resolved", {
       turnId: approval.turnId,
       approvalId,
@@ -1733,18 +1791,23 @@ function createCollaboratorConversationHost({
     for (const collaboratorId of readdirSync(root)) {
       if (!ID.test(collaboratorId)) continue;
       for (const conversation of loadConversations(collaboratorId)) {
-        if (!conversation.activeTurn || !ACTIVE_STATES.has(conversation.activeTurn.state)) continue;
-        for (const approval of conversation.approvals.filter((item) => item.state === "pending")) {
-          approval.state = "expired";
-          approval.resolvedAt = now();
-          approval.decision = "interrupted";
-          appendEvent(conversation, "approval.resolved", {
-            turnId: approval.turnId,
-            approvalId: approval.approvalId,
-            decision: "interrupted",
-          });
+        try {
+          // Recovery is per ledger. Preserve an unreadable shape on disk rather
+          // than inventing missing history or preventing unrelated Host startup.
+          if (!Array.isArray(conversation.events) || !Array.isArray(conversation.approvals)
+              || !Array.isArray(conversation.messages) || !Number.isSafeInteger(conversation.nextSequence)) {
+            throw new Error("conversation ledger lacks valid events, approvals, messages or sequence");
+          }
+          const expired = expireApprovals(conversation);
+          if (!conversation.activeTurn || !ACTIVE_STATES.has(conversation.activeTurn.state)) {
+            if (expired) saveConversation(conversation);
+            continue;
+          }
+          interruptConversation(conversation, "Aru Host 重启后保留了历史，但没有重复执行未完成的动作");
+        } catch (error) {
+          console.error("Aru Host conversation recovery skipped", collaboratorId,
+            ID.test(conversation.conversationId ?? "") ? conversation.conversationId : "invalid-id", error.message);
         }
-        interruptConversation(conversation, "Aru Host 重启后保留了历史，但没有重复执行未完成的动作");
       }
     }
   }
@@ -1767,11 +1830,30 @@ function createCollaboratorConversationHost({
     return approval;
   }
 
+  function expireApprovals(conversation, turnId) {
+    let changed = false;
+    for (const approval of conversation.approvals) {
+      if (approval.state !== "pending" || (turnId && approval.turnId !== turnId)) continue;
+      changed = true;
+      const pending = pendingApprovals.get(approval.approvalId);
+      pendingApprovals.delete(approval.approvalId);
+      approval.state = "expired";
+      approval.decision = "interrupted";
+      approval.resolvedAt = now();
+      appendEvent(conversation, "approval.resolved", {
+        turnId: approval.turnId, approvalId: approval.approvalId, decision: "interrupted",
+      });
+      pending?.continuation("cancel");
+    }
+    return changed;
+  }
+
   function completeConversation(conversation) {
     const turn = conversation.activeTurn;
     if (!turn) return;
     turn.state = "completed";
     turn.completedAt = now();
+    expireApprovals(conversation, turn.turnId);
     message(conversation, turn.assistantMessageId).status = "completed";
     appendEvent(conversation, "turn.completed", { turnId: turn.turnId });
     touch(conversation, null);
@@ -1785,6 +1867,7 @@ function createCollaboratorConversationHost({
     if (!turn || !ACTIVE_STATES.has(turn.state)) return;
     turn.state = "failed";
     turn.completedAt = now();
+    expireApprovals(conversation, turn.turnId);
     turn.failure = failure;
     message(conversation, turn.assistantMessageId).status = "failed";
     appendEvent(conversation, "turn.failed", { turnId: turn.turnId, message: failure });
@@ -1799,6 +1882,7 @@ function createCollaboratorConversationHost({
     if (!turn || !ACTIVE_STATES.has(turn.state)) return;
     turn.state = "interrupted";
     turn.completedAt = now();
+    expireApprovals(conversation, turn.turnId);
     turn.failure = failure;
     message(conversation, turn.assistantMessageId).status = "interrupted";
     appendEvent(conversation, "turn.interrupted", { turnId: turn.turnId, message: failure });
@@ -1860,11 +1944,11 @@ function createCollaboratorConversationHost({
       activeTurn: turn,
       messageCount: conversation.messages.length,
       pendingApprovalCount: conversation.approvals.filter((approval) => approval.state === "pending").length,
-      lastMessagePreview: conversation.messages.at(-1)?.content.slice(0, 180) ?? "",
+      lastMessagePreview: conversation.messages.length ? publicMessage(conversation.messages.at(-1)).content.slice(0, 180) : "",
     };
     if (includeBody) {
       value.messages = conversation.messages
-        .map(({ clientRequestId: _, driverText: __, ...item }, position) => ({ ...item, position }))
+        .map(publicMessage)
         .filter((item) => item.role !== "system");
       value.approvals = conversation.approvals.map(publicApproval);
     }

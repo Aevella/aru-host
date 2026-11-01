@@ -114,7 +114,12 @@ node aru-selfhost-stub.mjs --port 8787
 
 Boot prints the manifest URL plus a single-use pairing payload (JSON and
 `aru://pair?...` forms, 10 minute TTL). Use `--pairing-token <fixed>` for
-deterministic dev flows.
+deterministic dev flows. Each normal service restart issues a fresh token. A
+mismatch can therefore mean a restart or another instance/address; it does not
+prove which. Check `systemctl show aru-selfhost -p NRestarts -p MainPID`, the
+service journal, and whether another process uses the same data directory. Compare
+the link's origin with the intended listener and reverse proxy. Do not share the
+token or the complete pairing link when collecting diagnostics.
 
 ## Endpoints
 
@@ -417,9 +422,12 @@ and non-UTF-8 files are moved into content-addressed artifact storage rather
 than being base64-encoded into JSON.
 
 Each run uses a fresh container with no network, a read-only container root,
-all Linux capabilities dropped, `no-new-privileges`, a non-root uid, bounded
-process/memory/CPU resources, and only its disposable `/workspace` bind mount
-writable. Symbolic links and non-UTF-8 result files are rejected. The runtime
+all Linux capabilities dropped, `no-new-privileges`, a non-root uid, normally
+bounded process/memory/CPU resources, and only its disposable `/workspace` bind
+mount writable. When the rootless engine explicitly reports that cgroup access is
+denied, Host first verifies a probe without resource limits. If that probe reports
+the same cgroup denial, it also tries with cgroups disabled. Jobs use the verified
+mode; authenticated container diagnostics record the missing limits and selected mode. Symbolic links and non-UTF-8 result files are rejected. The runtime
 images and safety boundaries are operator-configurable:
 
 ```bash
@@ -437,6 +445,70 @@ available but the manifest truthfully marks `workspace-runtime` disabled.
 Existing artifacts remain available through `artifact-vault`. A Node 22+
 runtime can still provide the permissioned source-plugin workshop; OCI plugins
 remain disabled without a container runtime.
+
+### Rootless cgroups on Linux
+
+The system service uses `User=aru-selfhost`, `Delegate=yes`, and Podman's
+`cgroupfs` manager. On cgroup v2, systemd must delegate a writable service
+subtree to that user; available controllers must also be enabled for descendants.
+`Delegate=yes` requests delegation but does not itself enable controllers in
+`cgroup.subtree_control`. A successful interactive `podman run` can use a
+separate user-session subtree and does not prove the service subtree works.
+
+For diagnosis, inspect `systemctl show aru-selfhost -p User -p Delegate -p ControlGroup -p NRestarts`,
+`systemctl cat aru-selfhost`, and `journalctl -u aru-selfhost`. Inspect ownership,
+`cgroup.controllers`, and `cgroup.subtree_control` under the reported cgroup.
+Check the active unit after daemon reload and service restart; do not recursively
+change ownership of the system cgroup tree. A user service or `systemd-run --user
+--scope` needs a working user manager, lingering and delegated controllers; it
+is not automatically equivalent to this system unit. If delegation cannot be
+repaired, the authenticated runtime diagnostics expose the unlimited fallback.
+CPU, memory and process-count limits are then absent, so operators should use
+an appropriately bounded VPS or restore delegation.
+
+For the reported Ubuntu shape (service directory owned by `root:root` with mode
+0755), the immediate failure is that the service UID cannot create a child cgroup.
+With effective delegation on cgroup v2, systemd should hand ownership of the
+service subtree to `User=` before launching its processes. This observation does
+not establish whether the running unit predates the setting, a drop-in overrides
+it, or the VPS restricts delegation above the guest. Lingering only keeps the user
+manager alive; it does not repair ownership in `system.slice`.
+
+For an existing system installation, keep its data directory and service identity.
+After verifying the installed unit has `User=aru-selfhost` and `Delegate=yes`, use
+`sudo systemctl daemon-reload` and `sudo systemctl restart aru-selfhost` in a
+maintenance window (a restart invalidates the previous pairing link). Then inspect:
+
+```sh
+systemctl show aru-selfhost -p User -p Delegate -p ControlGroup -p MainPID -p NRestarts
+cg=$(systemctl show aru-selfhost -p ControlGroup --value)
+stat -c '%U:%G %a %n' "/sys/fs/cgroup$cg"
+cat "/sys/fs/cgroup$cg/cgroup.controllers"
+cat "/sys/fs/cgroup$cg/cgroup.subtree_control"
+```
+
+If the parent VPS does not permit delegation, use the verified no-limits fallback
+and confirm authenticated runtime diagnostics report `ready` and
+`resourceLimits: false`. A fresh user-owned installation may instead use
+`install-linux-desktop.sh` from the release payload, run as the intended user with
+a working `systemctl --user` manager and administrator-enabled lingering. Verify
+its own runtime diagnostics; do not point both installations at the same data
+directory. This is not an automatic migration of the system service's identity,
+credential backend or data. `systemd-run --user --scope` is useful for a probe but
+is not a replacement for the installer's durable service and restart lifecycle.
+
+References: [systemd delegation](https://systemd.io/CGROUP_DELEGATION/) and
+[service subtree ownership](https://systemd.io/CONTROL_GROUP_INTERFACE/).
+Ubuntu 24.04 VM verification (Podman 4.9.3, runc 1.3.4, systemd 255) reproduced
+this failure class. Even with `Delegate=yes` and correct service-UID ownership,
+`cgroupfs` attempted to create a sibling directly under `system.slice`, outside
+the delegated service subtree. Both delegated and non-delegated system services
+passed real Node/Python/Shell probes after removing limits, without disabling
+cgroups. A transient user service with `Delegate=yes`, the correct user's
+`XDG_RUNTIME_DIR`/session bus, and Podman's `cgroup_manager="systemd"` passed
+with limits intact. See `tests/ubuntu-rootless-systemd-smoke.sh` for the executable
+comparison. This verifies the fallback and user-manager alternative, but does
+not establish why the reported customer's service subtree remained root-owned.
 
 ## MCP gateway
 

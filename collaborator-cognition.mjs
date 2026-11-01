@@ -32,8 +32,8 @@ function createResidenceReading({ root, HttpError }) {
     // newer projection transfers this read-only slot, not computer memory or a
     // different phone's relationship. Retired writers can never take it back.
     if (old && (retiredDeviceIds.includes(device.deviceId)
-        || body.generation < old.generation
-        || (body.generation === old.generation && (body.sourceCollaboratorId !== old.sourceCollaboratorId || body.revision < old.revision))
+        || (!changedDevice && (body.generation < old.generation
+            || (body.generation === old.generation && (body.sourceCollaboratorId !== old.sourceCollaboratorId || body.revision < old.revision))))
         || (changedDevice && (body.sourceCollaboratorId !== old.sourceCollaboratorId || body.revision <= old.revision)))) {
       throw new HttpError(409, "reading.stale", "Reading relationship or revision changed; publish a newer snapshot from the linked phone collaborator");
     }

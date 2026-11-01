@@ -56,14 +56,17 @@ export function createAttachmentChunkTransfer({ HttpError, recordDirectory, load
         if (record.state === "ready") { sendJSON(res, 200, projection(record)); return true; }
         if (record.state !== "uploading") throw new HttpError(409, "attachment.state_invalid", "attachment is not accepting content");
         const destination = path(record, index);
-        if (existsSync(destination)) {
-          if (!readFileSync(destination).equals(bytes)) throw new HttpError(409, "attachment.chunk_conflict", "chunk retry contains different bytes");
-        } else {
+        // An uploading part is recoverable staging, not the final asset. A
+        // retransmission can repair corrupt bytes; completion still verifies the
+        // immutable admission hash before making anything available to messages.
+        if (!existsSync(destination) || !readFileSync(destination).equals(bytes)) {
           const temporary = `${destination}.${randomUUID()}.tmp`;
           try {
-            writeFileSync(temporary, bytes, { mode: 0o600 });
-            const descriptor = openSync(temporary, "r");
-            try { fsyncSync(descriptor); } finally { closeSync(descriptor); }
+            const descriptor = openSync(temporary, "wx", 0o600);
+            try {
+              writeFileSync(descriptor, bytes);
+              fsyncSync(descriptor);
+            } finally { closeSync(descriptor); }
             renameSync(temporary, destination);
           }
           finally { rmSync(temporary, { force: true }); }

@@ -1,6 +1,43 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { pollConversation, patchMessageRows, conversationRunning } from '../src/conversation-sync.mjs';
+import { pollConversation, patchMessageRows, conversationRunning, submitConversationApproval } from '../src/conversation-sync.mjs';
+import { createHostRequest } from '../src/host-request.mjs';
+
+test('actual conversation sync and approval calls cross the Console request boundary', async () => {
+  const calls = [];
+  const request = createHostRequest({
+    platform: { nodeEnvPath: 'fixture', readCredential: async () => 'fixture-token' },
+    readText: async () => 'ARU_PORT=8787',
+    fetchResponse: async (url, options) => {
+      calls.push({ path: url.pathname + url.search, method: options.method, body: options.body });
+      return Response.json(options.method === 'GET'
+        ? { cursor: 128, version: calls.length === 1 ? '123-456-789' : 'opaque/+ &汉', hasMore: false, conversation: { messages: [] } }
+        : { ok: true });
+    },
+  });
+  const uuid = '01234567-89ab-cdef-0123-456789abcdef';
+  const path = `/aru/v1/hosted-collaborators/hostcol_${uuid}/conversations/hostconv_${uuid}`;
+  const approvalId = `hostapproval_${uuid}`;
+  const state = { cursor: 0, version: null };
+  await pollConversation(state, path, request, () => true, () => {});
+  await pollConversation(state, path, request, () => true, () => {});
+  await pollConversation(state, path, request, () => true, () => {});
+  for (const decision of ['allowOnce', 'allowSession', 'deny']) {
+    await submitConversationApproval(request, path, approvalId, decision);
+  }
+  assert.deepEqual(calls.slice(0, 3).map(call => call.path), [
+    `${path}/sync?after=0`, `${path}/sync?after=128&version=123-456-789`,
+    `${path}/sync?after=128&version=opaque%2F%2B+%26%E6%B1%89`,
+  ]);
+  assert.deepEqual(calls.slice(3).map(call => [call.method, call.path, JSON.parse(call.body)]),
+    ['allowOnce', 'allowSession', 'deny'].map(decision =>
+      ['POST', `${path}/approvals/${approvalId}?window=1`, { decision }]));
+  await assert.rejects(request('POST', `${path}/approvals/${approvalId}?window=1&other=1`, {}));
+  await assert.rejects(request('POST', `${path}/sync?after=0`, {}));
+  await assert.rejects(request('GET', `${path}/sync?after=0&other=1`));
+  await assert.rejects(request('GET', `${path}%2Fsync?after=0`));
+  assert.equal(calls.length, 6, 'rejected calls never reach Host');
+});
 
 test('failed application retries, stale view cannot publish, and unchanged performs no application', async () => {
   const state = {cursor: 10, version: 'old'};

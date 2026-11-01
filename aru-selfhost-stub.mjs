@@ -21,8 +21,21 @@ import * as node17 from './conversation-turn-relay.mjs';
 import * as node18 from './apns-push.mjs';
 import * as node19 from './wake-bridge.mjs';
 
-// src/server/container-readiness.mjs
+// src/server/pairing-token.mjs
 const module1 = (() => {
+// Check token identity before state so an unrelated token cannot be described as
+// a consumed or expired token belonging to this instance.
+function pairingTokenFailure(pairing, token, now, ttl, equal) {
+  if (!equal(token, pairing.token)) return "pairing.token_mismatch";
+  if (pairing.consumedAt) return "pairing.token_used";
+  if (now - pairing.issuedAt > ttl) return "pairing.token_expired";
+  return null;
+}
+return { pairingTokenFailure };
+})();
+
+// src/server/container-readiness.mjs
+const module2 = (() => {
 const { verifyContainerRuntime } = node0;
 
 // One attempt per Core process, with explicit retries. Preparation is not proof
@@ -36,11 +49,33 @@ function createContainerReadiness(config, verify = verifyContainerRuntime) {
     if (!config.containerRuntime) return Promise.resolve(snapshot);
     snapshot = { status: "checking", checkedAt: null, message: null };
     failure = undefined;
-    attempt = Promise.resolve().then(() => verify(config.containerRuntime, {
+    const options = {
       allowPull: false,
       setting: (key, fallback) => ({ NODE_IMAGE: config.runtimeImages.node, PYTHON_IMAGE: config.runtimeImages.python,
         SHELL_IMAGE: config.runtimeImages.shell, CONTAINER_MEMORY: config.containerMemory, CONTAINER_CPUS: config.containerCPUs }[key] ?? fallback),
-    })).then(() => snapshot = { status: "ready", checkedAt: Date.now(), message: null },
+    };
+    attempt = Promise.resolve().then(async () => {
+      try {
+        await verify(config.containerRuntime, options);
+        return { resourceLimits: true };
+      } catch (error) {
+        // Only retry the synthetic probe for the specific rootless cgroup denial.
+        // Never retry an actual workspace job which might already have run.
+        const detail = String(error.detail ?? error.message ?? "");
+        if (!/rootless needs no limits \+ no cgroup\s*path when no permission is granted for cgroups/i.test(detail)) throw error;
+        let cgroupsDisabled = false;
+        try {
+          await verify(config.containerRuntime, { ...options, resourceLimits: false });
+        } catch (unlimitedError) {
+          const unlimitedDetail = String(unlimitedError.detail ?? unlimitedError.message ?? "");
+          if (!/rootless needs no limits \+ no cgroup\s*path when no permission is granted for cgroups/i.test(unlimitedDetail)) throw unlimitedError;
+          await verify(config.containerRuntime, { ...options, resourceLimits: false, cgroupsDisabled: true });
+          cgroupsDisabled = true;
+        }
+        failure = { stage: "resource-limits", executable: config.containerRuntime, detail };
+        return { resourceLimits: false, cgroupsDisabled };
+      }
+    }).then(result => snapshot = { status: "ready", checkedAt: Date.now(), message: null, ...result },
       error => {
         failure = { stage: error.stage ?? "workspace", executable: config.containerRuntime,
           image: error.image ?? null, detail: error.detail ?? error.message };
@@ -53,13 +88,15 @@ function createContainerReadiness(config, verify = verifyContainerRuntime) {
   }
   return { check, snapshot: () => ({ ...snapshot }),
     diagnostics: () => ({ ...snapshot, executable: config.containerRuntime, ...(failure ? { failure: { ...failure } } : {}) }),
-    ready: () => snapshot.status === "ready" };
+    ready: () => snapshot.status === "ready",
+    resourceLimits: () => snapshot.resourceLimits !== false,
+    cgroupsDisabled: () => snapshot.cgroupsDisabled === true };
 }
 return { createContainerReadiness };
 })();
 
 // src/server/network-address.mjs
-const module2 = (() => {
+const module3 = (() => {
 const { networkInterfaces, hostname } = node1;
 
 // Address policy is durable; an interface address is a fresh runtime projection.
@@ -85,7 +122,7 @@ return { resolveHostAddress };
 })();
 
 // src/server/mcp-gateway.mjs
-const module3 = (() => {
+const module4 = (() => {
 const { randomUUID } = node2;
 function createMCPGateway({ config, state, nodeControl, backupSettings, backupInventory, deleteBackupPackage, HttpError, readJSONBody, sendJSON, sendEmpty, officialMCPTools, workspaceJobInventory, workspaceJob, publicWorkspaceJob, cancelWorkspaceJob, retryWorkspaceJob, artifactInventory, deleteArtifact, MCP_PROTOCOL_VERSION, SERVER_VERSION, WORKSPACE_JOB_EVENTS_SCHEMA, getPluginSupervisor, getCollaboratorHost, getNodeWorkspaceHost }) {
 const mcpSessions = new Map();
@@ -369,7 +406,7 @@ return { createMCPGateway };
 })();
 
 // src/server/workspace-jobs.mjs
-const module4 = (() => {
+const module5 = (() => {
 const { randomBytes, randomUUID } = node2;
 const { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } = node3;
 const { spawn, execFile } = node4;
@@ -377,6 +414,11 @@ const { promisify } = node5;
 const runContainerControl = promisify(execFile);
 const { isAbsolute, join, relative, resolve, sep } = node6;
 const { tmpdir } = node1;
+function workspaceContainerResourceArgs(config) {
+  return config.containerReadiness?.resourceLimits() === false
+    ? (config.containerReadiness?.cgroupsDisabled?.() ? ["--cgroups=disabled"] : [])
+    : ["--pids-limit", "128", "--memory", config.containerMemory, "--cpus", config.containerCPUs];
+}
 function createWorkspaceJobs({ config, state, saveState, sendJSON, readJSONBody, HttpError, log, sha256Hex, persistWorkspaceArtifacts, artifactExtension, CONTAINER_STOP_GRACE_SECONDS, WORKSPACE_JOB_EVENTS_SCHEMA, WORKSPACE_JOB_INVENTORY_SCHEMA, WORKSPACE_JOB_POLICY_SCHEMA, WORKSPACE_JOB_SCHEMA, WORKSPACE_RESULT_SCHEMA, WORKSPACE_RUNTIMES, WORKSPACE_RUN_SCHEMA }) {
 const activeJobProcesses = new Map();
 function publicWorkspaceJobPolicy() {
@@ -818,9 +860,7 @@ async function runWorkspaceContainer({
     "--read-only",
     "--cap-drop", "ALL",
     "--security-opt", "no-new-privileges",
-    "--pids-limit", "128",
-    "--memory", config.containerMemory,
-    "--cpus", config.containerCPUs,
+    ...workspaceContainerResourceArgs(config),
     "--user", "65532:65532",
     "--tmpfs", "/tmp:rw,nosuid,nodev,size=64m",
     "--mount", `type=bind,src=${workspaceDirectory},dst=/workspace`,
@@ -1035,11 +1075,11 @@ async function recoverInterruptedJobs() {
 
 return { publicWorkspaceJobPolicy, handleWorkspaceJobPolicyUpdate, handleWorkspaceJobSubmit, executeWorkspaceJob, workspaceJob, publicWorkspaceJob, workspaceJobInventory, matchWorkspaceJobRoute, handleWorkspaceJobStatus, handleWorkspaceJobEvents, handleWorkspaceJobCancel, cancelWorkspaceJob, handleWorkspaceJobRetry, retryWorkspaceJob, recoverInterruptedJobs };
 }
-return { createWorkspaceJobs };
+return { workspaceContainerResourceArgs, createWorkspaceJobs };
 })();
 
 // src/server/artifact-vault.mjs
-const module5 = (() => {
+const module6 = (() => {
 const { randomUUID } = node2;
 const { existsSync, readFileSync, rmSync, writeFileSync } = node3;
 const { extname, join } = node6;
@@ -1179,7 +1219,7 @@ return { createArtifactVault };
 })();
 
 // src/server/backup-snapshot-references.mjs
-const module8 = (() => {
+const module9 = (() => {
 const { openSync, closeSync, readFileSync, writeFileSync, fsyncSync, statSync, truncateSync } = node3;
 const { createHash } = node2;
 const checkpointBytes = length => Buffer.from(JSON.stringify({ length, sha256: hash(String(length)) }));
@@ -1240,8 +1280,8 @@ return { createDraftReferences };
 })();
 
 // src/server/backup-snapshot-store.mjs
-const module7 = (() => {
-const { createDraftReferences } = module8;
+const module8 = (() => {
+const { createDraftReferences } = module9;
 const { randomBytes, randomUUID, createHash } = node2;
 const { mkdirSync, readFileSync, writeFileSync, openSync, closeSync, readSync, fsyncSync, renameSync, unlinkSync, readdirSync, lstatSync } = node3;
 const { join } = node6;
@@ -1519,9 +1559,9 @@ return { createBackupSnapshotStore };
 })();
 
 // src/server/backup-snapshot-routes.mjs
-const module6 = (() => {
+const module7 = (() => {
 const { createHash } = node2;
-const { createBackupSnapshotStore } = module7;
+const { createBackupSnapshotStore } = module8;
 const { join } = node6;
 
 function createBackupSnapshotRoutes({ config, serverId, sendJSON, HttpError, applyRetention }) {
@@ -1614,7 +1654,7 @@ return { createBackupSnapshotRoutes };
 })();
 
 // src/server/backup-vault.mjs
-const module9 = (() => {
+const module10 = (() => {
 const { randomUUID, createHash } = node2;
 const { createWriteStream, createReadStream, existsSync, renameSync, unlinkSync, statSync, openSync, closeSync, readSync } = node3;
 const { join, resolve, sep } = node6;
@@ -1875,7 +1915,7 @@ return { createBackupVault };
 })();
 
 // src/server/mcp-catalog.mjs
-const module10 = (() => {
+const module11 = (() => {
 function createMCPCatalog({  }) {
 const MCP_TOOLS = [
   {
@@ -2229,7 +2269,7 @@ return { createMCPCatalog };
 })();
 
 // src/server/state-store.mjs
-const module11 = (() => {
+const module12 = (() => {
 const { readFileSync, lstatSync, openSync, writeFileSync, fsyncSync, closeSync, renameSync } = node3;
 const { randomBytes } = node2;
 function createHostStateStore({ statePath, WORKSPACE_JOB_POLICY_SCHEMA, OFFICIAL_DEFAULT_MAXIMUM_RUNTIME_SECONDS }) {
@@ -2341,15 +2381,16 @@ return { load: loadState, save: saveState };
 return { createHostStateStore };
 })();
 
-const { createContainerReadiness } = module1;
-const { resolveHostAddress } = module2;
-const { createMCPGateway } = module3;
-const { createWorkspaceJobs } = module4;
-const { createArtifactVault } = module5;
-const { createBackupSnapshotRoutes } = module6;
-const { createBackupVault } = module9;
-const { createMCPCatalog } = module10;
-const { createHostStateStore } = module11;
+const { pairingTokenFailure } = module1;
+const { createContainerReadiness } = module2;
+const { resolveHostAddress } = module3;
+const { createMCPGateway } = module4;
+const { createWorkspaceJobs } = module5;
+const { createArtifactVault } = module6;
+const { createBackupSnapshotRoutes } = module7;
+const { createBackupVault } = module10;
+const { createMCPCatalog } = module11;
+const { createHostStateStore } = module12;
 // Aru self-hosted reference stub server.
 //
 // Implements the SELF-HOSTED-VPS-BRANCH.md contracts that native Aru already
@@ -3012,9 +3053,14 @@ async function handlePair(req, res) {
   if (!token) throw new HttpError(400, "pairing.missing_token", "pairingToken required");
 
   const pairing = state.pairing;
-  const expired = Date.now() - pairing.issuedAt > PAIRING_TOKEN_TTL_MS;
-  if (pairing.consumedAt || expired || !safeEqual(token, pairing.token)) {
-    throw new HttpError(401, "pairing.rejected", "pairing token rejected or expired");
+  const failure = pairingTokenFailure(pairing, token, Date.now(), PAIRING_TOKEN_TTL_MS, safeEqual);
+  if (failure) {
+    const messages = {
+      "pairing.token_mismatch": "Pairing token does not match this Host instance. The service may have restarted; run pairing again and verify the address.",
+      "pairing.token_used": "Pairing token has already been used. Run pairing again.",
+      "pairing.token_expired": "Pairing token has expired. Run pairing again.",
+    };
+    throw new HttpError(401, failure, messages[failure]);
   }
 
   pairing.consumedAt = Date.now();

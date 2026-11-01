@@ -9,6 +9,9 @@ const MAX_BRIDGE_REQUEST_BYTES = 4 * 1024 * 1024;
 export async function createClaudeCodeHostBridge(currentTurn, sessionToolGrants) {
   const token = randomUUID();
   const server = createServer(async (request, response) => {
+    const connection = new AbortController();
+    const disconnected = () => { if (!response.writableEnded) connection.abort(); };
+    response.once("close", disconnected);
     try {
       if (request.method !== "POST" || request.headers.authorization !== `Bearer ${token}`) {
         sendBridgeJSON(response, 404, { error: "not found" });
@@ -28,14 +31,16 @@ export async function createClaudeCodeHostBridge(currentTurn, sessionToolGrants)
       }
       if (body.action === "callTool") {
         const value = body.name === CLAUDE_CODE_PERMISSION_TOOL
-          ? await requestPermission(context, body.arguments ?? {}, sessionToolGrants)
+          ? await requestPermission(context, body.arguments ?? {}, sessionToolGrants, connection.signal)
           : await requestHostTool(context, body.name, body.arguments ?? {});
         sendBridgeJSON(response, 200, value);
         return;
       }
       sendBridgeJSON(response, 400, { error: "unknown bridge action" });
     } catch (error) {
-      sendBridgeJSON(response, 500, { error: String(error?.message ?? error).slice(0, 600) });
+      if (!response.destroyed) sendBridgeJSON(response, 500, { error: String(error?.message ?? error).slice(0, 600) });
+    } finally {
+      response.removeListener("close", disconnected);
     }
   });
   server.requestTimeout = 0;
@@ -100,7 +105,7 @@ async function requestHostTool(context, name, argumentsValue) {
   }
 }
 
-async function requestPermission(context, value, sessionToolGrants) {
+async function requestPermission(context, value, sessionToolGrants, connectionSignal) {
   const toolName = String(value.tool_name ?? "").trim();
   const input = value.input && typeof value.input === "object" && !Array.isArray(value.input)
     ? value.input
@@ -109,8 +114,8 @@ async function requestPermission(context, value, sessionToolGrants) {
   const grants = sessionToolGrants.get(sessionId) ?? new Set();
   const grantKey = permissionGrantKey(toolName, input);
   if (grants.has(grantKey)) return mcpText({ behavior: "allow", updatedInput: input });
+  const signal = AbortSignal.any([connectionSignal, context.lifetimeSignal].filter(Boolean));
   const response = await new Promise((resolve, reject) => {
-    const signal = context.lifetimeSignal;
     const finish = (value) => {
       signal?.removeEventListener("abort", cancel);
       resolve(value);
@@ -123,6 +128,7 @@ async function requestPermission(context, value, sessionToolGrants) {
         method: approvalMethod(toolName),
         params: approvalParams(toolName, input),
         respond: finish,
+        signal,
       })).catch((error) => {
         signal?.removeEventListener("abort", cancel);
         reject(error);
@@ -132,7 +138,7 @@ async function requestPermission(context, value, sessionToolGrants) {
       reject(error);
     }
   });
-  if (context.closed || context.interrupted) return mcpText({ behavior: "deny", message: "Originating turn has ended" });
+  if (signal.aborted || context.closed || context.interrupted) return mcpText({ behavior: "deny", message: "Originating turn has ended" });
   if (response?.decision === "accept" || response?.decision === "acceptForSession") {
     if (response.decision === "acceptForSession") {
       grants.add(grantKey);

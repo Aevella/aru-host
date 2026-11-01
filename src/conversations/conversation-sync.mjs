@@ -1,9 +1,12 @@
+import { assistantDeliveryContent } from "../host/assistant-delivery-content.mjs";
 // Read-only wire projections. The conversation ledger remains the sole durable owner.
 export const SYNC_SCHEMA = "aru.selfhost.collaborator-conversation-sync.v1";
 export const PAGE_SCHEMA = "aru.selfhost.collaborator-conversation-message-page.v1";
 const pageSize = 64;
 const eventPageSize = 128;
-const publicMessage = ({ clientRequestId: _, driverText: __, ...value }, position) => ({ ...value, position });
+export function publicMessage({ clientRequestId: _, driverText: __, ...value }, position) {
+  return { ...value, content: value.role === "assistant" ? assistantDeliveryContent(value.content, { trim: false, partial: value.status === "streaming" }) : value.content, position };
+}
 
 export function messagePage(conversation, before, HttpError) {
   const source = conversation.messages;

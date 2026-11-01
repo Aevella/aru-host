@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer } from 'node:net';
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -16,6 +16,12 @@ test('public manifest, diagnostics and driver inventory never scan conversation 
     conversationId: 'conversation_test', collaboratorId: 'collaborator_test',
     messages: Array.from({ length: 128 }, () => ({ content: 'x'.repeat(32768) })),
     activeTurn: { state: 'running' }, approvals: [{ state: 'pending' }],
+  }));
+  const original = await readFile(join(history, 'conversation_test.json'), 'utf8');
+  await writeFile(join(history, 'conversation_valid.json'), JSON.stringify({
+    conversationId:'conversation_valid', collaboratorId:'collaborator_test',
+    messages:[], events:[], nextSequence:1, activeTurn:null,
+    approvals:[{approvalId:'orphan', turnId:'old', state:'pending'}],
   }));
   const reservation = createServer().listen(0, '127.0.0.1');
   await once(reservation, 'listening');
@@ -52,6 +58,11 @@ test('public manifest, diagnostics and driver inventory never scan conversation 
     await new Promise(resolve => setTimeout(resolve, 100));
   }
   assert.ok(ready, errors);
+  assert.equal(await readFile(join(history, 'conversation_test.json'), 'utf8'), original,
+    'failed recovery must preserve the original ledger bytes');
+  const recovered = JSON.parse(await readFile(join(history, 'conversation_valid.json'), 'utf8'));
+  assert.equal(recovered.approvals[0].state, 'expired', 'unrelated recovery still completes');
+  assert.match(errors, /conversation recovery skipped.*conversation_test/);
   const pair = await fetch(`${base}/aru/v1/pair`, { method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ pairingToken: 'status-test-token', deviceLabel: 'test', deviceRole: 'host-console' }) });

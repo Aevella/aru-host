@@ -24,7 +24,7 @@ for (const [input, output] of targets) {
         if (specifier.startsWith('../../')) specifier = './' + resolve(dirname(path), specifier).slice(root.length + 1);
         if (!nodes.has(specifier)) nodes.set(specifier, `node${nodes.size}`);
         dependency = nodes.get(specifier);
-      } else if (specifier.startsWith('./')) {
+      } else if ((specifier.startsWith('./') || specifier.startsWith('../'))) {
         dependency = visit(resolve(dirname(path), specifier));
       } else throw new Error(`Unsupported runtime import: ${specifier}`);
       return `const {${bindings.replace(/\bas\b/g, ':')}} = ${dependency};`;
