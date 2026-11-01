@@ -66,6 +66,24 @@ test("Host request allowlist admits owned routes and blocks traversal", () => {
   assert.throws(() => validateHostRequest("PUT", "/aru/v1/hosted-collaborators/root_1/surfaces/surface_1/rollback"));
 });
 
+test("backup vault requests pass the Console boundary", () => {
+  for (const [method, path] of [
+    ["GET", "/aru/v1/backups?includeSnapshots=1"],
+    ["GET", "/aru/v1/backups/settings"],
+    ["PUT", "/aru/v1/backups/settings"],
+    ["GET", "/aru/v1/backups/backup_123"],
+    ["DELETE", "/aru/v1/backups/backup_123"],
+  ]) {
+    assert.deepEqual(validateHostRequest(method, path), { method, path });
+  }
+  for (const path of [
+    "/aru/v1/backups?includeSnapshots=0",
+    "/aru/v1/backups?includeSnapshots=1&other=1",
+    "/aru/v1/backups/settings?includeSnapshots=1",
+  ]) assert.throws(() => validateHostRequest("GET", path));
+  assert.throws(() => validateHostRequest("DELETE", "/aru/v1/backups?includeSnapshots=1"));
+});
+
 test("pairing parser requires the complete local grant", () => {
   const link = "aru://pair?canonicalUrl=http%3A%2F%2F192.168.1.2%3A8787&serverId=home-linux&pairingToken=secret";
   assert.equal(parsePairingLink(`restarting\n${link}\nready`), link);
