@@ -258,3 +258,15 @@ test("failed unlimited probe remains failed and a later repair can retry", async
   assert.equal((await owner.check()).status, "ready");
   assert.equal(owner.resourceLimits(), true);
 });
+
+test("a second specific cgroup denial probes disabled cgroups as a final fallback", async () => {
+  const modes = [];
+  const denied = () => Object.assign(new Error("denied"), { detail: "rootless needs no limits + no cgroup path when no permission is granted for cgroups" });
+  const owner = createContainerReadiness({ containerRuntime: "podman", runtimeImages: {} }, async (_, options) => {
+    modes.push([options.resourceLimits, options.cgroupsDisabled]);
+    if (!options.cgroupsDisabled) throw denied();
+  });
+  assert.equal((await owner.check()).status, "ready");
+  assert.deepEqual(modes, [[undefined, undefined], [false, undefined], [false, true]]);
+  assert.deepEqual(workspaceContainerResourceArgs({ containerReadiness: owner }), ["--cgroups=disabled"]);
+});

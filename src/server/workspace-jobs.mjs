@@ -7,7 +7,7 @@ import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
 export function workspaceContainerResourceArgs(config) {
   return config.containerReadiness?.resourceLimits() === false
-    ? []
+    ? (config.containerReadiness?.cgroupsDisabled?.() ? ["--cgroups=disabled"] : [])
     : ["--pids-limit", "128", "--memory", config.containerMemory, "--cpus", config.containerCPUs];
 }
 export function createWorkspaceJobs({ config, state, saveState, sendJSON, readJSONBody, HttpError, log, sha256Hex, persistWorkspaceArtifacts, artifactExtension, CONTAINER_STOP_GRACE_SECONDS, WORKSPACE_JOB_EVENTS_SCHEMA, WORKSPACE_JOB_INVENTORY_SCHEMA, WORKSPACE_JOB_POLICY_SCHEMA, WORKSPACE_JOB_SCHEMA, WORKSPACE_RESULT_SCHEMA, WORKSPACE_RUNTIMES, WORKSPACE_RUN_SCHEMA }) {

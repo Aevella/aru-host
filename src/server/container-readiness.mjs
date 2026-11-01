@@ -25,9 +25,17 @@ export function createContainerReadiness(config, verify = verifyContainerRuntime
         // Never retry an actual workspace job which might already have run.
         const detail = String(error.detail ?? error.message ?? "");
         if (!/rootless needs no limits \+ no cgroup path when no permission is granted for cgroups/i.test(detail)) throw error;
-        await verify(config.containerRuntime, { ...options, resourceLimits: false });
+        let cgroupsDisabled = false;
+        try {
+          await verify(config.containerRuntime, { ...options, resourceLimits: false });
+        } catch (unlimitedError) {
+          const unlimitedDetail = String(unlimitedError.detail ?? unlimitedError.message ?? "");
+          if (!/rootless needs no limits \+ no cgroup path when no permission is granted for cgroups/i.test(unlimitedDetail)) throw unlimitedError;
+          await verify(config.containerRuntime, { ...options, resourceLimits: false, cgroupsDisabled: true });
+          cgroupsDisabled = true;
+        }
         failure = { stage: "resource-limits", executable: config.containerRuntime, detail };
-        return { resourceLimits: false };
+        return { resourceLimits: false, cgroupsDisabled };
       }
     }).then(result => snapshot = { status: "ready", checkedAt: Date.now(), message: null, ...result },
       error => {
@@ -43,5 +51,6 @@ export function createContainerReadiness(config, verify = verifyContainerRuntime
   return { check, snapshot: () => ({ ...snapshot }),
     diagnostics: () => ({ ...snapshot, executable: config.containerRuntime, ...(failure ? { failure: { ...failure } } : {}) }),
     ready: () => snapshot.status === "ready",
-    resourceLimits: () => snapshot.resourceLimits !== false };
+    resourceLimits: () => snapshot.resourceLimits !== false,
+    cgroupsDisabled: () => snapshot.cgroupsDisabled === true };
 }
