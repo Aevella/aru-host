@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { validateHostRequest } from '../src/runtime.mjs';
 
@@ -62,25 +62,63 @@ test('Console request shapes are admitted by the main-process boundary', () => {
   }
 });
 
-// Fail closed on edits to call sites so a newly introduced route or query must
-// be reviewed against the scenarios above. This complements the real caller
-// execution tests for approval and sync; it is not a JavaScript parser.
+// Capture request arguments and the small set of route-building declarations,
+// leaving request bodies and unrelated local variables out of the review guard.
+function requestSignatures(source) {
+  const signatures = [];
+  const calls = /\b(?:api\.request|api\.download|requestHost|submitConversationApproval|request)\s*\(/g;
+  for (const match of source.matchAll(calls)) {
+    if (/\bfunction\s+$/.test(source.slice(0, match.index))) continue;
+    const name = match[0].replace(/\s*\($/, '');
+    let i = match.index + match[0].length, start = i, depth = 0, quote = null;
+    const args = [];
+    for (; i < source.length; i++) {
+      const c = source[i];
+      if (quote) {
+        if (c === '\\') { i++; continue; }
+        if (c === quote) quote = null;
+        continue;
+      }
+      if (c === '"' || c === "'" || c === '`') { quote = c; continue; }
+      if ('([{'.includes(c)) depth++;
+      else if (')]}'.includes(c)) {
+        if (depth === 0) { args.push(source.slice(start, i).trim()); break; }
+        depth--;
+      } else if (c === ',' && depth === 0) {
+        args.push(source.slice(start, i).trim());
+        if (args.length === (name === 'api.download' ? 1 : 2)) break;
+        start = i + 1;
+      }
+    }
+    if (name === 'request' && !/^['"](?:GET|POST|PUT|DELETE)['"]$/.test(args[0])) continue;
+    signatures.push(`${name}(${args.join(', ')})`);
+  }
+  for (const line of source.split('\n')) {
+    const declaration = line.match(/\b(?:const|let)\s+(?:path|root|method|params)\s*=\s*[^;]+/);
+    if (declaration && /\/aru\/v1\/|conversationApiPath|\broot\b|\bprofile\b|\bsurface\b|URLSearchParams/.test(declaration[0])) {
+      signatures.push(declaration[0].trim());
+    }
+    if (/\bparams\.set\(/.test(line) || /\breturn\s+`\/aru\/v1\//.test(line)) signatures.push(line.trim());
+  }
+  return signatures;
+}
+
+test('request review ignores unrelated variables and request bodies', () => {
+  const original = 'const id = 1; api.request("POST", `/aru/v1/items/${id}`, { title: "one" });';
+  assert.deepEqual(requestSignatures(original), requestSignatures(original.replace('id = 1', 'id = 2').replace('"one"', '"two"')));
+  assert.notDeepEqual(requestSignatures(original), requestSignatures(original.replace('/items/', '/other/')));
+});
+
+// This static guard prompts review of changed call sites; it complements the
+// route scenarios and real caller tests, but is not a full JavaScript parser.
 test('Console request call sites are reviewed when they change', async () => {
-  const files = ['renderer.mjs', 'conversation-sync.mjs', 'connection-settings.mjs', 'main.mjs'];
+  const files = (await readdir(new URL('../src/', import.meta.url))).filter(file => file.endsWith('.mjs')).sort();
   const signatures = [];
   for (const file of files) {
     const source = await readFile(new URL(`../src/${file}`, import.meta.url), 'utf8');
-    for (const line of source.split('\n')) {
-      if (/\b(?:api\.request|api\.download|requestHost|submitConversationApproval)\s*\(/.test(line)
-          || /\brequest\(['"](?:GET|POST|PUT|DELETE)['"]/.test(line)
-          || /\b(?:const|let)\s+(?:id|path|root|method|kind|action|params)\b/.test(line)
-          || /\bparams\.set\(/.test(line)
-          || /\breturn\s+`\/aru\/v1\//.test(line)) {
-        signatures.push(`${file}:${line.trim()}`);
-      }
-    }
+    signatures.push(...requestSignatures(source).map(signature => `${file}:${signature}`));
   }
   const digest = createHash('sha256').update(signatures.join('\n')).digest('hex');
-  assert.equal(digest, 'e32c7046d1108130c3ce588350bcbf34691fa6900dfa76a14be69354d486ab32',
+  assert.equal(digest, 'b569696424534048ba98a08d704efd48e8deceee130bd672a6d31168c455be83',
     'Console request sites changed: review every method/path/query and update the route scenarios and digest');
 });
