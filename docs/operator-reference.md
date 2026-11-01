@@ -114,7 +114,12 @@ node aru-selfhost-stub.mjs --port 8787
 
 Boot prints the manifest URL plus a single-use pairing payload (JSON and
 `aru://pair?...` forms, 10 minute TTL). Use `--pairing-token <fixed>` for
-deterministic dev flows.
+deterministic dev flows. Each normal service restart issues a fresh token. A
+mismatch can therefore mean a restart or another instance/address; it does not
+prove which. Check `systemctl show aru-selfhost -p NRestarts -p MainPID`, the
+service journal, and whether another process uses the same data directory. Compare
+the link's origin with the intended listener and reverse proxy. Do not share the
+token or the complete pairing link when collecting diagnostics.
 
 ## Endpoints
 
@@ -417,9 +422,11 @@ and non-UTF-8 files are moved into content-addressed artifact storage rather
 than being base64-encoded into JSON.
 
 Each run uses a fresh container with no network, a read-only container root,
-all Linux capabilities dropped, `no-new-privileges`, a non-root uid, bounded
-process/memory/CPU resources, and only its disposable `/workspace` bind mount
-writable. Symbolic links and non-UTF-8 result files are rejected. The runtime
+all Linux capabilities dropped, `no-new-privileges`, a non-root uid, normally
+bounded process/memory/CPU resources, and only its disposable `/workspace` bind
+mount writable. When the rootless engine explicitly reports that cgroup access is
+denied, Host verifies a second probe with cgroups disabled and runs without those
+resource limits; authenticated container diagnostics record the reason. Symbolic links and non-UTF-8 result files are rejected. The runtime
 images and safety boundaries are operator-configurable:
 
 ```bash
@@ -437,6 +444,26 @@ available but the manifest truthfully marks `workspace-runtime` disabled.
 Existing artifacts remain available through `artifact-vault`. A Node 22+
 runtime can still provide the permissioned source-plugin workshop; OCI plugins
 remain disabled without a container runtime.
+
+### Rootless cgroups on Linux
+
+The system service uses `User=aru-selfhost`, `Delegate=yes`, and Podman's
+`cgroupfs` manager. On cgroup v2, systemd must delegate a writable service
+subtree to that user; available controllers must also be enabled for descendants.
+`Delegate=yes` requests delegation but does not itself enable controllers in
+`cgroup.subtree_control`. A successful interactive `podman run` can use a
+separate user-session subtree and does not prove the service subtree works.
+
+For diagnosis, inspect `systemctl show aru-selfhost -p User -p Delegate -p ControlGroup -p NRestarts`,
+`systemctl cat aru-selfhost`, and `journalctl -u aru-selfhost`. Inspect ownership,
+`cgroup.controllers`, and `cgroup.subtree_control` under the reported cgroup.
+Check the active unit after daemon reload and service restart; do not recursively
+change ownership of the system cgroup tree. A user service or `systemd-run --user
+--scope` needs a working user manager, lingering and delegated controllers; it
+is not automatically equivalent to this system unit. If delegation cannot be
+repaired, the authenticated runtime diagnostics expose the unlimited fallback.
+CPU, memory and process-count limits are then absent, so operators should use
+an appropriately bounded VPS or restore delegation.
 
 ## MCP gateway
 

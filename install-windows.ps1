@@ -218,6 +218,16 @@ function Sha256File([string]$path) {
 function ManagedNodeBinary {
   $candidate = Join-Path $BaseRoot "runtime\current-node\node.exe"
   if (Test-Path -LiteralPath $candidate) { return $candidate }
+  # A junction can be blocked even on a fresh machine. Versioned runtimes are
+  # complete installations and remain usable directly after an interrupted setup.
+  $runtimeRoot = Join-Path $BaseRoot "runtime"
+  if (Test-Path -LiteralPath $runtimeRoot) {
+    $versions = Get-ChildItem -LiteralPath $runtimeRoot -Directory -Filter "node-v*-win-*" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending
+    foreach ($version in $versions) {
+      $binary = Join-Path $version.FullName "node.exe"
+      if (Test-Path -LiteralPath $binary) { return $binary }
+    }
+  }
   return $null
 }
 
@@ -241,16 +251,32 @@ function InstallManagedNode {
     $archive = Join-Path $temp $fileName
     Invoke-WebRequest -UseBasicParsing -Uri "https://nodejs.org/dist/latest-v22.x/$fileName" -OutFile $archive
     if ((Sha256File $archive) -ne $expected.ToLower()) { Fail "Node.js SHA-256 mismatch" }
-    Expand-Archive -LiteralPath $archive -DestinationPath $temp -Force
+    try { Expand-Archive -LiteralPath $archive -DestinationPath $temp -Force }
+    catch { Fail "Node extraction failed: archive '$archive', destination '$temp': $($_.Exception.Message). Retry installation after checking access." }
     $extracted = $fileName -replace "\.zip$", ""
     $runtimeRoot = Join-Path $BaseRoot "runtime"
     New-Item -ItemType Directory -Force -Path $runtimeRoot | Out-Null
     $versionRoot = Join-Path $runtimeRoot $extracted
-    if (Test-Path -LiteralPath $versionRoot) { Remove-Item -LiteralPath $versionRoot -Recurse -Force }
-    Move-Item -LiteralPath (Join-Path $temp $extracted) -Destination $versionRoot
+    $extractedRoot = Join-Path $temp $extracted
+    if (-not (Test-Path -LiteralPath (Join-Path $extractedRoot "node.exe"))) {
+      Fail "Node extraction did not produce '$extractedRoot\node.exe'; retry installation."
+    }
+    try {
+      if (Test-Path -LiteralPath $versionRoot) { Remove-Item -LiteralPath $versionRoot -Recurse -Force }
+      Move-Item -LiteralPath $extractedRoot -Destination $versionRoot
+    } catch {
+      Fail "Node runtime installation failed: source '$extractedRoot', destination '$versionRoot': $($_.Exception.Message). Check access and retry."
+    }
     $currentNode = Join-Path $runtimeRoot "current-node"
-    RemoveLink $currentNode
-    New-Item -ItemType Junction -Path $currentNode -Value $versionRoot | Out-Null
+    $nodeExe = Join-Path $versionRoot "node.exe"
+    if (-not (Test-Path -LiteralPath $nodeExe)) { Fail "Node extraction did not produce $nodeExe; retry installation." }
+    try {
+      RemoveLink $currentNode
+      New-Item -ItemType Junction -Path $currentNode -Value $versionRoot -ErrorAction Stop | Out-Null
+    } catch {
+      Log "Could not create Node junction '$currentNode' -> '$versionRoot': $($_.Exception.Message). Using $nodeExe directly."
+      $script:managedNodeFallback = $nodeExe
+    }
   } finally {
     Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue
   }
@@ -268,6 +294,7 @@ function ResolveNodeBinary {
   if ($SkipDependencies) { Fail "Node.js 22 or newer is required" }
   Log "installing a user-owned Node.js 22 runtime"
   InstallManagedNode
+  if ($script:managedNodeFallback) { return $script:managedNodeFallback }
   return (ManagedNodeBinary)
 }
 
