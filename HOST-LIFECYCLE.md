@@ -622,3 +622,14 @@ scans on subsequent manifest/diagnostics/driver requests. Seven focused recovery
 checks pass locally. The first Ubuntu VM attempt stopped at image preparation
 because the runner's container environment leaked into the test account; the
 fixture now uses a clean account environment before testing the service.
+
+2026-11-02 Ubuntu acceptance: CI run 41353565075 passes all three real Ubuntu
+24.04 rootless Podman/runc scenarios. A delegated system service has the correct
+UID-owned subtree but cgroupfs still attempts a sibling under system.slice;
+limited readiness fails with the actual `no cgrouppath` spelling. Both system
+service scenarios recover without limits and without disabling cgroups. The
+user-manager/systemd-cgroup scenario retains resource limits. Each scenario
+executes Node, Python and Shell file receipts. The matcher covers both
+`cgroup path` and `cgrouppath`. Core, Linux desktop and both macOS CI jobs pass
+on the same source commit 4b82c67. Customer VPS ownership remains site-specific;
+this is VM acceptance, not a customer-machine claim.

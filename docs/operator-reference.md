@@ -499,8 +499,16 @@ is not a replacement for the installer's durable service and restart lifecycle.
 
 References: [systemd delegation](https://systemd.io/CGROUP_DELEGATION/) and
 [service subtree ownership](https://systemd.io/CONTROL_GROUP_INTERFACE/).
-Ubuntu guest reproduction remains outstanding; this runbook separates the known
-permission failure from its unconfirmed installation-specific cause.
+Ubuntu 24.04 VM verification (Podman 4.9.3, runc 1.3.4, systemd 255) reproduced
+this failure class. Even with `Delegate=yes` and correct service-UID ownership,
+`cgroupfs` attempted to create a sibling directly under `system.slice`, outside
+the delegated service subtree. Both delegated and non-delegated system services
+passed real Node/Python/Shell probes after removing limits, without disabling
+cgroups. A transient user service with `Delegate=yes`, the correct user's
+`XDG_RUNTIME_DIR`/session bus, and Podman's `cgroup_manager="systemd"` passed
+with limits intact. See `tests/ubuntu-rootless-systemd-smoke.sh` for the executable
+comparison. This verifies the fallback and user-manager alternative, but does
+not establish why the reported customer's service subtree remained root-owned.
 
 ## MCP gateway
 
