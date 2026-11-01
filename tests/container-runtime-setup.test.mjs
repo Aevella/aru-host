@@ -270,3 +270,16 @@ test("a second specific cgroup denial probes disabled cgroups as a final fallbac
   assert.deepEqual(modes, [[undefined, undefined], [false, undefined], [false, true]]);
   assert.deepEqual(workspaceContainerResourceArgs({ containerReadiness: owner }), ["--cgroups=disabled"]);
 });
+
+test("last-resort probe actually disables cgroups without limit flags", async () => {
+  const runs = [];
+  await verifyContainerRuntime("podman", { resourceLimits: false, cgroupsDisabled: true, run: async (command, args) => {
+    if (args[0] === "run") runs.push(args);
+    return successfulRun(command, args);
+  } });
+  assert.equal(runs.length, 3);
+  for (const args of runs) {
+    assert.ok(args.includes("--cgroups=disabled"));
+    assert.ok(!args.includes("--memory") && !args.includes("--cpus") && !args.includes("--pids-limit"));
+  }
+});
