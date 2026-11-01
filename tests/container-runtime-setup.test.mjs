@@ -223,7 +223,7 @@ test("unrelated container failures do not turn off resource limits", async () =>
   assert.equal(count, 1);
 });
 
-test("unlimited probe disables cgroups and removes all resource flags", async () => {
+test("unlimited probe removes resource flags without changing cgroup mode", async () => {
   const calls = [];
   await verifyContainerRuntime("podman", { resourceLimits: false, run: async (command, args) => {
     if (args[0] === "run") calls.push(args);
@@ -231,7 +231,7 @@ test("unlimited probe disables cgroups and removes all resource flags", async ()
   } });
   assert.equal(calls.length, 3);
   for (const args of calls) {
-    assert.ok(args.includes("--cgroups=disabled"));
+    assert.ok(!args.includes("--cgroups=disabled"));
     assert.ok(!args.includes("--memory"));
     assert.ok(!args.includes("--cpus"));
     assert.ok(!args.includes("--pids-limit"));
@@ -240,7 +240,7 @@ test("unlimited probe disables cgroups and removes all resource flags", async ()
 
 test("workspace execution uses the mode proved by readiness", () => {
   const config = { containerMemory: "1g", containerCPUs: "2", containerReadiness: { resourceLimits: () => false } };
-  assert.deepEqual(workspaceContainerResourceArgs(config), ["--cgroups=disabled"]);
+  assert.deepEqual(workspaceContainerResourceArgs(config), []);
   config.containerReadiness.resourceLimits = () => true;
   assert.deepEqual(workspaceContainerResourceArgs(config), ["--pids-limit", "128", "--memory", "1g", "--cpus", "2"]);
 });

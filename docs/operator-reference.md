@@ -425,7 +425,7 @@ Each run uses a fresh container with no network, a read-only container root,
 all Linux capabilities dropped, `no-new-privileges`, a non-root uid, normally
 bounded process/memory/CPU resources, and only its disposable `/workspace` bind
 mount writable. When the rootless engine explicitly reports that cgroup access is
-denied, Host verifies a second probe with cgroups disabled and runs without those
+denied, Host verifies a second probe without resource limits and runs without those
 resource limits; authenticated container diagnostics record the reason. Symbolic links and non-UTF-8 result files are rejected. The runtime
 images and safety boundaries are operator-configurable:
 

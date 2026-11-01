@@ -591,8 +591,8 @@ This is source/local proof, not a released or customer-installed fix.
 
 ## Host feedback repair candidate (2026-11-01)
 
-Rootless container readiness retries the synthetic Node/Python/Shell probes with
-cgroups disabled only when Podman reports the specific rootless cgroup permission
+Rootless container readiness retries the synthetic Node/Python/Shell probes without
+resource limits only when Podman reports the specific rootless cgroup permission
 failure. Successful fallback is ready, with missing process/CPU/memory limits in
 authenticated diagnostics; workspace execution follows the verified mode without
 replaying jobs. Other probe errors remain failures. Operator guidance describes

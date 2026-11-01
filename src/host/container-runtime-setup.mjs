@@ -91,7 +91,7 @@ export async function verifyContainerRuntime(executable, { run = execute, settin
         await run(executable, ["run", ...(allowPull ? [] : ["--pull", "never"]), "--rm", "--init", "--network", "none", "--read-only", "--cap-drop", "ALL",
         "--security-opt", "no-new-privileges", "--user", "65532:65532",
         ...(resourceLimits ? ["--pids-limit", "128", "--memory", setting("CONTAINER_MEMORY", "1g"),
-        "--cpus", setting("CONTAINER_CPUS", "2")] : ["--cgroups=disabled"]), "--tmpfs", "/tmp:rw,nosuid,nodev,size=64m", "--workdir", "/workspace",
+        "--cpus", setting("CONTAINER_CPUS", "2")] : []), "--tmpfs", "/tmp:rw,nosuid,nodev,size=64m", "--workdir", "/workspace",
         "--mount", `type=bind,src=${directory},dst=/workspace`, configured || fallback, ...command],
         { windowsHide: true, maxBuffer: 4 * 1024 * 1024,
           // Core checks only already-prepared images and tiny file probes. A stuck
