@@ -81,9 +81,11 @@ UNIT
   if ! systemctl start "$unit"; then journalctl -u "$unit" --no-pager -n 100; exit 1; fi
   systemctl show "$unit" -p User -p Delegate -p ControlGroup -p Result
   cg=$(systemctl show "$unit" -p ControlGroup --value)
-  stat -c '%U:%G %a %n' "/sys/fs/cgroup$cg"
-  cat "/sys/fs/cgroup$cg/cgroup.controllers" "/sys/fs/cgroup$cg/cgroup.subtree_control"
-  journalctl -u "$unit" --no-pager -n 25
+  if [[ -n "$cg" ]]; then
+    stat -c '%U:%G %a %n' "/sys/fs/cgroup$cg"
+    cat "/sys/fs/cgroup$cg/cgroup.controllers" "/sys/fs/cgroup$cg/cgroup.subtree_control"
+  fi
+  journalctl -u "$unit" --no-pager -n 100
   systemctl stop "$unit"
 done
 # Verify the supported user-manager route retains limits on the same VM.
@@ -96,7 +98,9 @@ chmod 644 "$root/user-containers.conf"
 runuser -u "$account" -- env -i PATH=/usr/bin:/bin HOME="/home/$account" XDG_RUNTIME_DIR="/run/user/$uid" \
   DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \
   systemd-run --user --wait --pipe --collect --property=Delegate=yes \
-  --setenv="CONTAINERS_CONF=$root/user-containers.conf" --setenv=EXPECT_LIMITS=true \
+  /usr/bin/env -i PATH=/usr/bin:/bin HOME="/home/$account" XDG_RUNTIME_DIR="/run/user/$uid" \
+  DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \
+  CONTAINERS_CONF="$root/user-containers.conf" EXPECT_LIMITS=true \
   "$node_binary" "$root/source/proof.mjs"
 podman --version
 runc --version
