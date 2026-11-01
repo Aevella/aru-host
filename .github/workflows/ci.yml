@@ -55,6 +55,19 @@ jobs:
       - name: Build Linux release payload
         run: ./package-release.sh dist/aru-host-linux.tar.gz
 
+  ubuntu-rootless-systemd:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Install rootless Podman and runc
+        run: sudo apt-get update && sudo apt-get install -y podman runc uidmap slirp4netns fuse-overlayfs
+      - name: Verify delegated and unavailable cgroups in real system services
+        run: sudo bash tests/ubuntu-rootless-systemd-smoke.sh "$(command -v node)"
+
   macos:
     strategy:
       fail-fast: false

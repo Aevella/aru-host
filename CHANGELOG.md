@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.39.1
+
+- Recover rootless container readiness without resource limits when cgroup delegation is unavailable.
+- Distinguish used, expired and mismatched pairing links.
+- Continue Windows Node installation when a directory junction cannot be created.
+- Repair Console backup, approval and incremental conversation requests.
+- Recover interrupted attachments and terminal approval waits; keep Claude MCP calls alive through human approval.
+- See [upgrade instructions and verification boundaries](docs/releases/0.39.1.md).
+
 ## 0.39.0
 
 - Recover same-source phone reading after re-pairing, retiring old writers so late snapshots cannot restore outdated access.
