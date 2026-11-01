@@ -821,12 +821,23 @@ export function createCollaboratorConversationHost({
     for (const collaboratorId of readdirSync(root)) {
       if (!ID.test(collaboratorId)) continue;
       for (const conversation of loadConversations(collaboratorId)) {
-        const expired = expireApprovals(conversation);
-        if (!conversation.activeTurn || !ACTIVE_STATES.has(conversation.activeTurn.state)) {
-          if (expired) saveConversation(conversation);
-          continue;
+        try {
+          // Recovery is per ledger. Preserve an unreadable shape on disk rather
+          // than inventing missing history or preventing unrelated Host startup.
+          if (!Array.isArray(conversation.events) || !Array.isArray(conversation.approvals)
+              || !Array.isArray(conversation.messages) || !Number.isSafeInteger(conversation.nextSequence)) {
+            throw new Error("conversation ledger lacks valid events, approvals, messages or sequence");
+          }
+          const expired = expireApprovals(conversation);
+          if (!conversation.activeTurn || !ACTIVE_STATES.has(conversation.activeTurn.state)) {
+            if (expired) saveConversation(conversation);
+            continue;
+          }
+          interruptConversation(conversation, "Aru Host 重启后保留了历史，但没有重复执行未完成的动作");
+        } catch (error) {
+          console.error("Aru Host conversation recovery skipped", collaboratorId,
+            ID.test(conversation.conversationId ?? "") ? conversation.conversationId : "invalid-id", error.message);
         }
-        interruptConversation(conversation, "Aru Host 重启后保留了历史，但没有重复执行未完成的动作");
       }
     }
   }

@@ -612,3 +612,13 @@ it is wired into Windows CI but has not been executed on this macOS host.
 Operator guidance now distinguishes effective delegation ownership from lingering
 and provides service reload/restart checks. No Ubuntu VM or Windows device
 acceptance, packaged installer, deployment, or release is claimed.
+
+2026-11-02 release acceptance found an incomplete conversation fixture entering
+orphan-approval recovery without an event ledger. Startup recovery now isolates
+that ledger, reports its identity to the existing process log and preserves its
+bytes; other conversations still recover. The real HTTP status test verifies
+unchanged broken bytes, an unrelated orphan approval expiring, and no history
+scans on subsequent manifest/diagnostics/driver requests. Seven focused recovery
+checks pass locally. The first Ubuntu VM attempt stopped at image preparation
+because the runner's container environment leaked into the test account; the
+fixture now uses a clean account environment before testing the service.

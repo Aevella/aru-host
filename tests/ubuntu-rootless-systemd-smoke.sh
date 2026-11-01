@@ -33,7 +33,7 @@ chmod 644 "$root/containers.conf"
 # Pull through the user manager, independent of either system-unit scenario.
 uid=$(id -u "$account")
 for image in docker.io/library/node:22-alpine docker.io/library/python:3.13-alpine docker.io/library/alpine:3.22; do
-  runuser -u "$account" -- env HOME="/home/$account" XDG_RUNTIME_DIR="/run/user/$uid" CONTAINERS_CONF="$root/containers.conf" podman pull "$image"
+  runuser -u "$account" -- env -i PATH=/usr/bin:/bin HOME="/home/$account" XDG_RUNTIME_DIR="/run/user/$uid" CONTAINERS_CONF="$root/containers.conf" podman pull "$image"
 done
 cat > "$root/source/proof.mjs" <<'JS'
 import assert from 'node:assert/strict';
