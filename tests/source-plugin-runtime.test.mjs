@@ -6,6 +6,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { createSourcePluginRuntime } from "../source-plugin-runtime.mjs";
+import { createPluginWorkshop } from "../src/plugins/plugin-workshop.mjs";
 
 class TestHttpError extends Error {
   constructor(status, code, message) {
@@ -44,6 +45,24 @@ test("Node 22/24-style permission mode uses the container for denied and outboun
   assert.equal(runs.length, 2);
   assert.match(runs[0], /--network none/);
   assert.doesNotMatch(runs[1], /--network none/);
+});
+
+test("Console validation reports actionable runtime requirements for Node 24 without a container", async (t) => {
+  const fixture = await createFixture(t, { nodeMode: "legacy" });
+  const sourceRuntime = fixture.runtime({ containerRuntime: null });
+  const workshop = createPluginWorkshop({
+    sourceRuntime, HttpError: TestHttpError,
+    readJSONBody: async () => ({ capabilities: ["network-outbound"] }),
+  });
+  await assert.rejects(
+    workshop.route({ method: "POST" }, {}, "/aru/v1/plugin-workshop/validate", () => {}),
+    (error) => error.code === "plugin.source_runtime_unavailable"
+      && /Node\.js 25\+/.test(error.message)
+      && /Podman or Docker/.test(error.message)
+      && /Host Console > Runtime/.test(error.message)
+      && !/Node\.js 22\+/.test(error.message),
+  );
+  assert.deepEqual(await fixture.hostRuns(), []);
 });
 
 test("network-capable Node permission mode runs on the host with the exact grant", async (t) => {
