@@ -289,3 +289,32 @@ for (const outcome of [
     ? { title: "Example", body: "Finished" } : null);
 }
 console.log("ARU_HOST_SINGLE_COMPLETION_ALERT_OK");
+
+
+// Released registrations can contain several pairings of one physical phone.
+{
+  const devices = ["old-phone", "new-phone", "other-phone"].map(deviceId => ({ deviceId, revokedAt: null }));
+  const duplicateState = { devices };
+  const sent = [];
+  const options = { state: duplicateState, saveState() {}, readJSONBody: async req => req.body,
+    sendJSON(res, status, body) { res.status = status; res.body = body; },
+    HttpError, serverId: "synthetic-host", credentialStore,
+    sendPush: async value => { sent.push(value); }, now: () => ++clock };
+  let duplicateHost = createAPNsPushHost(options);
+  for (const [index, device] of devices.entries()) {
+    await duplicateHost.route({ method: "PUT", body: {
+      schema: "aru.selfhost.remote-push-registration.v1", environment: "production",
+      topic: "cn.aelion.aru", deviceToken: (index === 2 ? "bb" : "aa").repeat(32),
+    } }, {}, "/aru/v1/push-devices/current", () => device);
+  }
+  duplicateHost = createAPNsPushHost({ ...options, state: JSON.parse(JSON.stringify(duplicateState)) });
+  await duplicateHost.deliverHostedCollaboratorTurn(completedEvent());
+  assert.equal(sent.length, 2, "one alert per phone, including a distinct second phone");
+  assert.deepEqual(new Set(sent.map(item => item.registration.deviceId)), new Set(["new-phone", "other-phone"]));
+  sent.length = 0;
+  await duplicateHost.deliverConversationTurnRelayResult({
+    deviceId: "old-phone", conversationId: "chat", turnId: "targeted", state: "succeeded", notificationPreview: "reply",
+  });
+  assert.equal(sent.length, 1, "targeted result keeps its authorized original pairing");
+  assert.equal(sent[0].registration.deviceId, "old-phone");
+}

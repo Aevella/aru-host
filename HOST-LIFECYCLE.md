@@ -588,3 +588,15 @@ failed. Fault injection proves retained message/attachment, zero driver starts o
 failure, and the next send starting without restart (13 focused checks passed).
 The ordinary attachment conversation smoke passed; generated consistency passed.
 This is source/local proof, not a released or customer-installed fix.
+
+
+2026-11-05 notification destination admission (source/local proof): paired-device
+identity remains the authorization boundary. After choosing the authorized
+recipient set, result notifications coalesce registrations by transport,
+environment, topic and physical APNs address or relay route. Existing duplicate
+registrations do not multiply broadcasts; no pairing or credential is deleted.
+A targeted relayed turn still reaches its original authorized pairing even when
+another pairing has the same address. Synthetic reopened-state checks cover
+same-address duplicates and an independent second phone. Generated payload
+consistency and the APNs smoke checks pass. This does not prove customer-device
+reproduction or an installed Host upgrade.

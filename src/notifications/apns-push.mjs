@@ -251,7 +251,7 @@ export function createAPNsPushHost({
     if (isHosted && event.turn?.notify === false) return;
     const body = String(event.mobileDelivery?.assistantContent ?? event.assistantMessage?.content ?? "").trim();
     if (!body) return;
-    const registrations = activeRegistrations();
+    const registrations = uniqueNotificationTargets(activeRegistrations());
     if (registrations.length === 0) return;
     let credentials;
     try {
@@ -331,8 +331,8 @@ export function createAPNsPushHost({
     // get a background push so the failure state syncs; the official relay only
     // sends visible alerts, so relay registrations wait for the next foreground.
     const succeeded = turn.state === "succeeded";
-    const registrations = activeRegistrations().filter((item) =>
-      item.deviceId === turn.deviceId && (succeeded || !item.relay));
+    const registrations = uniqueNotificationTargets(activeRegistrations().filter((item) =>
+      item.deviceId === turn.deviceId && (succeeded || !item.relay)));
     if (registrations.length === 0) return;
     let credentials = null;
     if (registrations.some((item) => !item.relay)) {
@@ -440,6 +440,19 @@ export function createAPNsPushHost({
       }
     }));
     saveState();
+  }
+
+  // Pairing identity is authorization, not a distinct physical push destination.
+  // Filter the authorized audience first; then send once per transport target.
+  function uniqueNotificationTargets(registrations) {
+    const targets = new Map();
+    for (const item of registrations) {
+      const key = JSON.stringify([item.environment, item.topic,
+        item.relay ? "relay" : "direct", item.relay?.routeId ?? item.deviceToken]);
+      const previous = targets.get(key);
+      if (!previous || item.updatedAt >= previous.updatedAt) targets.set(key, item);
+    }
+    return [...targets.values()];
   }
 
   function activeRegistrations() {
