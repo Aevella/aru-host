@@ -1,7 +1,8 @@
 import { SYNC_SCHEMA, messagePage, syncProjection, publicMessage } from "./conversation-sync.mjs";
-import { replicaInstructions, proactiveReplicaSeed, messageContentWithTime, historyRoleLabel, isoTimestamp, validatedReplicaRole, dynamicTool, driverConfigurationFingerprint, collaboratorInstructions, driverApprovalKind, driverApprovalTitle, publicApprovalDetail, driverApprovalResponse, publicDriverItem, publicWorkspacePath } from "./driver-projection.mjs";
+import { replicaInstructions, proactiveReplicaSeed, messageContentWithTime, historyRoleLabel, isoTimestamp, dynamicTool, driverConfigurationFingerprint, collaboratorInstructions, driverApprovalKind, driverApprovalTitle, publicApprovalDetail, driverApprovalResponse, publicDriverItem, publicWorkspacePath } from "./driver-projection.mjs";
 import { createCollaboratorConversationAttachmentHost } from "./attachments.mjs";
 import { createReplicaDeliveryRecovery } from "./replica-delivery-recovery.mjs";
+import { replicaContextMessages } from "./replica-context.mjs";
 import { createTurnExecution, waitForTurnStop } from "./turn-execution.mjs";
 import { mutateConversationLifecycle } from "./collaborator-conversation-lifecycle.mjs";
 import { createHash, randomUUID } from "node:crypto";
@@ -392,17 +393,15 @@ export function createCollaboratorConversationHost({
     );
     // Lets deleting the executing face find and stop this turn.
     conversation.executorCollaboratorId = executor.collaboratorId;
-    for (const item of source?.messages ?? []) {
-      const content = String(item.content ?? "").trim();
-      if (!content) continue;
+    for (const item of replicaContextMessages(source?.messages ?? [], triggeredAt)) {
       conversation.messages.push({
         messageId: `hostmsg_${randomUUID()}`,
         clientRequestId: null,
-        role: validatedReplicaRole(item.role),
-        content,
+        role: item.role,
+        content: item.content,
         status: "completed",
-        createdAt: Number(item.createdAt) || now(),
-        updatedAt: Number(item.updatedAt) || Number(item.createdAt) || now(),
+        createdAt: item.createdAt,
+        updatedAt: item.updatedAt,
       });
     }
     touch(conversation, device.deviceId);
