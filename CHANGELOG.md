@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.39.2
+
+- Keep deleted computer collaborators out of Console lists, counts and detail refreshes while retaining synchronization tombstones and saved data.
+- Bound proactive phone replica history admission while preserving complete synchronization and delivery evidence.
+- See [upgrade instructions and verification boundaries](docs/releases/0.39.2.md).
+
 ## 0.39.1
 
 - Recover rootless container readiness without resource limits when cgroup delegation is unavailable.
