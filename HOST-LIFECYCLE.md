@@ -666,3 +666,14 @@ executes Node, Python and Shell file receipts. The matcher covers both
 `cgroup path` and `cgrouppath`. Core, Linux desktop and both macOS CI jobs pass
 on the same source commit 4b82c67. Customer VPS ownership remains site-specific;
 this is VM acceptance, not a customer-machine claim.
+
+## Console deletion directory projection (2026-11-11)
+
+The hosted-collaborator directory retains deleted identities as tombstones for
+synchronization. Console list projections must exclude rows with `archivedAt`
+before displaying/counting them or loading child surfaces, conversations and
+cognition. Native macOS and Electron now apply this rule; deletion receipts and
+idempotent retries remain owned by Core. Eleven focused Node checks and two macOS
+tests pass, including delete/refresh/reopen, retained durable tombstones, revision
+rejection and unrelated live rows. The native Console compiles. No installed
+release or customer-device acceptance was performed.

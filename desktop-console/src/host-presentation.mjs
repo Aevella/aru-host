@@ -10,3 +10,8 @@ export function driverGuidance(drivers, locale = "en") {
     ? "还没有就绪的执行方式。使用模型 API：先添加并测试模型路线。使用 Codex：先安装并登录 Codex，再重新探测驱动。"
     : "No execution driver is ready. For a model API, add and test a model route. For Codex, install and sign in to Codex, then refresh drivers.";
 }
+
+// The sync directory retains tombstones; Console lists only live identities.
+export function activeCollaborators(inventory) {
+  return inventory.collaborators.filter(item => item.archivedAt == null);
+}
