@@ -67,6 +67,7 @@ struct HostedCollaborator: Decodable, Equatable, Identifiable, Sendable {
     let driverId: String
     let providerProfileId: String?
     let revision: Int
+    let archivedAt: Int64?
     let activationStatus: String
     let turnExecution: Bool
     let toolAccess: HostedCollaboratorToolAccess
@@ -203,6 +204,10 @@ struct ArchiveHostCollaboratorCognitionRecordBody: Encodable, Sendable {
 struct HostedCollaboratorInventory: Decodable, Equatable, Sendable {
     let schema: String
     let collaborators: [HostedCollaborator]
+
+    var activeCollaborators: [HostedCollaborator] {
+        collaborators.filter { $0.archivedAt == nil }
+    }
 }
 
 struct HostCollaboratorConversationTurn: Decodable, Equatable, Sendable {

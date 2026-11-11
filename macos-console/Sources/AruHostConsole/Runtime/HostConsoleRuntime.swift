@@ -780,8 +780,9 @@ final class HostConsoleRuntime {
             try drivers.validate()
             try roots.validate()
             assignIfChanged(drivers, to: \HostConsoleRuntime.driverInventory)
-            assignIfChanged(roots.collaborators, to: \HostConsoleRuntime.collaborators)
-            for collaborator in roots.collaborators {
+            let activeCollaborators = roots.activeCollaborators
+            assignIfChanged(activeCollaborators, to: \HostConsoleRuntime.collaborators)
+            for collaborator in activeCollaborators {
                 try await surfaces.refreshSurfaces(collaboratorId: collaborator.id)
                 try await conversations.refreshConversations(collaboratorId: collaborator.id)
                 try await refreshCognition(collaboratorId: collaborator.id)

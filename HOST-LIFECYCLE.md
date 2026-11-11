@@ -4,6 +4,39 @@ This is the maintained engineering contract for Host installation, execution,
 recovery and phone delivery. Read it before changing those boundaries. It defines
 required semantics, not evidence that every existing path already satisfies them.
 
+## Phone replica history admission (Issue #40)
+
+`src/conversations/replica-context.mjs` projects the recent history used by
+`runReplicaProactive` before copying it into the execution conversation. Its
+64 KiB UTF-8 history budget includes timestamp metadata and the larger of text
+or structured-message framing. This is a history admission policy, not an exact
+token count or a claim about a provider's context window. Recent complete messages
+retain order, roles and timestamps; the first non-fitting older message ends
+admission. If the newest nonempty message alone exceeds the budget, only its
+UTF-8-safe tail is admitted with an explicit omission marker. Empty histories
+remain valid. Normal computer conversations do not use this policy.
+
+The phone upload, `baseMessageId`, and complete `basisMessages` remain unchanged.
+The execution ledger and delivery receipt retain the original evidence, including
+unreflected Host replies appended by the continuation owner. Budgeted history is
+never used as a replacement synchronization basis. No schema migration, automatic
+model retry, scheduler change or delivery-acknowledgement change is introduced.
+Full basis storage still costs space; this repair does not claim to bound ledger
+or delivery size. System prompts, memories, references, tool schemas/results and
+output reservations are outside this history budget, so unusually large inputs
+there or a small model window can still cause provider rejection.
+
+Focused proof belongs to `replica-context-budget.test.mjs` and
+`collaborator-replica-context.test.mjs`, with the existing mobile replica and
+record-store suites covering adjacent recovery. Fixtures use 10,001 messages,
+an oversized Unicode tail, exact byte boundaries, provider failure, the next
+scheduled occurrence, duplicate settlement, disk reopen, repeated acknowledgement
+and continuation from an unreflected delivery. These are synthetic source/runtime
+checks, not successful real-provider scheduled execution or phone acceptance.
+Local verification on 2026-11-07: all 35 tests in those four suites passed;
+generated runtime consistency and whitespace checks passed. No release or
+installed Host was changed.
+
 ## Product intent
 
 A Host keeps doing accepted work while its clients disconnect. Reopening a Console,
@@ -633,3 +666,14 @@ executes Node, Python and Shell file receipts. The matcher covers both
 `cgroup path` and `cgrouppath`. Core, Linux desktop and both macOS CI jobs pass
 on the same source commit 4b82c67. Customer VPS ownership remains site-specific;
 this is VM acceptance, not a customer-machine claim.
+
+## Console deletion directory projection (2026-11-11)
+
+The hosted-collaborator directory retains deleted identities as tombstones for
+synchronization. Console list projections must exclude rows with `archivedAt`
+before displaying/counting them or loading child surfaces, conversations and
+cognition. Native macOS and Electron now apply this rule; deletion receipts and
+idempotent retries remain owned by Core. Eleven focused Node checks and two macOS
+tests pass, including delete/refresh/reopen, retained durable tombstones, revision
+rejection and unrelated live rows. The native Console compiles. No installed
+release or customer-device acceptance was performed.

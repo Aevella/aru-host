@@ -320,6 +320,16 @@ renderer synthetic fixture was observed through cancel (row retained) and confir
 (row removed, count zero, empty state). Native macOS visual acceptance and released
 installer acceptance remain unverified; these checks do not publish a release.
 
+2026-11-11 deletion refresh repair: the directory continues to carry tombstones for
+synchronization. Native macOS decodes `archivedAt` and projects only live rows into
+its list, sidebar count and child-detail refresh loop. Electron uses the same live-row
+rule for its rendered list, actions and count. Existing data and the Core deletion
+receipt/retry protocol are unchanged. Eleven focused Node checks and two native
+macOS tests pass, including real Core deletion, revision rejection, retained durable
+tombstones, repeated deletion, refresh/reopen and an unrelated live collaborator.
+The native Console compiles. This is source/local proof, not a published installer
+or customer-device acceptance.
+
 ## Container readiness completion (2026-10-24)
 
 Container preparation may download images; it remains distinct from Core's

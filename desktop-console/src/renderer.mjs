@@ -1,5 +1,5 @@
 import { pollConversation, patchMessageRows, conversationRunning, submitConversationApproval } from "./conversation-sync.mjs";
-import { hostReleaseLabel, turnActions, driverGuidance } from "./host-presentation.mjs";
+import { hostReleaseLabel, turnActions, driverGuidance, activeCollaborators } from "./host-presentation.mjs";
 import { containerSetupPanel, bindContainerSetup } from "./container-setup.mjs";
 import { connectionSettingsPanel, bindConnectionSettings } from "./connection-settings.mjs";
 const api = window.aruHost;
@@ -282,9 +282,10 @@ async function renderCollaborators() {
   const [drivers, roots, providers] = await Promise.all([
     api.request("GET", "/aru/v1/agent-drivers"), api.request("GET", "/aru/v1/hosted-collaborators"), api.request("GET", "/aru/v1/provider-profiles"),
   ]);
-  state.data.collaborators = roots.collaborators;
+  const collaborators = activeCollaborators(roots);
+  state.data.collaborators = collaborators;
   content.innerHTML = pageHead("collaborators", t("collaboratorsTitle"), t("collaboratorsDetail"), `<button class="quiet-button" data-refresh-drivers>${esc(t("refreshDrivers"))}</button><button class="primary-button" data-new-collaborator>${esc(t("newCollaborator"))}</button>`)
-    + (roots.collaborators.length ? `<div class="raised-list">${roots.collaborators.map((item) => row(item.displayName, `${item.driverId} · ${item.activationStatus} · ${item.toolAccess.mode === "all" ? t("allTools") : `${item.toolAccess.toolNames.length} ${t("selectedTools")}`}`, `<button class="quiet-button" data-collaborator-settings="${escAttr(item.collaboratorId)}">${esc(t("settings"))}</button><button class="primary-button" data-studio="${escAttr(item.collaboratorId)}">${esc(t("studio"))}</button><button class="danger-button" data-delete-collaborator="${escAttr(item.collaboratorId)}">${esc(t("deleteCollaborator"))}</button>`)).join("")}</div>` : empty("◌", t("noCollaborators"), t("noCollaboratorsDetail")))
+    + (collaborators.length ? `<div class="raised-list">${collaborators.map((item) => row(item.displayName, `${item.driverId} · ${item.activationStatus} · ${item.toolAccess.mode === "all" ? t("allTools") : `${item.toolAccess.toolNames.length} ${t("selectedTools")}`}`, `<button class="quiet-button" data-collaborator-settings="${escAttr(item.collaboratorId)}">${esc(t("settings"))}</button><button class="primary-button" data-studio="${escAttr(item.collaboratorId)}">${esc(t("studio"))}</button><button class="danger-button" data-delete-collaborator="${escAttr(item.collaboratorId)}">${esc(t("deleteCollaborator"))}</button>`)).join("")}</div>` : empty("◌", t("noCollaborators"), t("noCollaboratorsDetail")))
     + (driverGuidance(drivers.drivers, locale) ? `<p role="status">${esc(driverGuidance(drivers.drivers, locale))}</p>` : "")
     + sectionBlock(t("mobileIdentities"), t("mobileIdentityDetail"), `<div class="raised-list">${(roots.mobileIdentities ?? []).map((item) => row(item.displayName, t("mobileIdentityDetail"), "")).join("")}</div>`)
     + sectionBlock(t("providerRoutes"), "", `<div class="section-title"><div></div><button class="quiet-button" data-new-provider>${esc(t("newProvider"))}</button></div>${providers.profiles?.length ? `<div class="raised-list">${providers.profiles.map((profile) => row(profile.displayName, `${profile.protocol} · ${profile.model} · ${profile.health}`, `<button class="quiet-button" data-edit-provider="${escAttr(profile.profileId)}">${esc(t("edit"))}</button><button class="quiet-button" data-test-provider="${escAttr(profile.profileId)}">${esc(t("test"))}</button><button class="danger-button" data-delete-provider="${escAttr(profile.profileId)}">${esc(t("delete"))}</button>`)).join("")}</div>` : empty("◇", t("providerRoutes"), providers.secretStorage?.supported ? t("newProvider") : t("routeUnavailable"))}`);
@@ -302,7 +303,7 @@ async function renderCollaborators() {
     await mutate(() => api.request("POST", "/aru/v1/hosted-collaborators", { displayName: values.displayName, driverId: values.driverId, providerProfileId: values.providerProfileId || null }), "collaborators");
   });
   content.querySelectorAll("[data-delete-collaborator]").forEach(button => button.addEventListener("click", async () => {
-    const collaborator = roots.collaborators.find(item => item.collaboratorId === button.dataset.deleteCollaborator);
+    const collaborator = collaborators.find(item => item.collaboratorId === button.dataset.deleteCollaborator);
     if (!collaborator || button.disabled) return;
     button.disabled = true;
     try {
@@ -312,12 +313,12 @@ async function renderCollaborators() {
       }), "collaborators");
     } finally { button.disabled = false; }
   }));
-  content.querySelectorAll("[data-collaborator-settings]").forEach((button) => button.addEventListener("click", () => editCollaborator(roots.collaborators.find((item) => item.collaboratorId === button.dataset.collaboratorSettings), drivers, providers)));
+  content.querySelectorAll("[data-collaborator-settings]").forEach((button) => button.addEventListener("click", () => editCollaborator(collaborators.find((item) => item.collaboratorId === button.dataset.collaboratorSettings), drivers, providers)));
   content.querySelector("[data-new-provider]").addEventListener("click", () => editProvider());
   content.querySelectorAll("[data-edit-provider]").forEach((button) => button.addEventListener("click", () => editProvider(providers.profiles.find((profile) => profile.profileId === button.dataset.editProvider))));
   content.querySelectorAll("[data-test-provider]").forEach((button) => button.addEventListener("click", () => mutate(() => api.request("POST", `/aru/v1/provider-profiles/${button.dataset.testProvider}/test`), "collaborators")));
   content.querySelectorAll("[data-delete-provider]").forEach((button) => button.addEventListener("click", async () => { if (await confirmDialog(t("delete"), t("destructiveTitle"), true)) await mutate(() => api.request("DELETE", `/aru/v1/provider-profiles/${button.dataset.deleteProvider}`), "collaborators"); }));
-  content.querySelectorAll("[data-studio]").forEach((button) => button.addEventListener("click", () => renderCollaboratorStudio(roots.collaborators.find((item) => item.collaboratorId === button.dataset.studio))));
+  content.querySelectorAll("[data-studio]").forEach((button) => button.addEventListener("click", () => renderCollaboratorStudio(collaborators.find((item) => item.collaboratorId === button.dataset.studio))));
 }
 
 async function editCollaborator(collaborator, drivers, providers) {
