@@ -3,6 +3,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { createHash } from "node:crypto";
 import { createPluginWorkshop } from "./plugin-workshop.mjs";
+import { SOURCE_RUNTIME_UNAVAILABLE_MESSAGE } from "./source-plugin-runtime.mjs";
 
 const PLUGIN_MANIFEST_SCHEMA = "aru.selfhost.plugin-manifest.v1";
 const PLUGIN_MUTATION_SCHEMA = "aru.selfhost.plugin-mutation.v1";
@@ -328,7 +329,7 @@ export function createPluginSupervisor({
 
   function requirePluginRuntime(packageMode) {
     if (packageMode === "source-node" && !sourceRuntime?.available) {
-      throw new HttpError(503, "plugin.source_runtime_unavailable", "Source plugins require Node.js 22+ permission mode or a container runtime");
+      throw new HttpError(503, "plugin.source_runtime_unavailable", SOURCE_RUNTIME_UNAVAILABLE_MESSAGE);
     }
     if (packageMode === "oci" && !containerRuntime) {
       throw new HttpError(503, "plugin.runtime_unavailable", "Docker or Podman is required for OCI plugins");
