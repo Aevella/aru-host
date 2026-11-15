@@ -686,7 +686,12 @@ function createMobileCollaboratorReplicaHost({
       const cursor = new URL(req.url, "http://aru.local").searchParams.get("after");
       const page = records.indexed("executions", sourceCollaboratorId, epoch, { after: cursor, limit: 51 });
       if (!page) throw new HttpError(409, "mobile_execution.cursor_stale", "refresh execution history");
-      const executions = page.slice(0, 50);
+      // Keep the durable execution evidence intact, but expose the same authored
+      // text as delivery/chat. This also covers records saved by older Hosts.
+      const executions = page.slice(0, 50).map(execution => ({
+        ...execution,
+        content: execution.content == null ? null : assistantDeliveryContent(execution.content),
+      }));
       sendJSON(res, 200, { schema: "aru.selfhost.mobile-collaborator-execution-inventory.v1",
         sourceCollaboratorId, epoch, executions,
         nextCursor: page.length > 50 ? executions.at(-1).deliveryId : null });

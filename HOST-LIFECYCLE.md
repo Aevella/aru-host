@@ -677,3 +677,18 @@ idempotent retries remain owned by Core. Eleven focused Node checks and two macO
 tests pass, including delete/refresh/reopen, retained durable tombstones, revision
 rejection and unrelated live rows. The native Console compiles. No installed
 release or customer-device acceptance was performed.
+
+## Mobile execution history text projection (2026-11-15)
+
+The authenticated execution-history endpoint applies the existing standalone
+timestamp-envelope filter to assistant content, just like delivery and ordinary
+conversation projections. Filtering happens on read, including previously saved
+records; durable execution evidence, pagination identities and failure states
+remain unchanged. Code examples and malformed/unknown envelopes remain literal.
+
+The replica, delegated MCP and assistant-content suites pass 36 checks, including
+history after disk reopen, successful MCP execution and explicit confirmation
+rejection. This is local source/runtime evidence, not a packaged release or a
+reproduction of a customer's missing tool execution. Mobile deliveries currently
+carry assistant text without the Host conversation's tool events; absence of a
+phone chat tool row cannot establish that no tool ran.

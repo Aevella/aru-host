@@ -142,6 +142,11 @@ test("computer collaborator reads a phone replica without owning it and Host set
   assert.equal(response.value.deliveries[0].ruleVersion, "rule-version-1");
   assert.deepEqual(response.value.deliveries[0].basisMessages, replica.conversations[0].messages);
 
+  const executionPath = "/aru/v1/mobile-collaborator-replicas/phone_aru/executions";
+  await host.route({ method: "GET", url: `${executionPath}?epoch=1` }, {}, executionPath,
+    () => ({ deviceId: "phone" }));
+  assert.equal(response.value.executions[0].content, "I am here.");
+
   const tools = host.selfTools();
   assert.ok(tools.every((tool) => tool.annotations.readOnlyHint === true));
   const readable = host.callSelfTool(
@@ -153,7 +158,7 @@ test("computer collaborator reads a phone replica without owning it and Host set
   assert.equal(readable.value.systemPrompt, "Stay close.");
   const reopened = createMobileCollaboratorReplicaHost({
     dataDir: directory, readJSONBody: async req => req.body,
-    sendJSON: () => {}, HttpError,
+    sendJSON: (_response, status, value) => { response = { status, value }; }, HttpError,
     collaboratorForId: id => collaborators.get(id), trigger: () => {},
     maximumRequestBytes: 64 * 1024 * 1024, setTimer: () => 1, clearTimer: () => {},
   });
@@ -161,6 +166,9 @@ test("computer collaborator reads a phone replica without owning it and Host set
     { sourceCollaboratorId: "phone_aru" }, {}, collaborators.get("hostcol_reader"));
   assert.equal(recovered.value.conversations[0].baseMessageId, "phone:message/part.1");
   assert.equal(recovered.value.conversations[0].messages[0].messageId, "phone:message/part.1");
+  await reopened.route({ method: "GET", url: `${executionPath}?epoch=1` }, {}, executionPath,
+    () => ({ deviceId: "phone" }));
+  assert.equal(response.value.executions[0].content, "I am here.");
 
   assert.equal(readable.value.memories, undefined);
   assert.equal(readable.value.references, undefined);
