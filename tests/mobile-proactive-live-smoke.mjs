@@ -51,6 +51,7 @@ let mobile, settleResolve, settleReject;
 const settled = new Promise((resolve, reject) => { settleResolve = resolve; settleReject = reject; });
 const conversations = createCollaboratorConversationHost({ ...common,
   driverForCollaborator: () => driver,
+  requestInstructions: collaborator => collaborator.mobileInstructions,
   toolCatalog: (who, signal) => mobile.mcpTools(who, signal),
   executeTool: (name, args, _device, who, context) => mobile.callMCP(name, args, who, context),
   onTurnSettled: async event => {
@@ -76,7 +77,7 @@ try {
     epoch: 1, revision: 1, generatedAt: Date.now(),
     mcpConnections: [{ id: 'receipt', name: 'Receipt', transport: 'streamable-http', url: `http://127.0.0.1:${server.address().port}/mcp`, headers: {}, approvalMode: 'always_allow',
       tools: [{ name: 'write_receipt', enabled: true, inputSchemaJSON: JSON.stringify({ type: 'object', properties: { text: { type: 'string' } }, required: ['text'] }) }] }],
-    rules: [{ ruleId: 'once', title: 'Receipt probe', goal: 'Call write_receipt exactly once with text scheduled-probe. Then reply with the exact receipt code returned by the tool. Never invent a code.', instructions: 'The actual tool result is required.',
+    rules: [{ ruleId: 'once', title: 'Receipt probe', goal: 'Call write_receipt exactly once with text scheduled-probe. Then reply with the exact receipt code returned by the tool. Never invent a code.', instructions: 'The actual tool result is required. If using JavaScript orchestration, print the entire returned value so its receipt code is visible; the transport may wrap JSON as text.',
       nextFireAt: Date.now() + 1000, enabled: true, notificationsEnabled: false, conversationMode: 'follow_latest', scheduleKind: 'one_time', sourceVersion: 'v1', updatedAt: Date.now(), mcpServerIds: ['receipt'] }],
   });
   await mobile.start(); // Real timer; no manual runDue to initiate the turn.
@@ -87,6 +88,9 @@ try {
   const deliveries = (await route('GET', '/deliveries')).deliveries;
   assert.equal(deliveries.length, 1);
   assert.ok(deliveries[0].assistantContent.includes(receipt), 'Model final answer must contain the tool-only nonce');
+  assert.equal(deliveries[0].toolReceipts.length, 1);
+  assert.equal(deliveries[0].toolReceipts[0].status, 'complete');
+  assert.ok(deliveries[0].toolReceipts[0].toolName.startsWith('mobile_mcp_'));
   const executions = (await route('GET', '/executions')).executions;
   assert.equal(executions[0].state, 'completed');
   const folder = join(root, 'collaborator-conversations', 'mobilereplica_synthetic_phone');

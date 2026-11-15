@@ -578,6 +578,7 @@ export function createMobileCollaboratorReplicaHost({
           baseMessageId: event.turn.baseMessageId ?? null,
           basisMessages: validatedContextMessages(event.turn.basisMessages),
           assistantContent,
+          ...(event.toolReceipts === undefined ? {} : { toolReceipts: event.toolReceipts }),
           createdAt: now(),
           replicaRevision: replica.revision,
           acknowledgedAt: null,

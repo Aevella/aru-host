@@ -873,8 +873,32 @@ function mimeTypeForPath(path) {
 return { createCollaboratorConversationAttachmentHost };
 })();
 
+// src/conversations/mobile-tool-receipts.mjs
+const module7 = (() => {
+// Status evidence only. Arguments, provider payloads and credentials do not
+// belong in mobile delivery, and these receipts are not protocol replay data.
+function mobileToolReceipts(conversation, turn) {
+  const receipts = new Map();
+  for (const event of conversation.events ?? []) {
+    const p = event.payload;
+    if (p?.turnId !== turn.turnId || !p.toolCallId || !p.toolName) continue;
+    if (!["tool.started", "tool.completed", "tool.failed"].includes(event.kind)) continue;
+    const previous = receipts.get(p.toolCallId);
+    receipts.set(p.toolCallId, {
+      toolCallId: p.toolCallId, toolName: p.toolName, title: p.title || p.toolName,
+      status: event.kind === "tool.completed" ? "complete" : event.kind === "tool.failed" ? "failed" : "interrupted",
+      failure: event.kind === "tool.failed" ? p.message ?? null : null,
+      createdAt: previous?.createdAt ?? event.at, updatedAt: event.at,
+    });
+  }
+  return [...receipts.values()];
+}
+return { mobileToolReceipts };
+})();
+
 // src/conversations/replica-delivery-recovery.mjs
 const module6 = (() => {
+const { mobileToolReceipts } = module7;
 function createReplicaDeliveryRecovery({ loadConversations, publicConversation, publicTurn, message }) {
   // Startup-only reconciliation of the delivery owner's outstanding attempts.
   // Conversation storage owns completion evidence; callers never read its files.
@@ -891,7 +915,7 @@ function createReplicaDeliveryRecovery({ loadConversations, publicConversation, 
     if (turn.state === "completed" && (!assistant || assistant.status !== "completed")) return null;
     return { outcome: turn.state === "completed" ? "completed" : turn.state === "failed" ? "failed" : "interrupted", failure: turn.failure ?? null,
       conversation: publicConversation(conversation, true),
-      turn: publicTurn(turn), assistantMessage: assistant ? { ...assistant } : null };
+      turn: publicTurn(turn), toolReceipts: mobileToolReceipts(conversation, turn), assistantMessage: assistant ? { ...assistant } : null };
   }
 
 }
@@ -899,7 +923,7 @@ return { createReplicaDeliveryRecovery };
 })();
 
 // src/conversations/replica-context.mjs
-const module7 = (() => {
+const module8 = (() => {
 const { messageContentWithTime, historyRoleLabel, validatedReplicaRole } = module3;
 
 // A history-only admission budget, not a model-specific token/window claim.
@@ -965,7 +989,7 @@ return { REPLICA_HISTORY_BYTES, replicaContextMessages };
 })();
 
 // src/conversations/turn-execution.mjs
-const module8 = (() => {
+const module9 = (() => {
 // Runtime of one admitted turn. Durable state and projection stay in the
 // conversation owner; this object only holds cancellable work and its receipts.
 function createTurnExecution() {
@@ -1009,7 +1033,7 @@ return { createTurnExecution, waitForTurnStop };
 })();
 
 // src/conversations/collaborator-conversation-lifecycle.mjs
-const module9 = (() => {
+const module10 = (() => {
 // Metadata lifecycle, independent of message execution. A running turn must be
 // stopped through its owner before its conversation can leave the live list.
 function mutateConversationLifecycle({ conversation, body, deleting, deviceId, now, save, HttpError }) {
@@ -1038,9 +1062,9 @@ const { SYNC_SCHEMA, messagePage, syncProjection, publicMessage } = module1;
 const { replicaInstructions, proactiveReplicaSeed, messageContentWithTime, historyRoleLabel, isoTimestamp, dynamicTool, driverConfigurationFingerprint, collaboratorInstructions, driverApprovalKind, driverApprovalTitle, publicApprovalDetail, driverApprovalResponse, publicDriverItem, publicWorkspacePath } = module3;
 const { createCollaboratorConversationAttachmentHost } = module4;
 const { createReplicaDeliveryRecovery } = module6;
-const { replicaContextMessages } = module7;
-const { createTurnExecution, waitForTurnStop } = module8;
-const { mutateConversationLifecycle } = module9;
+const { replicaContextMessages } = module8;
+const { createTurnExecution, waitForTurnStop } = module9;
+const { mutateConversationLifecycle } = module10;
 const { createHash, randomUUID } = node0;
 const {
   chmodSync,
@@ -1059,6 +1083,7 @@ const {
 } = node2;
 const { basename, dirname, extname, isAbsolute, join, relative, resolve } = node1;
 const { once } = node3;
+const { mobileToolReceipts } = module7;
 
 const CONVERSATION_SCHEMA = "aru.selfhost.collaborator-conversation.v1";
 const INVENTORY_SCHEMA = "aru.selfhost.collaborator-conversation-inventory.v1";
@@ -1649,11 +1674,17 @@ function createCollaboratorConversationHost({
         }, collaborator, { conversationId: conversation.conversationId, turnId: expectedTurn.turnId, signal: execution.signal, tool });
       }
       admitResult();
-      appendEvent(conversation, "tool.completed", {
+      const toolFailed = value?.isError === true;
+      const toolFailure = toolFailed
+        ? (Array.isArray(value.content) ? value.content : []).filter(item => item.type === "text")
+          .map(item => item.text).join("\n").trim() || "MCP tool reported failure"
+        : null;
+      appendEvent(conversation, toolFailed ? "tool.failed" : "tool.completed", {
         turnId: conversation.activeTurn.turnId,
         toolCallId,
         toolName: tool.name,
         title: tool.title ?? tool.name,
+        ...(toolFailed ? { message: toolFailure } : {}),
       });
       setTurnState(conversation, "streaming");
       saveConversation(conversation);
@@ -1965,6 +1996,7 @@ function createCollaboratorConversationHost({
       conversation: publicConversation(conversation, true),
       turn: publicTurn(turn),
       assistantMessage: assistantMessage ? { ...assistantMessage } : null,
+      ...(turn.source === "mobile-replica-proactive" ? { toolReceipts: mobileToolReceipts(conversation, turn) } : {}),
     };
     void Promise.resolve(onTurnSettled(event)).catch(() => {});
   }

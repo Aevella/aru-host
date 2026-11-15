@@ -23,6 +23,7 @@ import {
 } from "node:fs";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { once } from "node:events";
+import { mobileToolReceipts } from "./mobile-tool-receipts.mjs";
 
 const CONVERSATION_SCHEMA = "aru.selfhost.collaborator-conversation.v1";
 const INVENTORY_SCHEMA = "aru.selfhost.collaborator-conversation-inventory.v1";
@@ -613,11 +614,17 @@ export function createCollaboratorConversationHost({
         }, collaborator, { conversationId: conversation.conversationId, turnId: expectedTurn.turnId, signal: execution.signal, tool });
       }
       admitResult();
-      appendEvent(conversation, "tool.completed", {
+      const toolFailed = value?.isError === true;
+      const toolFailure = toolFailed
+        ? (Array.isArray(value.content) ? value.content : []).filter(item => item.type === "text")
+          .map(item => item.text).join("\n").trim() || "MCP tool reported failure"
+        : null;
+      appendEvent(conversation, toolFailed ? "tool.failed" : "tool.completed", {
         turnId: conversation.activeTurn.turnId,
         toolCallId,
         toolName: tool.name,
         title: tool.title ?? tool.name,
+        ...(toolFailed ? { message: toolFailure } : {}),
       });
       setTurnState(conversation, "streaming");
       saveConversation(conversation);
@@ -929,6 +936,7 @@ export function createCollaboratorConversationHost({
       conversation: publicConversation(conversation, true),
       turn: publicTurn(turn),
       assistantMessage: assistantMessage ? { ...assistantMessage } : null,
+      ...(turn.source === "mobile-replica-proactive" ? { toolReceipts: mobileToolReceipts(conversation, turn) } : {}),
     };
     void Promise.resolve(onTurnSettled(event)).catch(() => {});
   }

@@ -1,3 +1,4 @@
+import { mobileToolReceipts } from "./mobile-tool-receipts.mjs";
 export function createReplicaDeliveryRecovery({ loadConversations, publicConversation, publicTurn, message }) {
   // Startup-only reconciliation of the delivery owner's outstanding attempts.
   // Conversation storage owns completion evidence; callers never read its files.
@@ -14,7 +15,7 @@ export function createReplicaDeliveryRecovery({ loadConversations, publicConvers
     if (turn.state === "completed" && (!assistant || assistant.status !== "completed")) return null;
     return { outcome: turn.state === "completed" ? "completed" : turn.state === "failed" ? "failed" : "interrupted", failure: turn.failure ?? null,
       conversation: publicConversation(conversation, true),
-      turn: publicTurn(turn), assistantMessage: assistant ? { ...assistant } : null };
+      turn: publicTurn(turn), toolReceipts: mobileToolReceipts(conversation, turn), assistantMessage: assistant ? { ...assistant } : null };
   }
 
 }

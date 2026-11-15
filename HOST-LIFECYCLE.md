@@ -714,3 +714,34 @@ expired authorization, revocation, transport failure and recovery. Generated
 runtime consistency passed. This evidence does not establish arbitrary third-party
 MCP behavior, real API-provider execution, APNs delivery or phone UI acceptance;
 it does not reproduce the original customer's reported attempt. No release changed.
+
+## Mobile proactive tool status delivery
+
+The conversation event ledger owns execution status. Its turn-scoped
+`mobileToolReceipts` projection travels with proactive settlement and recovery
+into the durable mobile delivery. Entries contain call identity, tool name/title,
+terminal status, failure detail and timestamps; they do not contain arguments,
+raw tool results or delegated credentials. A started call without a terminal
+event projects as interrupted, never completed. MCP `isError: true` produces a
+failed event while the original result still returns to the driver.
+
+The additive optional `toolReceipts` field preserves v1 interoperability: absence
+means the old delivery did not provide evidence, while an empty list means no
+recorded tool calls. Existing saved deliveries are not rewritten. The phone stages
+these receipts with the reply and atomically imports status-only tool ledger rows
+linked to that reply's generation. Its existing chat receipt surface consumes them;
+provider replay excludes them because no original tool exchange is available.
+Repeated collection/import and restart must retain identity without another call
+or another card. `mobile-tool-receipts.test.mjs` covers success, MCP error, thrown
+failure, unrelated-turn isolation, status-only projection and disk recovery. The
+live scheduled smoke also requires the successful receipt in the delivery.
+
+Local Host validation: 38 focused checks passed; after refining the MCP error
+message projection, the two receipt checks passed again. The real Codex scheduled
+HTTP MCP smoke passed with a completion receipt in the delivery, the tool-only
+receipt code in the final reply and no repeated call after reopening. One earlier
+live attempt executed the tool but its generated JavaScript discarded the text
+wrapper; the smoke now mirrors production mobile instructions and explicitly
+prints the full tool return. This was a test-result-consumption failure, not a
+missing service call. Source checks do not establish phone-device UI acceptance,
+Claude/API-provider acceptance, or released-version availability.
