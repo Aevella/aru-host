@@ -692,3 +692,25 @@ rejection. This is local source/runtime evidence, not a packaged release or a
 reproduction of a customer's missing tool execution. Mobile deliveries currently
 carry assistant text without the Host conversation's tool events; absence of a
 phone chat tool row cannot establish that no tool ran.
+
+## Opt-in live scheduled MCP proof (2026-11-15)
+
+`tests/mobile-proactive-live-smoke.mjs` runs a synthetic phone replica through the
+real scheduler timer, conversation owner, selected live model driver and loopback
+HTTP MCP transport. The remote tool writes a receipt whose random code is unknown
+to the model until the tool returns. Acceptance requires exactly one tool call,
+the code in the final mobile delivery, durable `tool.completed` evidence, and the
+same delivery after reopening the replica owner without another model/tool call.
+The phone is absent after snapshot publication. No personal conversation data or
+external write service is used. Temporary state belongs to build-scratch.
+
+Run explicitly under build-scratch with `ARU_CODEX_LIVE_EXECUTABLE` or
+`ARU_CLAUDE_LIVE_EXECUTABLE` pointing at an authenticated executable. This is an
+account-dependent smoke, not an automatic unit test. Codex passed this live chain
+locally. Claude did not complete because its provider refused the account before
+tool execution; no Claude live-success claim is made. The 36 adjacent replica,
+MCP and assistant projection checks also passed, including confirmation denial,
+expired authorization, revocation, transport failure and recovery. Generated
+runtime consistency passed. This evidence does not establish arbitrary third-party
+MCP behavior, real API-provider execution, APNs delivery or phone UI acceptance;
+it does not reproduce the original customer's reported attempt. No release changed.
