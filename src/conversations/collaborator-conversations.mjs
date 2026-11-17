@@ -1,5 +1,5 @@
 import { SYNC_SCHEMA, messagePage, syncProjection, publicMessage } from "./conversation-sync.mjs";
-import { replicaInstructions, proactiveReplicaSeed, messageContentWithTime, historyRoleLabel, isoTimestamp, dynamicTool, driverConfigurationFingerprint, collaboratorInstructions, driverApprovalKind, driverApprovalTitle, publicApprovalDetail, driverApprovalResponse, publicDriverItem, publicWorkspacePath } from "./driver-projection.mjs";
+import { replicaTimeZone, replicaInstructions, proactiveReplicaSeed, messageContentWithTime, historyRoleLabel, isoTimestamp, dynamicTool, driverConfigurationFingerprint, collaboratorInstructions, driverApprovalKind, driverApprovalTitle, publicApprovalDetail, driverApprovalResponse, publicDriverItem, publicWorkspacePath } from "./driver-projection.mjs";
 import { createCollaboratorConversationAttachmentHost } from "./attachments.mjs";
 import { createReplicaDeliveryRecovery } from "./replica-delivery-recovery.mjs";
 import { replicaContextMessages } from "./replica-context.mjs";
@@ -394,7 +394,8 @@ export function createCollaboratorConversationHost({
     );
     // Lets deleting the executing face find and stop this turn.
     conversation.executorCollaboratorId = executor.collaboratorId;
-    for (const item of replicaContextMessages(source?.messages ?? [], triggeredAt)) {
+    conversation.runtimeTimeZoneIdentifier = replicaTimeZone(replica, rule);
+    for (const item of replicaContextMessages(source?.messages ?? [], triggeredAt, undefined, conversation.runtimeTimeZoneIdentifier)) {
       conversation.messages.push({
         messageId: `hostmsg_${randomUUID()}`,
         clientRequestId: null,
@@ -409,7 +410,7 @@ export function createCollaboratorConversationHost({
     saveConversation(conversation);
     return enqueueMessage(conversation, collaborator, {
       clientRequestId: `mobile_initiative_${deliveryId}`,
-      text: proactiveReplicaSeed(rule, triggeredAt, replica.generatedAt),
+      text: proactiveReplicaSeed(rule, triggeredAt, replica.generatedAt, conversation.runtimeTimeZoneIdentifier),
     }, device, {
       role: "system",
       source: "mobile-replica-proactive",
@@ -466,6 +467,7 @@ export function createCollaboratorConversationHost({
         text: messageContentWithTime(
           userMessage,
           userMessage.driverText ?? userMessage.content,
+          conversation.runtimeTimeZoneIdentifier,
         ),
         attachments: projectedAttachments,
         userMessageId: turn.userMessageId,
@@ -809,7 +811,7 @@ export function createCollaboratorConversationHost({
         && item.messageId !== currentTurn.assistantMessageId
         && item.status === "completed"
         && item.content)
-      .map((item) => `${historyRoleLabel(item.role)}: ${messageContentWithTime(item)}`)
+      .map((item) => `${historyRoleLabel(item.role)}: ${messageContentWithTime(item, item.content, conversation.runtimeTimeZoneIdentifier)}`)
       .join("\n\n");
   }
 
@@ -819,7 +821,7 @@ export function createCollaboratorConversationHost({
         && item.messageId !== currentTurn.assistantMessageId
         && item.status === "completed"
         && item.content)
-      .map((item) => ({ role: item.role, content: messageContentWithTime(item) }));
+      .map((item) => ({ role: item.role, content: messageContentWithTime(item, item.content, conversation.runtimeTimeZoneIdentifier) }));
   }
 
   function recoverInterruptedConversations() {

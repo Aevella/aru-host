@@ -764,6 +764,7 @@ function createMobileCollaboratorReplicaHost({
       epoch,
       revision,
       generatedAt: positiveInteger(body.generatedAt, "generatedAt"),
+      timeZoneIdentifier: typeof body.timeZoneIdentifier === "string" ? body.timeZoneIdentifier.trim() : null,
       updatedAt: now(),
     };
     value.mcp = body.mcpConnections === undefined

@@ -11,16 +11,41 @@ function replicaInstructions(replica) {
   ].filter(Boolean).join("\n\n");
 }
 
-function proactiveReplicaSeed(rule, triggeredAt, replicaGeneratedAt) {
+// Older phone clients may omit the display zone. A daily schedule can supply
+// it; otherwise preserve UTC explicitly rather than guessing the server's zone.
+function replicaTimeZone(replica, rule) {
+  for (const value of [replica.timeZoneIdentifier, rule.scheduleTimeZoneIdentifier]) {
+    if (typeof value !== "string" || !value.trim()) continue;
+    try { return new Intl.DateTimeFormat("en", { timeZone: value.trim() }).resolvedOptions().timeZone; }
+    catch { /* Try the older client's schedule zone. */ }
+  }
+  return null;
+}
+
+function localTimestamp(value, timeZone) {
+  if (!timeZone || !isoTimestamp(value)) return null;
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
+    timeZone, year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
+  }).formatToParts(new Date(Number(value))).map(part => [part.type, part.value]));
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}`;
+}
+
+function proactiveReplicaSeed(rule, triggeredAt, replicaGeneratedAt, timeZone = replicaTimeZone({}, rule)) {
   const clock = {
     triggered_at: isoTimestamp(triggeredAt),
     triggered_at_unix_ms: triggeredAt,
-    time_zone: String(rule.scheduleTimeZoneIdentifier ?? "UTC"),
+    time_zone: timeZone ?? "UTC",
+    local_time_known: timeZone !== null,
+    triggered_at_local: localTimestamp(triggeredAt, timeZone),
     replica_generated_at: isoTimestamp(replicaGeneratedAt),
     replica_generated_at_unix_ms: replicaGeneratedAt,
   };
   return [
     `<runtime_clock>${JSON.stringify(clock)}</runtime_clock>`,
+    timeZone
+      ? "Use runtime_clock.time_zone and the *_local fields when referring to the user's local time; timestamps ending in Z are UTC instants."
+      : "The phone's local time zone is unavailable. Z timestamps are UTC; do not present their hour as the user's local hour.",
     "This is a scheduled proactive turn. Decide what is genuinely worth saying now and reply directly to the user.",
     rule.title ? `Rule: ${rule.title}` : "",
     rule.goal ? `Goal: ${rule.goal}` : "",
@@ -28,13 +53,18 @@ function proactiveReplicaSeed(rule, triggeredAt, replicaGeneratedAt) {
   ].filter(Boolean).join("\n");
 }
 
-function messageContentWithTime(message, content = message.content) {
+function messageContentWithTime(message, content = message.content, timeZone = null) {
   const metadata = {
     sent_at: isoTimestamp(message.createdAt),
     sent_at_unix_ms: Number(message.createdAt),
     updated_at: isoTimestamp(message.updatedAt),
     updated_at_unix_ms: Number(message.updatedAt),
   };
+  if (timeZone) Object.assign(metadata, {
+    time_zone: timeZone,
+    sent_at_local: localTimestamp(message.createdAt, timeZone),
+    updated_at_local: localTimestamp(message.updatedAt, timeZone),
+  });
   return `<message_meta>${JSON.stringify(metadata)}</message_meta>\n${String(content ?? "")}`;
 }
 
@@ -169,4 +199,4 @@ function publicWorkspacePath(value, workspace) {
 }
 
 
-export { replicaInstructions, proactiveReplicaSeed, messageContentWithTime, historyRoleLabel, isoTimestamp, validatedReplicaRole, dynamicTool, driverConfigurationFingerprint, collaboratorInstructions, driverApprovalKind, driverApprovalTitle, publicApprovalDetail, driverApprovalResponse, publicDriverItem, publicWorkspacePath };
+export { replicaTimeZone, replicaInstructions, proactiveReplicaSeed, messageContentWithTime, historyRoleLabel, isoTimestamp, validatedReplicaRole, dynamicTool, driverConfigurationFingerprint, collaboratorInstructions, driverApprovalKind, driverApprovalTitle, publicApprovalDetail, driverApprovalResponse, publicDriverItem, publicWorkspacePath };

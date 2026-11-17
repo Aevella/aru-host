@@ -745,3 +745,23 @@ wrapper; the smoke now mirrors production mobile instructions and explicitly
 prints the full tool return. This was a test-result-consumption failure, not a
 missing service call. Source checks do not establish phone-device UI acceptance,
 Claude/API-provider acceptance, or released-version availability.
+
+## Phone-local time in proactive model context
+
+The phone replica may carry `timeZoneIdentifier`, captured by the phone at sync,
+independently of recurrence scheduling. The replica owner preserves that optional
+wire field. Each admitted replica conversation captures the resolved display zone;
+its model clock and historical message metadata render local calendar times in
+that zone while retaining unchanged UTC instants and epoch milliseconds. History
+admission accounts for the additional metadata. Scheduling and delivery identities
+are unchanged; no user message or delivery basis is rewritten.
+
+Older external phone clients may omit the field: use a valid daily-rule zone when
+available, otherwise label the phone-local time as unknown and keep UTC explicitly.
+Never infer phone location from the server clock or hardcode an eight-hour offset.
+A subsequent synchronized replica supplies the zone for future attempts; an already
+admitted conversation retains its own zone. Normal computer conversations retain
+their existing metadata. Tests cover phone-zone precedence, missing/invalid legacy
+zones, half-hour offsets, DST and date rollover, plus real sync, failure, disk
+reopen, repeated acknowledgement and a later scheduled occurrence. This is local
+synthetic proof, not a released binary or real-provider/customer acceptance.

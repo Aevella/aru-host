@@ -8,15 +8,15 @@ import { messageContentWithTime, historyRoleLabel, validatedReplicaRole } from "
 export const REPLICA_HISTORY_BYTES = 64 * 1024;
 const OMITTED_PREFIX = "[Earlier content of this message omitted from model context.]\n";
 
-function historyBytes(message) {
-  const content = messageContentWithTime(message);
+function historyBytes(message, timeZone) {
+  const content = messageContentWithTime(message, message.content, timeZone);
   return Math.max(
     Buffer.byteLength(`${historyRoleLabel(message.role)}: ${content}\n\n`),
     Buffer.byteLength(JSON.stringify({ role: message.role, content })) + 1,
   );
 }
 
-export function replicaContextMessages(messages, timestamp, budget = REPLICA_HISTORY_BYTES) {
+export function replicaContextMessages(messages, timestamp, budget = REPLICA_HISTORY_BYTES, timeZone = null) {
   const selected = [];
   // Include the structured history array delimiters as well as per-row framing.
   let remaining = Math.max(0, budget - 2);
@@ -29,7 +29,7 @@ export function replicaContextMessages(messages, timestamp, budget = REPLICA_HIS
       createdAt: Number(item.createdAt) || timestamp,
       updatedAt: Number(item.updatedAt) || Number(item.createdAt) || timestamp,
     };
-    const cost = historyBytes(message);
+    const cost = historyBytes(message, timeZone);
     if (cost <= remaining) {
       selected.push(message);
       remaining -= cost;
@@ -48,7 +48,7 @@ export function replicaContextMessages(messages, timestamp, budget = REPLICA_HIS
         // UTF-8 continuation bytes cannot start a valid retained suffix.
         while (start < bytes.length && (bytes[start] & 0xc0) === 0x80) start++;
         const candidate = { ...message, content: OMITTED_PREFIX + bytes.subarray(start).toString("utf8") };
-        if (historyBytes(candidate) <= remaining) {
+        if (historyBytes(candidate, timeZone) <= remaining) {
           fitted = candidate;
           low = length + 1;
         } else high = length - 1;

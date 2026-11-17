@@ -44,6 +44,7 @@ test("phone replica proactive requests preserve message and trigger time", async
     systemPrompt: "Stay close.",
     memories: [],
     references: [],
+    timeZoneIdentifier: "Asia/Shanghai",
     revision: 7,
     epoch: 2,
     generatedAt: Date.parse("2026-09-02T02:55:00Z"),
@@ -78,7 +79,7 @@ test("phone replica proactive requests preserve message and trigger time", async
     title: "醒来看看",
     goal: "自然接着聊",
     instructions: "不要重说已经完成的事",
-    scheduleTimeZoneIdentifier: "Asia/Shanghai",
+    scheduleKind: "interval",
     sourceVersion: "rule-version-1",
   };
 
@@ -97,6 +98,8 @@ test("phone replica proactive requests preserve message and trigger time", async
   assert.match(request.historyMessages[2].content, /已经替你完成了/);
   assert.match(request.historyContext, /System: <message_meta>/);
   assert.match(request.text, /<runtime_clock>/);
+  assert.match(request.text, /2026-09-02T11:00:00/);
+  assert.match(request.historyMessages[1].content, /2026-09-01T12:00:00/);
   assert.match(request.text, /2026-09-02T03:00:00\.000Z/);
   assert.match(request.text, /Asia\/Shanghai/);
   assert.match(request.text, /2026-09-02T02:55:00\.000Z/);
@@ -155,6 +158,7 @@ test(`long replica execution retains complete delivery basis across failure, res
     schema: "aru.selfhost.mobile-collaborator-replica.v1",
     sourceCollaboratorId: "phone_source", displayName: "Phone", systemPrompt: "Keep identity.",
     memories: [], references: [], epoch: 1, revision: 1, generatedAt: 950,
+    timeZoneIdentifier: "Asia/Shanghai",
     readerHostCollaboratorIds: [executor.collaboratorId], executorHostCollaboratorId: executor.collaboratorId,
     conversations: [{ conversationId: "phone_window", title: "Long window", baseMessageId: messages.at(-1).messageId, messages }],
     rules: [{ ruleId: "hourly", conversationMode: "fixed", conversationId: "phone_window", title: "Check in",
@@ -179,6 +183,8 @@ test(`long replica execution retains complete delivery basis across failure, res
     assert.ok(request.historyMessages.length < messages.length);
     assert.match(request.instructions, /Keep identity/);
     assert.match(request.text, /Use recent context/);
+    assert.match(request.text, /"time_zone":"Asia\/Shanghai"/);
+    assert.match(request.historyMessages.at(-1).content, /"sent_at_local"/);
   }
   await send("PUT", "", replica);
   mobile.start();

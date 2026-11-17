@@ -153,16 +153,41 @@ function replicaInstructions(replica) {
   ].filter(Boolean).join("\n\n");
 }
 
-function proactiveReplicaSeed(rule, triggeredAt, replicaGeneratedAt) {
+// Older phone clients may omit the display zone. A daily schedule can supply
+// it; otherwise preserve UTC explicitly rather than guessing the server's zone.
+function replicaTimeZone(replica, rule) {
+  for (const value of [replica.timeZoneIdentifier, rule.scheduleTimeZoneIdentifier]) {
+    if (typeof value !== "string" || !value.trim()) continue;
+    try { return new Intl.DateTimeFormat("en", { timeZone: value.trim() }).resolvedOptions().timeZone; }
+    catch { /* Try the older client's schedule zone. */ }
+  }
+  return null;
+}
+
+function localTimestamp(value, timeZone) {
+  if (!timeZone || !isoTimestamp(value)) return null;
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
+    timeZone, year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
+  }).formatToParts(new Date(Number(value))).map(part => [part.type, part.value]));
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}`;
+}
+
+function proactiveReplicaSeed(rule, triggeredAt, replicaGeneratedAt, timeZone = replicaTimeZone({}, rule)) {
   const clock = {
     triggered_at: isoTimestamp(triggeredAt),
     triggered_at_unix_ms: triggeredAt,
-    time_zone: String(rule.scheduleTimeZoneIdentifier ?? "UTC"),
+    time_zone: timeZone ?? "UTC",
+    local_time_known: timeZone !== null,
+    triggered_at_local: localTimestamp(triggeredAt, timeZone),
     replica_generated_at: isoTimestamp(replicaGeneratedAt),
     replica_generated_at_unix_ms: replicaGeneratedAt,
   };
   return [
     `<runtime_clock>${JSON.stringify(clock)}</runtime_clock>`,
+    timeZone
+      ? "Use runtime_clock.time_zone and the *_local fields when referring to the user's local time; timestamps ending in Z are UTC instants."
+      : "The phone's local time zone is unavailable. Z timestamps are UTC; do not present their hour as the user's local hour.",
     "This is a scheduled proactive turn. Decide what is genuinely worth saying now and reply directly to the user.",
     rule.title ? `Rule: ${rule.title}` : "",
     rule.goal ? `Goal: ${rule.goal}` : "",
@@ -170,13 +195,18 @@ function proactiveReplicaSeed(rule, triggeredAt, replicaGeneratedAt) {
   ].filter(Boolean).join("\n");
 }
 
-function messageContentWithTime(message, content = message.content) {
+function messageContentWithTime(message, content = message.content, timeZone = null) {
   const metadata = {
     sent_at: isoTimestamp(message.createdAt),
     sent_at_unix_ms: Number(message.createdAt),
     updated_at: isoTimestamp(message.updatedAt),
     updated_at_unix_ms: Number(message.updatedAt),
   };
+  if (timeZone) Object.assign(metadata, {
+    time_zone: timeZone,
+    sent_at_local: localTimestamp(message.createdAt, timeZone),
+    updated_at_local: localTimestamp(message.updatedAt, timeZone),
+  });
   return `<message_meta>${JSON.stringify(metadata)}</message_meta>\n${String(content ?? "")}`;
 }
 
@@ -309,7 +339,7 @@ function publicWorkspacePath(value, workspace) {
   }
   return basename(path);
 }
-return { replicaInstructions, proactiveReplicaSeed, messageContentWithTime, historyRoleLabel, isoTimestamp, validatedReplicaRole, dynamicTool, driverConfigurationFingerprint, collaboratorInstructions, driverApprovalKind, driverApprovalTitle, publicApprovalDetail, driverApprovalResponse, publicDriverItem, publicWorkspacePath };
+return { replicaTimeZone, replicaInstructions, proactiveReplicaSeed, messageContentWithTime, historyRoleLabel, isoTimestamp, validatedReplicaRole, dynamicTool, driverConfigurationFingerprint, collaboratorInstructions, driverApprovalKind, driverApprovalTitle, publicApprovalDetail, driverApprovalResponse, publicDriverItem, publicWorkspacePath };
 })();
 
 // src/conversations/attachment-chunks.mjs
@@ -934,15 +964,15 @@ const { messageContentWithTime, historyRoleLabel, validatedReplicaRole } = modul
 const REPLICA_HISTORY_BYTES = 64 * 1024;
 const OMITTED_PREFIX = "[Earlier content of this message omitted from model context.]\n";
 
-function historyBytes(message) {
-  const content = messageContentWithTime(message);
+function historyBytes(message, timeZone) {
+  const content = messageContentWithTime(message, message.content, timeZone);
   return Math.max(
     Buffer.byteLength(`${historyRoleLabel(message.role)}: ${content}\n\n`),
     Buffer.byteLength(JSON.stringify({ role: message.role, content })) + 1,
   );
 }
 
-function replicaContextMessages(messages, timestamp, budget = REPLICA_HISTORY_BYTES) {
+function replicaContextMessages(messages, timestamp, budget = REPLICA_HISTORY_BYTES, timeZone = null) {
   const selected = [];
   // Include the structured history array delimiters as well as per-row framing.
   let remaining = Math.max(0, budget - 2);
@@ -955,7 +985,7 @@ function replicaContextMessages(messages, timestamp, budget = REPLICA_HISTORY_BY
       createdAt: Number(item.createdAt) || timestamp,
       updatedAt: Number(item.updatedAt) || Number(item.createdAt) || timestamp,
     };
-    const cost = historyBytes(message);
+    const cost = historyBytes(message, timeZone);
     if (cost <= remaining) {
       selected.push(message);
       remaining -= cost;
@@ -974,7 +1004,7 @@ function replicaContextMessages(messages, timestamp, budget = REPLICA_HISTORY_BY
         // UTF-8 continuation bytes cannot start a valid retained suffix.
         while (start < bytes.length && (bytes[start] & 0xc0) === 0x80) start++;
         const candidate = { ...message, content: OMITTED_PREFIX + bytes.subarray(start).toString("utf8") };
-        if (historyBytes(candidate) <= remaining) {
+        if (historyBytes(candidate, timeZone) <= remaining) {
           fitted = candidate;
           low = length + 1;
         } else high = length - 1;
@@ -1059,7 +1089,7 @@ return { mutateConversationLifecycle };
 // src/conversations/collaborator-conversations.mjs
 const module0 = (() => {
 const { SYNC_SCHEMA, messagePage, syncProjection, publicMessage } = module1;
-const { replicaInstructions, proactiveReplicaSeed, messageContentWithTime, historyRoleLabel, isoTimestamp, dynamicTool, driverConfigurationFingerprint, collaboratorInstructions, driverApprovalKind, driverApprovalTitle, publicApprovalDetail, driverApprovalResponse, publicDriverItem, publicWorkspacePath } = module3;
+const { replicaTimeZone, replicaInstructions, proactiveReplicaSeed, messageContentWithTime, historyRoleLabel, isoTimestamp, dynamicTool, driverConfigurationFingerprint, collaboratorInstructions, driverApprovalKind, driverApprovalTitle, publicApprovalDetail, driverApprovalResponse, publicDriverItem, publicWorkspacePath } = module3;
 const { createCollaboratorConversationAttachmentHost } = module4;
 const { createReplicaDeliveryRecovery } = module6;
 const { replicaContextMessages } = module8;
@@ -1454,7 +1484,8 @@ function createCollaboratorConversationHost({
     );
     // Lets deleting the executing face find and stop this turn.
     conversation.executorCollaboratorId = executor.collaboratorId;
-    for (const item of replicaContextMessages(source?.messages ?? [], triggeredAt)) {
+    conversation.runtimeTimeZoneIdentifier = replicaTimeZone(replica, rule);
+    for (const item of replicaContextMessages(source?.messages ?? [], triggeredAt, undefined, conversation.runtimeTimeZoneIdentifier)) {
       conversation.messages.push({
         messageId: `hostmsg_${randomUUID()}`,
         clientRequestId: null,
@@ -1469,7 +1500,7 @@ function createCollaboratorConversationHost({
     saveConversation(conversation);
     return enqueueMessage(conversation, collaborator, {
       clientRequestId: `mobile_initiative_${deliveryId}`,
-      text: proactiveReplicaSeed(rule, triggeredAt, replica.generatedAt),
+      text: proactiveReplicaSeed(rule, triggeredAt, replica.generatedAt, conversation.runtimeTimeZoneIdentifier),
     }, device, {
       role: "system",
       source: "mobile-replica-proactive",
@@ -1526,6 +1557,7 @@ function createCollaboratorConversationHost({
         text: messageContentWithTime(
           userMessage,
           userMessage.driverText ?? userMessage.content,
+          conversation.runtimeTimeZoneIdentifier,
         ),
         attachments: projectedAttachments,
         userMessageId: turn.userMessageId,
@@ -1869,7 +1901,7 @@ function createCollaboratorConversationHost({
         && item.messageId !== currentTurn.assistantMessageId
         && item.status === "completed"
         && item.content)
-      .map((item) => `${historyRoleLabel(item.role)}: ${messageContentWithTime(item)}`)
+      .map((item) => `${historyRoleLabel(item.role)}: ${messageContentWithTime(item, item.content, conversation.runtimeTimeZoneIdentifier)}`)
       .join("\n\n");
   }
 
@@ -1879,7 +1911,7 @@ function createCollaboratorConversationHost({
         && item.messageId !== currentTurn.assistantMessageId
         && item.status === "completed"
         && item.content)
-      .map((item) => ({ role: item.role, content: messageContentWithTime(item) }));
+      .map((item) => ({ role: item.role, content: messageContentWithTime(item, item.content, conversation.runtimeTimeZoneIdentifier) }));
   }
 
   function recoverInterruptedConversations() {
